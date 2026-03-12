@@ -212,7 +212,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats) {
-  PostToJs("Setting the Host address to: " + host);
+  PostToJs("Setting the Host address to: " + host + ":" + std::to_string(httpPort));
   PostToJs("Setting the Video resolution to: " + width + "x" + height);
   PostToJs("Setting the Video frame rate to: " + fps + " FPS");
   PostToJs("Setting the Video bitrate to: " + bitrate + " Kbps");
@@ -222,7 +222,6 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   PostToJs("Setting the GFE version to: " + gfeversion);
   PostToJs("Setting the RTSP session URL to: " + rtspurl);
   PostToJs("Setting the Server codec mode support to: " + std::to_string(serverCodecModeSupport));
-  PostToJs("Setting the HTTP port to: " + std::to_string(httpPort));
   PostToJs("Setting the Video frame pacing to: " + std::to_string(framePacing));
   PostToJs("Setting the Optimize game settings to: " + std::to_string(optimizeGames));
   PostToJs("Setting the Rumble feedback to: " + std::to_string(rumbleFeedback));
@@ -331,11 +330,11 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
 
   // Store the parameters from the start message
   m_Host = host;
+  m_HttpPort = httpPort;
   m_AppVersion = appversion;
   m_GfeVersion = gfeversion;
   m_RtspUrl = rtspurl;
   m_ServerCodecModeSupport = serverCodecModeSupport;
-  m_HttpPort = httpPort;
   m_FramePacingEnabled = framePacing;
   m_OptimizeGamesEnabled = optimizeGames;
   m_RumbleFeedbackEnabled = rumbleFeedback;
@@ -389,7 +388,7 @@ void MoonlightInstance::Pair_private(int callbackId, std::string serverMajorVers
   char* ppkstr;
   int err = gs_pair(atoi(serverMajorVersion.c_str()), address.c_str(), (unsigned short)httpPort, randomNumber.c_str(), &ppkstr);
 
-  ClLogMessage("Paired host address: %s using PIN: %s over HTTP port: %d with result: %d\n", address.c_str(), randomNumber.c_str(), httpPort, err);
+  ClLogMessage("Paired host address: %s:%d using PIN: %s with result: %d\n", address.c_str(), httpPort, randomNumber.c_str(), err);
   if (err == 0) {
     PostPromiseMessage(callbackId, "resolve", ppkstr);
     free(ppkstr);
@@ -399,7 +398,7 @@ void MoonlightInstance::Pair_private(int callbackId, std::string serverMajorVers
 }
 
 void MoonlightInstance::Pair(int callbackId, std::string serverMajorVersion, std::string address, int httpPort, std::string randomNumber) {
-  ClLogMessage("%s with host address: %s\n", __func__, address.c_str());
+  ClLogMessage("%s with host address: %s:%d\n", __func__, address.c_str(), httpPort);
   m_Dispatcher.post_job(std::bind(&MoonlightInstance::Pair_private, this, callbackId, serverMajorVersion, address, httpPort, randomNumber), false);
 }
 

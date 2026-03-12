@@ -215,11 +215,11 @@ class MoonlightInstance {
   static AUDIO_RENDERER_CALLBACKS s_ArCallbacks;
 
   std::string m_Host;
+  int m_HttpPort;
   std::string m_AppVersion;
   std::string m_GfeVersion;
   std::string m_RtspUrl;
   int m_ServerCodecModeSupport;
-  int m_HttpPort;
 
   bool m_FramePacingEnabled;
   bool m_OptimizeGamesEnabled;

@@ -509,14 +509,14 @@ function isPotentialIpv4AddressWithOptionalPort(rawInput) {
     return false;
   }
 
-  const hostPart = rawParts[0];
+  const addrPart = rawParts[0];
   const portPart = rawParts.length === 2 ? rawParts[1] : null;
 
-  if (!/^\d{0,3}(\.\d{0,3}){0,3}$/.test(hostPart)) {
+  if (!/^\d{0,3}(\.\d{0,3}){0,3}$/.test(addrPart)) {
     return false;
   }
 
-  const octets = hostPart.split('.');
+  const octets = addrPart.split('.');
   if (octets.length > 4) {
     return false;
   }
@@ -576,11 +576,10 @@ function updateIpAddressInputValidationState() {
 }
 
 function parseHostAndPortInput(rawInput) {
-  const fallbackHttpPort = 47989;
   const input = (rawInput || '').trim();
 
   if (!input) {
-    return { valid: false, error: 'Please enter a valid host address.' };
+    return { valid: false, error: 'Please enter a valid host IP address!' };
   }
 
   const firstColon = input.indexOf(':');
@@ -590,28 +589,28 @@ function parseHostAndPortInput(rawInput) {
     const portPart = input.substring(firstColon + 1).trim();
 
     if (!hostPart) {
-      return { valid: false, error: 'Please enter a valid host address.' };
+      return { valid: false, error: 'Please enter a valid host IP address!' };
     }
     if (!isValidIpv4Address(hostPart)) {
-      return { valid: false, error: 'Host must be a valid IPv4 address.' };
+      return { valid: false, error: 'Please enter a valid host IPv4 address!' };
     }
     if (!/^\d{1,5}$/.test(portPart)) {
-      return { valid: false, error: 'Port must be numeric and between 1 and 65535.' };
+      return { valid: false, error: 'Port must be a numeric value between 1 and 65535!' };
     }
 
     const parsedPort = parseInt(portPart, 10);
     if (!isValidPort(parsedPort)) {
-      return { valid: false, error: 'Port must be between 1 and 65535.' };
+      return { valid: false, error: 'Please enter a valid port number between 1 and 65535!' };
     }
 
-    return { valid: true, host: hostPart, httpPort: parsedPort };
+    return { valid: true, addr: hostPart, port: parsedPort };
   }
 
   if (!isValidIpv4Address(input)) {
-    return { valid: false, error: 'Host must be a valid IPv4 address.' };
+    return { valid: false, error: 'Please enter a valid host IPv4 address!' };
   }
 
-  return { valid: true, host: input, httpPort: fallbackHttpPort };
+  return { valid: true, addr: input, port: 47989 };
 }
 
 // If the `Add Host +` is selected on the host grid, then show the 
@@ -624,9 +623,9 @@ function addHostDialog() {
   // Show the dialog and push the view
   addHostOverlay.style.display = 'flex';
   addHostDialog.showModal();
-  updateIpAddressInputValidationState();
   isDialogOpen = true;
   Navigation.push(Views.AddHostDialog);
+  updateIpAddressInputValidationState();
 
   // Checks if the IP address field mode switch is checked
   if ($('#ipAddressFieldModeSwitch').prop('checked')) {
@@ -657,7 +656,7 @@ function addHostDialog() {
   $('#continueAddHost').off('click');
   $('#continueAddHost').on('click', function() {
     console.log('%c[index.js, addHostDialog]', 'color: green;', 'Adding host, closing app dialog, and returning.');
-    // Get the host value from the selected input mode
+    // Get the IP address value from the input field or select fields
     var inputHost;
     if ($('#ipAddressFieldModeSwitch').prop('checked')) {
       var ipAddressField1 = $('#ipAddressField1').val();
@@ -668,19 +667,19 @@ function addHostDialog() {
     } else {
       inputHost = $('#ipAddressTextInput').val();
     }
-
+    // Get the IP address and port from the input and validate them
     var parsedHostInput;
     if ($('#ipAddressFieldModeSwitch').prop('checked')) {
-      // Select fields only provide IP octets, so always use default HTTP port.
-      parsedHostInput = { valid: true, host: inputHost, httpPort: 47989 };
+      // Select fields only provide IP octets, so always use default HTTP port
+      parsedHostInput = { valid: true, addr: inputHost, port: 47989 };
     } else {
       parsedHostInput = parseHostAndPortInput(inputHost);
     }
+    // If the input is invalid, show an error message and return early
     if (!parsedHostInput.valid) {
       snackbarLog(parsedHostInput.error);
       return;
     }
-
     // Disable the Continue button to prevent multiple connection requests
     setTimeout(() => {
       // Add disabled state after 2 seconds
@@ -692,12 +691,11 @@ function addHostDialog() {
         Navigation.switch();
       }, 12000);
     }, 2000);
-
     // Send a connection request to the Host object based on the given IP address
-    var _nvhttpHost = new NvHTTP(parsedHostInput.host, myUniqueid, parsedHostInput.host);
-    _nvhttpHost.httpPort = parsedHostInput.httpPort;
+    var _nvhttpHost = new NvHTTP(parsedHostInput.addr, myUniqueid, parsedHostInput.addr);
+    _nvhttpHost.httpPort = parsedHostInput.port;
     console.log('%c[index.js, addHostDialog]', 'color: green;', 'Sending connection request to host address ' + _nvhttpHost.hostname);
-    _nvhttpHost.refreshServerInfoAtAddress(parsedHostInput.host).then(function(success) {
+    _nvhttpHost.refreshServerInfoAtAddress(parsedHostInput.addr).then(function(success) {
       snackbarLog('Connecting to ' + _nvhttpHost.hostname + '...');
       // Close the dialog if the user has provided the IP address
       console.log('%c[index.js, addHostDialog]', 'color: green;', 'Closing app dialog and returning.');
@@ -2325,8 +2323,7 @@ function startGame(host, appID) {
       const performanceStats = $('#performanceStatsSwitch').parent().hasClass('is-checked') ? 1 : 0;
 
       console.log('%c[index.js, startGame]', 'color: green;', 'startRequest:' + 
-      '\n Host address: ' + host.address + 
-      '\n HTTP port: ' + host.httpPort + 
+      '\n Host address: ' + host.address + ':' + host.httpPort + 
       '\n Video resolution: ' + streamWidth + 'x' + streamHeight + 
       '\n Video frame rate: ' + frameRate + ' FPS' + 
       '\n Video bitrate: ' + bitrate + ' Kbps' + 
