@@ -32,46 +32,6 @@ using EmssRenderingMode = samsung::wasm::ElementaryMediaStreamSource::RenderingM
 
 MoonlightInstance* g_Instance;
 
-static uint16_t SanitizeHttpPort(int httpPort) {
-  // Keep in sync with frontend fallbacks.
-  constexpr uint16_t kDefaultHttpPort = 47989;
-
-  if (httpPort <= 0 || httpPort > 65535) {
-    return kDefaultHttpPort;
-  }
-
-  // Ensure dependent offsets remain in valid range.
-  if (httpPort <= 5 || httpPort > (65535 - 21)) {
-    return kDefaultHttpPort;
-  }
-
-  return static_cast<uint16_t>(httpPort);
-}
-
-typedef struct _GS_SERVICE_PORTS {
-  uint16_t https;
-  uint16_t http;
-  uint16_t webUi;
-  uint16_t video;
-  uint16_t control;
-  uint16_t audio;
-  uint16_t mic;
-  uint16_t rtsp;
-} GS_SERVICE_PORTS;
-
-static GS_SERVICE_PORTS CalculateServicePorts(uint16_t sanitizedHttpPort) {
-  GS_SERVICE_PORTS ports = {};
-  ports.http = sanitizedHttpPort;
-  ports.https = sanitizedHttpPort - 5;
-  ports.webUi = sanitizedHttpPort + 1;
-  ports.video = sanitizedHttpPort + 9;
-  ports.control = sanitizedHttpPort + 10;
-  ports.audio = sanitizedHttpPort + 11;
-  ports.mic = sanitizedHttpPort + 13;
-  ports.rtsp = sanitizedHttpPort + 21;
-  return ports;
-}
-
 MoonlightInstance::MoonlightInstance()
   : m_OpusDecoder(NULL),
     m_MouseLocked(false),
@@ -99,7 +59,6 @@ MoonlightInstance::MoonlightInstance()
     m_VideoTrackListener(this),
     m_AudioTrack(),
     m_VideoTrack() {
-      m_HttpPort = 47989;
       m_Dispatcher.start();
     }
 
@@ -189,7 +148,6 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
   serverInfo.serverInfoAppVersion = me->m_AppVersion.c_str();
   serverInfo.serverInfoGfeVersion = me->m_GfeVersion.c_str();
   serverInfo.rtspSessionUrl = me->m_RtspUrl.c_str();
-  serverInfo.externalPort = (uint16_t)SanitizeHttpPort(me->m_HttpPort);
 
   // Initialize the server codec mode support with default value
   serverInfo.serverCodecModeSupport = 0;
@@ -377,16 +335,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   m_GfeVersion = gfeversion;
   m_RtspUrl = rtspurl;
   m_ServerCodecModeSupport = serverCodecModeSupport;
-  m_HttpPort = (int)SanitizeHttpPort(httpPort);
-  GS_SERVICE_PORTS ports = CalculateServicePorts((uint16_t)m_HttpPort);
-  PostToJs("Derived ports -> HTTPS: " + std::to_string(ports.https) +
-    " HTTP: " + std::to_string(ports.http) +
-    " WEBUI: " + std::to_string(ports.webUi) +
-    " VIDEO: " + std::to_string(ports.video) +
-    " CONTROL: " + std::to_string(ports.control) +
-    " AUDIO: " + std::to_string(ports.audio) +
-    " MIC: " + std::to_string(ports.mic) +
-    " RTSP: " + std::to_string(ports.rtsp));
+  m_HttpPort = httpPort;
   m_FramePacingEnabled = framePacing;
   m_OptimizeGamesEnabled = optimizeGames;
   m_RumbleFeedbackEnabled = rumbleFeedback;
@@ -438,7 +387,6 @@ void MoonlightInstance::STUN(int callbackId) {
 
 void MoonlightInstance::Pair_private(int callbackId, std::string serverMajorVersion, std::string address, int httpPort, std::string randomNumber) {
   char* ppkstr;
-  httpPort = (int)SanitizeHttpPort(httpPort);
   int err = gs_pair(atoi(serverMajorVersion.c_str()), address.c_str(), (unsigned short)httpPort, randomNumber.c_str(), &ppkstr);
 
   ClLogMessage("Paired host address: %s using PIN: %s over HTTP port: %d with result: %d\n", address.c_str(), randomNumber.c_str(), httpPort, err);

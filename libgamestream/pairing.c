@@ -37,8 +37,6 @@
 
 const char* gs_error;
 
-#define GS_DEFAULT_HTTP_PORT 47989
-
 extern X509 *g_Cert;
 extern EVP_PKEY *g_PrivateKey;
 extern char* g_UniqueId;
@@ -216,87 +214,24 @@ static char* x509_to_curl_ppk_string(X509* x509) {
 
 static unsigned short sanitize_http_port(unsigned short httpPort) {
   if (httpPort == 0) {
-    return GS_DEFAULT_HTTP_PORT;
+    return 47989;
   }
 
   if (httpPort <= 5 || httpPort > 65514) {
-    return GS_DEFAULT_HTTP_PORT;
+    return 47989;
   }
 
   return httpPort;
-}
-
-static bool parse_xml_port_value(const char* value, unsigned short* port) {
-  char* end = NULL;
-  long parsed;
-
-  if (value == NULL || *value == '\0' || port == NULL) {
-    return false;
-  }
-
-  parsed = strtol(value, &end, 10);
-  if (end == value || *end != '\0' || parsed <= 0 || parsed > 65535) {
-    return false;
-  }
-
-  *port = (unsigned short) parsed;
-  return true;
-}
-
-static unsigned short resolve_server_http_port(const char* address, unsigned short fallbackHttpPort, unsigned short* httpsPort) {
-  int ret;
-  char url[4096];
-  unsigned short resolvedHttpPort = fallbackHttpPort;
-  PHTTP_DATA data = http_create_data();
-  char* externalPortText = NULL;
-  char* httpsPortText = NULL;
-
-  if (data == NULL) {
-    return resolvedHttpPort;
-  }
-
-  snprintf(url, sizeof(url), "http://%s:%u/serverinfo?uniqueid=%s", address, fallbackHttpPort, g_UniqueId);
-  ret = http_request(url, NULL, data);
-  if (ret != GS_OK) {
-    goto cleanup;
-  }
-
-  if (xml_search(data->memory, data->size, "ExternalPort", &externalPortText) == GS_OK) {
-    unsigned short parsedPort;
-    if (parse_xml_port_value(externalPortText, &parsedPort)) {
-      resolvedHttpPort = sanitize_http_port(parsedPort);
-    }
-  }
-
-  if (httpsPort != NULL &&
-      xml_search(data->memory, data->size, "HttpsPort", &httpsPortText) == GS_OK) {
-    unsigned short parsedPort;
-    if (parse_xml_port_value(httpsPortText, &parsedPort)) {
-      *httpsPort = parsedPort;
-    }
-  }
-
-cleanup:
-  if (externalPortText != NULL) {
-    free(externalPortText);
-  }
-  if (httpsPortText != NULL) {
-    free(httpsPortText);
-  }
-  http_free_data(data);
-  return resolvedHttpPort;
 }
 
 int gs_unpair(const char* address, unsigned short httpPort) {
   int ret = GS_OK;
   char url[4096];
   unsigned short sanitizedHttpPort = sanitize_http_port(httpPort);
-  unsigned short unusedHttpsPort = 0;
   PHTTP_DATA data = http_create_data();
   if (data == NULL)
     return GS_OUT_OF_MEMORY;
 
-  sanitizedHttpPort = resolve_server_http_port(address, sanitizedHttpPort, &unusedHttpsPort);
   snprintf(url, sizeof(url), "http://%s:%u/unpair?uniqueid=%s", address, sanitizedHttpPort, g_UniqueId);
   ret = http_request(url, NULL, data);
 
@@ -310,11 +245,6 @@ int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort
   X509* server_cert = NULL;
   char url[4096];
   unsigned short sanitizedHttpPort = sanitize_http_port(httpPort);
-  unsigned short resolvedHttpsPort = 0;
-  
-  sanitizedHttpPort = resolve_server_http_port(address, sanitizedHttpPort, &resolvedHttpsPort);
-  (void)resolvedHttpsPort;
-
   unsigned char salt_data[16];
   char salt_hex[33];
   RAND_bytes(salt_data, 16);
