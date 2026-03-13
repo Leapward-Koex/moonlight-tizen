@@ -219,6 +219,10 @@ class ListView {
       });
     }
   }
+
+  reset() {
+    this.index = 0;
+  }
 };
 
 const Views = {

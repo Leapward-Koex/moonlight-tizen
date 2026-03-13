@@ -1110,7 +1110,9 @@ function deleteHostDialog(host) {
     deleteHostDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.left();
+    // Reset the Hosts view navigation index to prevent possible out-of-bounds errors
+    Views.Hosts.view.reset();
+    Navigation.switch();
   });
 }
 
@@ -1170,6 +1172,8 @@ function deleteAllHostsDialog() {
       deleteHostDialog.close();
       isDialogOpen = false;
       Navigation.pop();
+      // Reset the Hosts view navigation index to prevent possible out-of-bounds errors
+      Views.Hosts.view.reset();
       Navigation.switch();
     });
   }
