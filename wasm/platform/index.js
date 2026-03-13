@@ -1098,6 +1098,8 @@ function deleteHostDialog(host) {
     console.log('%c[index.js, deleteHostDialog]', 'color: green;', 'Removing host, closing app dialog, and returning.');
     // Remove the host container from the grid
     $('#host-container-' + host.serverUid).remove();
+    // Stop background polling for removed host
+    endBackgroundPollingOfHost(host);
     // Remove the host from the hosts object
     delete hosts[host.serverUid];
     // Save the updated hosts
@@ -1148,6 +1150,8 @@ function deleteAllHostsDialog() {
     $('#continueDeleteHost').off('click');
     $('#continueDeleteHost').on('click', function() {
       console.log('%c[index.js, deleteAllHostsDialog]', 'color: green;', 'Removing all hosts, closing app dialog, and returning.');
+      // Stop background polling for all hosts before removing them
+      stopPollingHosts();
       // Iterate through all hosts and remove them
       for (var serverUid in hosts) {
         if (hosts.hasOwnProperty(serverUid)) {
