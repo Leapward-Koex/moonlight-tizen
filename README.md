@@ -28,8 +28,8 @@ This application allows you to stream your collection of games, programs, or you
 - Force feedback and mouse control via gamepad by long-pressing *Start*.
 - Swap face buttons to match your specific gamepad layout.
 - Play audio from the host computer and your client device.
-- Game mode switching, full color range, and custom port support.
 - Connection warnings and performance statistics overlays.
+- Game mode switching, full color range, and custom port support.
 - ...and many more features and improvements!
 
 ---
