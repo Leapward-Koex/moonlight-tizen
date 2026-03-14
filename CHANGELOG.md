@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.11.0
+
+### Added
+- Added support for custom ports when connecting and pairing with a host
+- Added HTTP port sanitization and fallback to default on invalid values
+- Added input validation for IP address and optional port in the text field
+
+### Changed
+- Fallback to default port when entering an IP address using numeric fields
+
+### Fixed
+- Fixed host polling execution in background after deletion
+- Fixed navigation index out of bounds upon host deletion
+- Fixed navigation input being active during loading screens
+- Fixed a bug in the pairing process that was causing random pairing failures
+
 ## v1.10.3
 
 ### Added
