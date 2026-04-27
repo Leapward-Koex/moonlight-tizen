@@ -45,41 +45,29 @@ function resolveElement(target) {
   return null;
 }
 
-function markElement(element) {
+// Mark an element based on various target types
+function mark(target) {
+  const element = resolveElement(target);
+  // Check if the element exists before marking
   if (element) {
+    // Add the hovered class and dispatch the event
     element.classList.add(hoveredClassName);
     element.dispatchEvent(new Event('mouseenter'));
+  } else {
+    console.error('%c[navigation.js, mark]', 'color: gray;', 'Cannot mark the unresolved target:', target);
   }
 }
 
-function markElementById(id) {
-  markElement(document.getElementById(id));
-}
-
-function mark(value) {
-  if (typeof value === 'string') {
-    markElementById(value);
-  } else if (typeof value === 'object') {
-    markElement(value);
-  }
-}
-
-function unmarkElement(element) {
+// Unmark an element based on various target types
+function unmark(target) {
+  const element = resolveElement(target);
+  // Check if the element exists before un-marking
   if (element) {
+    // Remove the hovered class and dispatch the event
     element.classList.remove(hoveredClassName);
     element.dispatchEvent(new Event('mouseleave'));
-  }
-}
-
-function unmarkElementById(id) {
-  unmarkElement(document.getElementById(id));
-}
-
-function unmark(value) {
-  if (typeof value === 'string') {
-    unmarkElementById(value);
-  } else if (typeof value === 'object') {
-    unmarkElement(value);
+  } else {
+    console.error('%c[navigation.js, unmark]', 'color: gray;', 'Cannot unmark the unresolved target:', target);
   }
 }
 
