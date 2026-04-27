@@ -45,6 +45,25 @@ function resolveElement(target) {
   return null;
 }
 
+// Click the target element from the resolved element
+function clickElement(target) {
+  const element = resolveElement(target);
+  // Check if the element exists before clicking
+  if (!element) {
+    console.error('%c[navigation.js, clickElement]', 'color: gray;', 'Cannot click the unresolved target:', target);
+    return;
+  }
+  // Prevent clicking if the element is disabled based on common disabled states
+  if (element.disabled || element.getAttribute('aria-disabled') === 'true' || element.classList.contains('is-disabled')) {
+    console.warn('%c[navigation.js, clickElement]', 'color: gray;', 'Cannot click the disabled target element:', element);
+    return;
+  }
+  // Click the resolved element itself if it supports click event
+  if (typeof element.click === 'function') {
+    element.click();
+  }
+}
+
 // Mark an element based on various target types
 function mark(target) {
   const element = resolveElement(target);
