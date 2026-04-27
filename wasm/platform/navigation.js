@@ -1,5 +1,50 @@
 const hoveredClassName = 'hovered';
 
+// Check if the provided object is an HTML element
+function isHtmlElement(el) {
+  return (typeof HTMLElement !== 'undefined') && el instanceof HTMLElement;
+}
+
+// Resolve various target types to an actual HTML element
+function resolveElement(target) {
+  // If no target is provided, return null
+  if (!target) {
+    console.error('%c[navigation.js, resolveElement]', 'color: gray;', 'No target element is provided!', target);
+    return null;
+  }
+  // If the target is already an HTML element, return it directly
+  if (isHtmlElement(target)) {
+    return target;
+  }
+  // If the target is a string, treat it as an element ID
+  if (typeof target === 'string') {
+    return document.getElementById(target);
+  }
+  // If the target is an array-like object, return the first element
+  if (target && target[0] && target[0].nodeType === 1) {
+    return target[0];
+  }
+  // If the target is a DOM node, return it directly
+  if (target && target.nodeType === 1) {
+    return target;
+  }
+  // If the target is a wrapper object exposing an 'element' property, return that
+  if (target && target.element && isHtmlElement(target.element)) {
+    return target.element;
+  }
+  // If the target is a wrapper object exposing an 'el' property, return that
+  if (target && target.el && isHtmlElement(target.el)) {
+    return target.el;
+  }
+  // If the target is a string containing an element ID, retrieve the element by that ID
+  if (target && typeof target.id === 'string') {
+    return document.getElementById(target.id);
+  }
+  // If the target cannot be resolved to an element, return null
+  console.warn('%c[navigation.js, resolveElement]', 'color: gray;', 'Target element cannot be resolved:', target);
+  return null;
+}
+
 function markElement(element) {
   if (element) {
     element.classList.add(hoveredClassName);
