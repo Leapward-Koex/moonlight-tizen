@@ -71,6 +71,54 @@ function unmark(target) {
   }
 }
 
+// Get the current ID of a target element
+function elementId(target) {
+  const element = resolveElement(target);
+  // Check if the element exists and has an ID
+  if (element && element.id) {
+    return element.id;
+  }
+  // If the target is a string, return it directly
+  return typeof target === 'string' ? target : '';
+}
+
+// Safely add focus to an element
+function focusElement(target) {
+  const element = resolveElement(target);
+  const listener = document.getElementById('listener');
+  // Check if the element exists before adding focus
+  if (!element) {
+    console.error('%c[navigation.js, focusElement]', 'color: gray;', 'Cannot focus the unresolved target:', target);
+    return;
+  }
+  // Check if the element is a SELECT dropdown
+  if (element.tagName === 'SELECT') {
+    // Delegate focus to the hidden listener element
+    if (listener && typeof listener.focus === 'function') {
+      listener.focus();
+    }
+    return;
+  }
+  // If the element supports focus, add focus to it
+  if (typeof element.focus === 'function') {
+    element.focus();
+  }
+}
+
+// Safely remove focus from an element
+function blurElement(target) {
+  const element = resolveElement(target);
+  // Check if the element exists before removing focus
+  if (!element) {
+    console.error('%c[navigation.js, blurElement]', 'color: gray;', 'Cannot blur the unresolved target:', target);
+    return;
+  }
+  // If the element supports blur, remove focus from it
+  if (typeof element.blur === 'function') {
+    element.blur();
+  }
+}
+
 function isPopupActive(id) {
   return document
     .getElementById(id)
