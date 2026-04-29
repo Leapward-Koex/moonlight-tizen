@@ -597,7 +597,7 @@ const Views = {
     back: function() {
       resolveElement('closeHostMenu').click();
     },
-    press: function() {},
+    press: function() {
       focusElement(this.view.current());
     },
     enter: function() {
