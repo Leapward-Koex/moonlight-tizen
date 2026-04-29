@@ -58,6 +58,13 @@ function clickElement(target) {
     console.warn('%c[navigation.js, clickElement]', 'color: gray;', 'Cannot click the disabled target element:', element);
     return;
   }
+  // If inside an MDL menu, use the menu item itself for proper behavior
+  const menuItem = element.closest ? element.closest('.mdl-menu__item') : null;
+  // If a clickable menu item is found, use it instead of the container
+  if (menuItem && typeof menuItem.click === 'function') {
+    menuItem.click();
+    return;
+  }
   // Click the resolved element itself if it supports click event
   if (typeof element.click === 'function') {
     element.click();
@@ -138,13 +145,51 @@ function blurElement(target) {
   }
 }
 
-function isPopupActive(id) {
-  return document
-    .getElementById(id)
-    .parentNode
-    .children[3]
-    .classList
-    .contains('is-visible');
+// Determine if a popup menu container is active
+function isPopupMenuActive(id) {
+  const element = resolveElement(id);
+  const parent = element ? element.parentNode : null;
+  const container = parent && parent.querySelector ? parent.querySelector('.mdl-menu__container') : null;
+  // Check if the container exists and is visible
+  return !!(container && container.classList.contains('is-visible'));
+}
+
+// Close any active visible menu containers
+function closeActiveVisibleMenu() {
+  const visibleMenuContainer = document.querySelectorAll('.mdl-menu__container.is-visible');
+  // If no visible menus are found, return false
+  if (!visibleMenuContainer || visibleMenuContainer.length === 0) {
+    return false;
+  }
+  // Hide each visible menu using its MaterialMenu instance
+  visibleMenuContainer.forEach((menu) => {
+    const visibleMenu = menu.querySelector('.mdl-menu');
+    // Ensure the menu and its MaterialMenu instance exist before hiding
+    if (visibleMenu && visibleMenu.MaterialMenu && typeof visibleMenu.MaterialMenu.hide === 'function') {
+      visibleMenu.MaterialMenu.hide();
+    }
+  });
+  // Simulate an Escape key press to close menus that rely on it
+  document.dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'Escape', keyCode: 27, which: 27, bubbles: true
+  }));
+  // Trigger a click on the body to ensure menus are closed
+  if (document.body) {
+    document.body.click();
+  }
+  Navigation.pop();
+  return true;
+}
+
+// Close a specific popup menu container by its ID
+function closePopupMenu(id) {
+  // If the specified menu is active, click its opener to close it
+  if (isPopupMenuActive(id)) {
+    // Close the popup menu by clicking its opener element
+    clickElement(id);
+    return true;
+  }
+  return closeActiveVisibleMenu();
 }
 
 function changeIpAddressFieldValue(adjust) {
@@ -865,7 +910,7 @@ const Views = {
     },
   },
   SelectResolutionMenu: {
-    isActive: () => isPopupActive('videoResolutionMenu'),
+    isActive: () => isPopupMenuActive('videoResolutionMenu'),
     view: new ListView(() => 
       document.getElementById('videoResolutionMenu')
       .parentNode.children[3].children[1].children),
@@ -879,15 +924,17 @@ const Views = {
     right: function() {},
     select: function() {
       clickElement(this.view.current());
+      closeActiveVisibleMenu();
       setTimeout(() => focusElement('selectResolution'), 250);
     },
     accept: function() {
       clickElement(this.view.current());
-      Navigation.pop();
+      closeActiveVisibleMenu();
       setTimeout(() => focusElement('selectResolution'), 250);
     },
     back: function() {
-      resolveElement('selectResolution').click();
+      closePopupMenu('selectResolution');
+      closeActiveVisibleMenu();
       focusElement('selectResolution');
     },
     press: function() {},
@@ -900,7 +947,7 @@ const Views = {
     },
   },
   SelectFramerateMenu: {
-    isActive: () => isPopupActive('videoFramerateMenu'),
+    isActive: () => isPopupMenuActive('videoFramerateMenu'),
     view: new ListView(() => 
       document.getElementById('videoFramerateMenu')
       .parentNode.children[3].children[1].children),
@@ -914,15 +961,17 @@ const Views = {
     right: function() {},
     select: function() {
       clickElement(this.view.current());
+      closeActiveVisibleMenu();
       setTimeout(() => focusElement('selectFramerate'), 250);
     },
     accept: function() {
       clickElement(this.view.current());
-      Navigation.pop();
+      closeActiveVisibleMenu();
       setTimeout(() => focusElement('selectFramerate'), 250);
     },
     back: function() {
-      resolveElement('selectFramerate').click();
+      closePopupMenu('selectFramerate');
+      closeActiveVisibleMenu();
       focusElement('selectFramerate');
     },
     press: function() {},
@@ -935,7 +984,7 @@ const Views = {
     },
   },
   SelectBitrateMenu: {
-    isActive: () => isPopupActive('videoBitrateMenu'),
+    isActive: () => isPopupMenuActive('videoBitrateMenu'),
     view: new ListView(() => 
       document.getElementById('videoBitrateMenu')
       .parentNode.children[3].children[1].children),
@@ -951,14 +1000,17 @@ const Views = {
     },
     select: function() {
       clickElement(this.view.current());
+      closeActiveVisibleMenu();
       setTimeout(() => focusElement('selectBitrate'), 250);
     },
     accept: function() {
       clickElement(this.view.current());
+      closeActiveVisibleMenu();
       setTimeout(() => focusElement('selectBitrate'), 250);
     },
     back: function() {
-      resolveElement('selectBitrate').click();
+      closePopupMenu('selectBitrate');
+      closeActiveVisibleMenu();
       focusElement('selectBitrate');
     },
     press: function() {},
@@ -1102,7 +1154,7 @@ const Views = {
     },
   },
   SelectAudioMenu: {
-    isActive: () => isPopupActive('audioConfigMenu'),
+    isActive: () => isPopupMenuActive('audioConfigMenu'),
     view: new ListView(() => 
       document.getElementById('audioConfigMenu')
       .parentNode.children[3].children[1].children),
@@ -1116,15 +1168,17 @@ const Views = {
     right: function() {},
     select: function() {
       clickElement(this.view.current());
+      closeActiveVisibleMenu();
       setTimeout(() => focusElement('selectAudio'), 250);
     },
     accept: function() {
       clickElement(this.view.current());
-      Navigation.pop();
+      closeActiveVisibleMenu();
       setTimeout(() => focusElement('selectAudio'), 250);
     },
     back: function() {
-      resolveElement('selectAudio').click();
+      closePopupMenu('selectAudio');
+      closeActiveVisibleMenu();
       focusElement('selectAudio');
     },
     press: function() {},
@@ -1181,7 +1235,7 @@ const Views = {
     },
   },
   SelectCodecMenu: {
-    isActive: () => isPopupActive('videoCodecMenu'),
+    isActive: () => isPopupMenuActive('videoCodecMenu'),
     view: new ListView(() => 
       document.getElementById('videoCodecMenu')
       .parentNode.children[3].children[1].children),
@@ -1195,15 +1249,17 @@ const Views = {
     right: function() {},
     select: function() {
       clickElement(this.view.current());
+      closeActiveVisibleMenu();
       setTimeout(() => focusElement('selectCodec'), 250);
     },
     accept: function() {
       clickElement(this.view.current());
-      Navigation.pop();
+      closeActiveVisibleMenu();
       setTimeout(() => focusElement('selectCodec'), 250);
     },
     back: function() {
-      resolveElement('selectCodec').click();
+      closePopupMenu('selectCodec');
+      closeActiveVisibleMenu();
       focusElement('selectCodec');
     },
     press: function() {},
