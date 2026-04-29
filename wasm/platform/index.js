@@ -1349,11 +1349,6 @@ function showSettings() {
 
 // Reset the current settings view by clearing the selection and hiding the right pane
 function resetSettingsView() {
-  // Remove the 'hovered' and 'is-focused' classes from all toggle switches
-  document.querySelectorAll('.mdl-switch').forEach(function(toggleSwitch) {
-    toggleSwitch.classList.remove('hovered', 'is-focused');
-  });
-
   // Hide all settings options from the right pane
   document.querySelectorAll('.settings-options').forEach(function(settingsOption) {
     settingsOption.style.display = 'none';
@@ -1369,7 +1364,7 @@ function resetSettingsView() {
 function navigateSettingsView(view) {
   Navigation.pop();
   Navigation.push(view);
-  setTimeout(() => Navigation.switch(), 5);
+  setTimeout(() => Navigation.switch(), 250);
 }
 
 // Handle category selection, display appropriate options, and navigate to the provided settings pane
