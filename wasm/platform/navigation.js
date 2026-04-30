@@ -79,7 +79,7 @@ function clickElement(target) {
   }
   // Click the resolved element itself if it supports click event
   if (typeof element.click === 'function') {
-    element.click();
+    isGamepadActive ? element.click() : target.click();
   }
 }
 
@@ -438,18 +438,6 @@ const Views = {
       this.view.nextCard(5);
       focusElement(this.view.current());
     },
-    select: function() {
-      const currentItem = resolveElement(this.view.current());
-      // Check if the current item is the Add Host container
-      if (currentItem && currentItem.id === 'addHostContainer') {
-        // Click the Add Host container itself to open the Add Host dialog
-        clickElement(currentItem);
-      } else {
-        // If the current item has children, click the first child element (the host card)
-        const hostCard = currentItem.children ? currentItem.children[0] : null;
-        clickElement(hostCard);
-      }
-    },
     accept: function() {
       const currentItem = resolveElement(this.view.current());
       // Check if the current item is the Add Host container
@@ -523,9 +511,6 @@ const Views = {
       this.view.next();
       focusElement(this.view.current());
     },
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -588,19 +573,6 @@ const Views = {
       this.view.next();
       focusElement(this.view.current());
     },
-    select: function() {
-      const currentItem = elementId(this.view.current());
-      // Check if the current item is the IP address text input field
-      if (currentItem === 'ipAddressTextInput') {
-        // Enable the text input field and set focus to it to open the virtual keyboard
-        handleIpTextFieldState(true);
-        return;
-      } else {
-        // Disable the text input field and set focus back to the hidden listener element
-        handleIpTextFieldState(false);
-        clickElement(this.view.current());
-      }
-    },
     accept: function() {
       const currentItem = elementId(this.view.current());
       // Check if the current item is the IP address text input field
@@ -659,9 +631,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -696,9 +665,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -732,9 +698,6 @@ const Views = {
       this.view.next();
       focusElement('cancelDeleteHost');
     },
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -766,9 +729,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -800,9 +760,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -843,9 +800,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -885,18 +839,6 @@ const Views = {
     right: function() {
       this.view.next();
       focusElement(this.view.current());
-    },
-    select: function() {
-      const currentItem = resolveElement(this.view.current());
-      if (currentItem && currentItem.id === 'goBackBtn') {
-        clickElement(currentItem);
-        // Navigate to the HostsNav view
-        Navigation.change(Views.HostsNav);
-        // Set focus to the "Settings" button after navigating to the HostsNav view
-        focusElement('settingsBtn');
-      } else {
-        clickElement(this.view.current());
-      }
     },
     accept: function() {
       const currentItem = resolveElement(this.view.current());
@@ -945,9 +887,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -985,11 +924,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-      closeActiveVisibleMenu();
-      setTimeout(() => focusElement('selectResolution'), 250);
-    },
     accept: function() {
       clickElement(this.view.current());
       closeActiveVisibleMenu();
@@ -1022,11 +956,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-      closeActiveVisibleMenu();
-      setTimeout(() => focusElement('selectFramerate'), 250);
-    },
     accept: function() {
       clickElement(this.view.current());
       closeActiveVisibleMenu();
@@ -1060,11 +989,6 @@ const Views = {
     right: function() {
       bitrateSlider.stepUp();
       bitrateSlider.dispatchEvent(new Event('input'));
-    },
-    select: function() {
-      clickElement(this.view.current());
-      closeActiveVisibleMenu();
-      setTimeout(() => focusElement('selectBitrate'), 250);
     },
     accept: function() {
       clickElement(this.view.current());
@@ -1102,9 +1026,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -1146,9 +1067,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -1189,9 +1107,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -1229,11 +1144,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-      closeActiveVisibleMenu();
-      setTimeout(() => focusElement('selectAudio'), 250);
-    },
     accept: function() {
       clickElement(this.view.current());
       closeActiveVisibleMenu();
@@ -1270,9 +1180,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -1310,11 +1217,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-      closeActiveVisibleMenu();
-      setTimeout(() => focusElement('selectCodec'), 250);
-    },
     accept: function() {
       clickElement(this.view.current());
       closeActiveVisibleMenu();
@@ -1350,9 +1252,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -1394,9 +1293,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -1433,9 +1329,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -1467,9 +1360,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -1503,9 +1393,6 @@ const Views = {
     right: function() {
       this.view.next();
       focusElement('cancelRestoreDefaults');
-    },
-    select: function() {
-      clickElement(this.view.current());
     },
     accept: function() {
       clickElement(this.view.current());
@@ -1553,9 +1440,6 @@ const Views = {
       this.view.nextCard(6);
       focusElement(this.view.current());
     },
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -1593,9 +1477,6 @@ const Views = {
       this.view.next();
       focusElement(this.view.current());
     },
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -1628,9 +1509,6 @@ const Views = {
       this.view.next();
       focusElement('cancelQuitApp');
     },
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -1662,9 +1540,6 @@ const Views = {
     },
     left: function() {},
     right: function() {},
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -1699,9 +1574,6 @@ const Views = {
       this.view.next();
       focusElement('cancelRestartApp');
     },
-    select: function() {
-      clickElement(this.view.current());
-    },
     accept: function() {
       clickElement(this.view.current());
     },
@@ -1735,9 +1607,6 @@ const Views = {
     right: function() {
       this.view.next();
       focusElement('cancelExitApp');
-    },
-    select: function() {
-      clickElement(this.view.current());
     },
     accept: function() {
       clickElement(this.view.current());
@@ -1868,7 +1737,6 @@ const Navigation = (function() {
     down: runOp('down'),
     left: runOp('left'),
     right: runOp('right'),
-    select: runOp('select'),
     accept: runOp('accept'),
     back: runOp('back'),
     press: runOp('press'),
