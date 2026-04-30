@@ -204,13 +204,41 @@ function closePopupMenu(id) {
   return closeActiveVisibleMenu();
 }
 
-function changeIpAddressFieldValue(adjust) {
-  const currentItem = this.view.current();
+// Handle the state of the IP address text input field
+function handleIpTextFieldState(enabled) {
+  const listener = document.getElementById('listener');
+  const textInput = document.getElementById('ipAddressTextInput');
+  // Check if the element exists before modifying
+  if (!textInput) {
+    console.error('%c[navigation.js, handleIpTextFieldState]', 'color: gray;', 'Cannot find the IP address text input element!', textInput);
+    return;
+  }
+  textInput.readOnly = !enabled;
+  // Set or remove focus based on the enabled state
+  if (enabled) {
+    textInput.focus();
+    // Trigger a click to open the virtual keyboard on Tizen devices
+    if (typeof textInput.click === 'function') {
+      textInput.click();
+    }
+  } else {
+    textInput.blur();
+    // In case of blur, set focus back to the hidden listener element
+    if (typeof listener.focus === 'function') {
+      listener.focus();
+    }
+  }
+}
+
+// Change the value of the IP address numeric field
+function changeIpNumericFieldValue(adjust) {
+  const currentItem = elementId(this.view.current());
   if (currentItem.startsWith('ipAddressField')) {
     const digitElement = document.getElementById(currentItem);
     let currentValue = parseInt(digitElement.value, 10);
     currentValue = (currentValue + adjust + 256) % 256;
     digitElement.value = currentValue;
+    digitElement.dispatchEvent(new Event('change', { bubbles: true }));
   }
 }
 
@@ -465,6 +493,8 @@ const Views = {
     },
     enter: function() {
       mark(this.view.current());
+      // Disable the IP address text input field when entering the Hosts view
+      handleIpTextFieldState(false);
     },
     leave: function() {
       unmark(this.view.current());
@@ -525,57 +555,78 @@ const Views = {
       }
     }),
     up: function() {
-      if (document.getElementById('ipAddressFieldModeSwitch').checked) {
-        changeIpAddressFieldValue.call(this, 1);
+      const currentItem = elementId(this.view.current());
+      const ipAddressFieldModeSwitch = document.getElementById('ipAddressFieldModeSwitch');
+      // If the IP address field mode is enabled and the current item is an IP address numeric field
+      if (ipAddressFieldModeSwitch.checked && currentItem.startsWith('ipAddressField')) {
+        // Increase the value of the current IP address numeric field
+        changeIpNumericFieldValue.call(this, 1);
+      } else {
+        // Go to the first item in the list (ipAddressTextInput)
+        this.view.index = 0;
+        focusElement(this.view.current());
       }
     },
     down: function() {
-      if (document.getElementById('ipAddressFieldModeSwitch').checked) {
-        changeIpAddressFieldValue.call(this, -1);
+      const currentItem = elementId(this.view.current());
+      const ipAddressFieldModeSwitch = document.getElementById('ipAddressFieldModeSwitch');
+      // If the IP address field mode switch is enabled and the current item is an IP address numeric field
+      if (ipAddressFieldModeSwitch.checked && currentItem.startsWith('ipAddressField')) {
+        // Decrease the value of the current IP address numeric field
+        changeIpNumericFieldValue.call(this, -1);
+      } else {
+        // Go to the second item in the list (continueAddHost)
+        this.view.index = 1;
+        focusElement(this.view.current());
       }
     },
     left: function() {
-      if (document.getElementById('ipAddressFieldModeSwitch').checked) {
-        const currentItem = this.view.current();
-        if (currentItem.startsWith('ipAddressField') && currentItem !== 'continueAddHost' || currentItem !== 'cancelAddHost') {
-          // Remove focus from any currently focused item element
-          document.getElementById(currentItem).blur();
-          document.getElementById(this.view.prev());
-        } else {
-          document.getElementById(this.view.prev()).focus();
-        }
-      } else {
-        this.view.prev();
-        focusElement(this.view.current());
-      }
+      this.view.prev();
+      focusElement(this.view.current());
     },
     right: function() {
-      if (document.getElementById('ipAddressFieldModeSwitch').checked) {
-        const currentItem = this.view.current();
-        if (currentItem.startsWith('ipAddressField') && currentItem !== 'ipAddressField4') {
-          // Remove focus from any currently focused item element
-          document.getElementById(currentItem).blur();
-          document.getElementById(this.view.next());
-        } else {
-          document.getElementById(this.view.next()).focus();
-        }
-      } else {
-        this.view.next();
-        focusElement(this.view.current());
-      }
+      this.view.next();
+      focusElement(this.view.current());
     },
     select: function() {
-      clickElement(this.view.current());
+      const currentItem = elementId(this.view.current());
+      // Check if the current item is the IP address text input field
+      if (currentItem === 'ipAddressTextInput') {
+        // Enable the text input field and set focus to it to open the virtual keyboard
+        handleIpTextFieldState(true);
+        return;
+      } else {
+        // Disable the text input field and set focus back to the hidden listener element
+        handleIpTextFieldState(false);
+        clickElement(this.view.current());
+      }
     },
     accept: function() {
-      clickElement(this.view.current());
+      const currentItem = elementId(this.view.current());
+      // Check if the current item is the IP address text input field
+      if (currentItem === 'ipAddressTextInput') {
+        // Enable the text input field and set focus to it to open the virtual keyboard
+        handleIpTextFieldState(true);
+        return;
+      } else {
+        // Disable the text input field and set focus back to the hidden listener element
+        handleIpTextFieldState(false);
+        clickElement(this.view.current());
+      }
     },
     back: function() {
-      resolveElement('cancelAddHost').click();
+      const currentItem = document.activeElement;
+      // Check if the current item is the IP address text input field and it is not read-only
+      if (currentItem && currentItem.id === 'ipAddressTextInput' && !currentItem.readOnly) {
+        // Disable the text input field and set focus back to the hidden listener element
+        handleIpTextFieldState(false);
+        return;
+      } else {
+        // Otherwise, click the Cancel button to close the dialog
+        resolveElement('cancelAddHost').click();
+      }
     },
-    press: function() {
-      document.getElementById('ipAddressFieldModeSwitch').click();
-    },
+    press: function() {},
     switch: function() {
       const currentItem = resolveElement(this.view.current());
       // Check if the current item is either the Continue or Cancel button
