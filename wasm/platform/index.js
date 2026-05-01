@@ -7,6 +7,7 @@ var api; // The `api` should only be set if we're in a host-specific screen, on 
 var isPlatformVer = parseFloat(tizen.systeminfo.getCapability("http://tizen.org/feature/platform.version")); // Retrieve the Tizen platform version
 var isInGame = false; // Flag indicating whether the game has started, initial value is false
 var isDialogOpen = false; // Flag indicating whether the dialog is open, initial value is false
+var isGamepadActive = false; // Flag indicating whether the gamepad input is active, initial value is false
 var isClickPrevented = false; // Flag indicating whether the click event should be prevented, initial value is false
 var resFpsWarning = false; // Flag indicating whether the video resolution and frame rate warning message has shown, initial value is false
 var bitrateWarning = false; // Flag indicating whether the video bitrate warning message has shown, initial value is false
@@ -81,6 +82,7 @@ function attachListeners() {
 
   Controller.startWatching();
   window.addEventListener('gamepadinputchanged', (e) => {
+    isGamepadActive = true;
     const changes = e.detail.changes;
     // Iterate through each change in the gamepad input
     changes.forEach((change) => {
@@ -632,15 +634,8 @@ function addHostDialog() {
   isDialogOpen = true;
   Navigation.push(Views.AddHostDialog);
   updateIpAddressInputValidationState();
-
-  // Checks if the IP address field mode switch is checked
-  if ($('#ipAddressFieldModeSwitch').prop('checked')) {
-    // Remove focus from any currently focused element
-    document.activeElement.blur();
-  } else {
-    // Set focus to the currently active element
-    document.activeElement.focus();
-  }
+  // Remove focus from any current active element
+  document.activeElement.blur();
 
   // Cancel the operation if the Cancel button is pressed
   $('#cancelAddHost').off('click');
@@ -1349,11 +1344,6 @@ function showSettings() {
 
 // Reset the current settings view by clearing the selection and hiding the right pane
 function resetSettingsView() {
-  // Remove the 'hovered' and 'is-focused' classes from all toggle switches
-  document.querySelectorAll('.mdl-switch').forEach(function(toggleSwitch) {
-    toggleSwitch.classList.remove('hovered', 'is-focused');
-  });
-
   // Hide all settings options from the right pane
   document.querySelectorAll('.settings-options').forEach(function(settingsOption) {
     settingsOption.style.display = 'none';
@@ -1369,7 +1359,7 @@ function resetSettingsView() {
 function navigateSettingsView(view) {
   Navigation.pop();
   Navigation.push(view);
-  setTimeout(() => Navigation.switch(), 5);
+  setTimeout(() => Navigation.switch(), 250);
 }
 
 // Handle category selection, display appropriate options, and navigate to the provided settings pane
