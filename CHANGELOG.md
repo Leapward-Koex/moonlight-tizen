@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.11.1
+
+### Added
+- Added helper functions to resolve DOM elements from various target types
+- Added helpers for resolving element ID and safely handling focus and blur
+- Added helper for safely clicking elements with disabled state checks
+
+### Changed
+- Refactored mark and unmark to use resolve element function and removed duplication
+- Applying DOM helper utilities across views and improve navigation behavior
+- Enhanced MDL dropdown menu handling for selection and closing
+- Improved navigation and UI behavior in 'Add Host' dialog and applied style fixes
+- Unifying gamepad and remote control selection logic using a single view handler
+
+### Fixed
+- Fixed toggle switch behavior and ensured consistent handling across Tizen versions
+
 ## v1.11.0
 
 ### Added
