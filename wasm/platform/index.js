@@ -2664,7 +2664,7 @@ function saveResolution() {
   storeData('resolution', chosenResolution, null);
 
   // Update the bitrate value based on the selected resolution
-  setBitratePresetValue();
+  $('#optimizeBitrateSwitch').prop('checked') ? optimizeBitratePresets() : standardBitratePresets();
   // Trigger warning check after changing video resolution
   warnResolutionFramerate();
 }
@@ -2676,7 +2676,7 @@ function saveFramerate() {
   storeData('frameRate', chosenFramerate, null);
 
   // Update the bitrate value based on the selected frame rate
-  setBitratePresetValue();
+  $('#optimizeBitrateSwitch').prop('checked') ? optimizeBitratePresets() : standardBitratePresets();
   // Trigger warning check after changing video frame rate
   warnResolutionFramerate();
 }
@@ -2723,7 +2723,8 @@ function warnBitrate() {
   }
 }
 
-function setBitratePresetValue() {
+function standardBitratePresets() {
+  console.log('%c[index.js, standardBitratePresets]', 'color: green;', 'Applying standard bitrate presets...');
   var res = $('#selectResolution').data('value');
   var frameRate = $('#selectFramerate').data('value').toString();
 
@@ -2961,6 +2962,10 @@ function updateVideoCodec(chosenCodecId, chosenCodecValue) {
   console.log('%c[index.js, updateVideoCodec]', 'color: green;', 'Saving video codec value: ' + chosenCodecValue);
   storeData('videoCodec', chosenCodecValue, null);
 
+  // Update the bitrate value based on the selected codec
+  if ($('#optimizeBitrateSwitch').prop('checked')) {
+    optimizeBitratePresets();
+  }
   // Trigger warning check after changing video codec
   warnVideoCodec();
 }
@@ -3017,6 +3022,11 @@ function updateHdrMode() {
     const chosenHdrMode = $('#hdrModeSwitch').parent().hasClass('is-checked');
     console.log('%c[index.js, updateHdrMode]', 'color: green;', 'Saving HDR mode state: ' + chosenHdrMode);
     storeData('hdrMode', chosenHdrMode, null);
+
+    // Update the bitrate value based on the selected HDR state
+    if ($('#optimizeBitrateSwitch').prop('checked')) {
+      optimizeBitratePresets();
+    }
   }, 100);
 }
 
@@ -3087,7 +3097,7 @@ function handleUnlockAllFps() {
       console.log('%c[index.js, handleUnlockAllFps]', 'color: green;', 'Resetting framerate value to 60 FPS');
       storeData('frameRate', '60', null);
       // Update the bitrate value based on the selected frame rate
-      setBitratePresetValue();
+      $('#optimizeBitrateSwitch').prop('checked') ? optimizeBitratePresets() : standardBitratePresets();
     }
   }
 }
@@ -3097,6 +3107,9 @@ function saveOptimizeBitrate() {
     const chosenOptimizeBitrate = $('#optimizeBitrateSwitch').parent().hasClass('is-checked');
     console.log('%c[index.js, saveOptimizeBitrate]', 'color: green;', 'Saving optimize bitrate state: ' + chosenOptimizeBitrate);
     storeData('optimizeBitrate', chosenOptimizeBitrate, null);
+
+    // Update the bitrate value based on the selected preset mode
+    chosenOptimizeBitrate ? optimizeBitratePresets() : standardBitratePresets();
   }, 100);
 }
 
