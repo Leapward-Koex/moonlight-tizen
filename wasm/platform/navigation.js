@@ -1239,6 +1239,7 @@ const Views = {
   AdvancedSettings: {
     view: new ListView(() => [
       'unlockAllFpsBtn',
+      'optimizeBitrateBtn',
       'disableWarningsBtn',
       'performanceStatsBtn'
     ]),

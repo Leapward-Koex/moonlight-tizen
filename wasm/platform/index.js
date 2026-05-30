@@ -56,6 +56,7 @@ function attachListeners() {
   $('#fullRangeSwitch').on('click', saveFullRange);
   $('#gameModeSwitch').on('click', saveGameMode);
   $('#unlockAllFpsSwitch').on('click', saveUnlockAllFps);
+  $('#optimizeBitrateSwitch').on('click', saveOptimizeBitrate);
   $('#disableWarningsSwitch').on('click', saveDisableWarnings);
   $('#performanceStatsSwitch').on('click', savePerformanceStats);
   $('#navigationGuideBtn').on('click', navigationGuideDialog);
@@ -2663,7 +2664,7 @@ function saveResolution() {
   storeData('resolution', chosenResolution, null);
 
   // Update the bitrate value based on the selected resolution
-  setBitratePresetValue();
+  $('#optimizeBitrateSwitch').prop('checked') ? optimizeBitratePresets() : standardBitratePresets();
   // Trigger warning check after changing video resolution
   warnResolutionFramerate();
 }
@@ -2675,7 +2676,7 @@ function saveFramerate() {
   storeData('frameRate', chosenFramerate, null);
 
   // Update the bitrate value based on the selected frame rate
-  setBitratePresetValue();
+  $('#optimizeBitrateSwitch').prop('checked') ? optimizeBitratePresets() : standardBitratePresets();
   // Trigger warning check after changing video frame rate
   warnResolutionFramerate();
 }
@@ -2722,7 +2723,8 @@ function warnBitrate() {
   }
 }
 
-function setBitratePresetValue() {
+function standardBitratePresets() {
+  console.log('%c[index.js, standardBitratePresets]', 'color: green;', 'Applying standard bitrate presets...');
   var res = $('#selectResolution').data('value');
   var frameRate = $('#selectFramerate').data('value').toString();
 
@@ -2791,6 +2793,41 @@ function setBitratePresetValue() {
     // Unrecognized option! In case someone screws with the JS to add custom resolutions.
     $('#bitrateSlider')[0].MaterialSlider.change('10');
   }
+
+  // Update the bitrate value
+  saveBitrate();
+}
+
+function optimizeBitratePresets() {
+  console.log('%c[index.js, optimizeBitratePresets]', 'color: green;', 'Applying optimize bitrate presets...');
+  var width = parseInt($('#selectResolution').data('value').split(':')[0]);
+  var height = parseInt($('#selectResolution').data('value').split(':')[1]);
+  var frameRate = $('#selectFramerate').data('value').toString();
+  var videoCodec = $('#selectCodec').data('value').toString();
+  var hdrMode = $('#hdrModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
+
+  // Multiplier to adjust bitrate based on codec efficiency
+  // Sweet-spot formula reference: https://www.reddit.com/r/MoonlightStreaming/comments/1gg2cdy/sweet_spot_bitrate/
+  var codecMultiplier = {
+    "H264": 1.0,
+    "HEVC": 0.6,
+    "AV1": 0.4
+  }[videoCodec];
+
+  // Bitrate factor depends on HDR state
+  var bitrateFactor = hdrMode ? 6630.5 : 8309;
+
+  // Calculate optimized bitrate based on resolution, framerate, codec efficiency, and HDR state
+  var baseBitrate = width * height * frameRate / bitrateFactor;
+  var finalBitrate = Math.round(baseBitrate * codecMultiplier);
+
+  // Apply the default bitrate value in case of invalid calculation
+  if (finalBitrate <= 0) {
+    finalBitrate = 10;
+  }
+
+  // Set the bitrate slider value based on the calculated optimized bitrate
+  $('#bitrateSlider')[0].MaterialSlider.change(finalBitrate / 1000);
 
   // Update the bitrate value
   saveBitrate();
@@ -2925,6 +2962,10 @@ function updateVideoCodec(chosenCodecId, chosenCodecValue) {
   console.log('%c[index.js, updateVideoCodec]', 'color: green;', 'Saving video codec value: ' + chosenCodecValue);
   storeData('videoCodec', chosenCodecValue, null);
 
+  // Update the bitrate value based on the selected codec
+  if ($('#optimizeBitrateSwitch').prop('checked')) {
+    optimizeBitratePresets();
+  }
   // Trigger warning check after changing video codec
   warnVideoCodec();
 }
@@ -2981,6 +3022,11 @@ function updateHdrMode() {
     const chosenHdrMode = $('#hdrModeSwitch').parent().hasClass('is-checked');
     console.log('%c[index.js, updateHdrMode]', 'color: green;', 'Saving HDR mode state: ' + chosenHdrMode);
     storeData('hdrMode', chosenHdrMode, null);
+
+    // Update the bitrate value based on the selected HDR state
+    if ($('#optimizeBitrateSwitch').prop('checked')) {
+      optimizeBitratePresets();
+    }
   }, 100);
 }
 
@@ -3051,9 +3097,20 @@ function handleUnlockAllFps() {
       console.log('%c[index.js, handleUnlockAllFps]', 'color: green;', 'Resetting framerate value to 60 FPS');
       storeData('frameRate', '60', null);
       // Update the bitrate value based on the selected frame rate
-      setBitratePresetValue();
+      $('#optimizeBitrateSwitch').prop('checked') ? optimizeBitratePresets() : standardBitratePresets();
     }
   }
+}
+
+function saveOptimizeBitrate() {
+  setTimeout(() => {
+    const chosenOptimizeBitrate = $('#optimizeBitrateSwitch').parent().hasClass('is-checked');
+    console.log('%c[index.js, saveOptimizeBitrate]', 'color: green;', 'Saving optimize bitrate state: ' + chosenOptimizeBitrate);
+    storeData('optimizeBitrate', chosenOptimizeBitrate, null);
+
+    // Update the bitrate value based on the selected preset mode
+    chosenOptimizeBitrate ? optimizeBitratePresets() : standardBitratePresets();
+  }, 100);
 }
 
 function saveDisableWarnings() {
@@ -3159,6 +3216,10 @@ function restoreDefaultsSettingsValues() {
   const defaultUnlockAllFps = false;
   document.querySelector('#unlockAllFpsBtn').MaterialSwitch.off();
   storeData('unlockAllFps', defaultUnlockAllFps, null);
+
+  const defaultOptimizeBitrate = false;
+  document.querySelector('#optimizeBitrateBtn').MaterialSwitch.off();
+  storeData('optimizeBitrate', defaultOptimizeBitrate, null);
 
   const defaultDisableWarnings = false;
   document.querySelector('#disableWarningsBtn').MaterialSwitch.off();
@@ -3475,6 +3536,17 @@ function loadUserDataCb() {
       document.querySelector('#gameModeBtn').MaterialSwitch.off();
     } else {
       document.querySelector('#gameModeBtn').MaterialSwitch.on();
+    }
+  });
+
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored optimizeBitrate preferences.');
+  getData('optimizeBitrate', function(previousValue) {
+    if (previousValue.optimizeBitrate == null) {
+      document.querySelector('#optimizeBitrateBtn').MaterialSwitch.off(); // Set the default state
+    } else if (previousValue.optimizeBitrate == false) {
+      document.querySelector('#optimizeBitrateBtn').MaterialSwitch.off();
+    } else {
+      document.querySelector('#optimizeBitrateBtn').MaterialSwitch.on();
     }
   });
 
