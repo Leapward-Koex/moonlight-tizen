@@ -1459,7 +1459,7 @@ function fetchLatestRelease() {
   }).then(data => {
     // Get the latest version and release notes from the released update
     let latestVersion = data.tag_name.startsWith('v') ? data.tag_name.slice(1) : data.tag_name;
-    const releaseNotes = extractReleaseNotes(data.body) || 'No relevant changes found.';
+    const releaseNotes = extractReleaseNotes(data.body) || '• No relevant changes found.';
     return { latestVersion, releaseNotes };
   });
 }
@@ -1485,8 +1485,25 @@ function checkVersionUpdate(currentVersion, latestVersion) {
 
 // Extract only the release notes section from the released update
 function extractReleaseNotes(releaseNotes) {
+  // Extract the "What's Changed" section and exclude everything after "Full Changelog"
   const match = releaseNotes.match(/## What's Changed:\r?\n\r?\n([\s\S]+?)(?:\r?\n\r?\n\*\*Full Changelog\*\*|$)/);
-  return match ? match[1].split('\n').map(line => line.replace(/^-\s/, '• ')).join('<br>') : null;
+  // Return null if release notes section is not found or does not match expected format
+  if (!match) {
+    return null;
+  }
+  // Clean and format each release note line into a user-friendly bullet list
+  return match[1].split('\n').map(line => {
+	  let cleaned = line.trim();
+	  // Remove contributor attribution and PR references
+	  cleaned = cleaned.replace(/\s+by\s+@[^]+$/i, '');
+	  // Convert list item to bullet point
+	  cleaned = cleaned.replace(/^-\s*/, '• ');
+	  // Add trailing period if missing
+	  if (cleaned && !cleaned.endsWith('.')) {
+	    cleaned += '.';
+	  }
+	  return cleaned;
+  }).filter(line => line !== '').join('<br>');
 }
 
 // Format the update timestamp into a readable string as "dd/mm/yyyy hh:mm"
