@@ -1,10 +1,16 @@
 // Initialize global variables and constants
+var appInfo = tizen.application.getAppInfo(); // Retrieve the application information
+var platformVer = tizen.systeminfo.getCapability("http://tizen.org/feature/platform.version"); // Retrieve the device platform version
+var modelSeries = webapis.productinfo.getModel(); // Retrieve the device model series
+var modelName = webapis.productinfo.getRealModel(); // Retrieve the device model name
+var modelGroup = webapis.productinfo.getModelCode(); // Retrieve the device model group
+var is4kPanel = webapis.productinfo.isUdPanelSupported(); // Check if the device supports 4K panel
+var isHdrCapable = webapis.avinfo.isHdrTvSupport(); // Check if the device supports HDR
 var hosts = {}; // Hosts is an associative array of NvHTTP objects, keyed by server UID
 var activePolls = {}; // Hosts currently being polled. An associated array of polling IDs, keyed by server UID
 var pairingCert; // Loads the generated certificate
 var myUniqueid = '0123456789ABCDEF'; // Use the same UID as other Moonlight clients to allow them to quit each other's games
 var api; // The `api` should only be set if we're in a host-specific screen, on the initial screen it should always be null
-var isPlatformVer = parseFloat(tizen.systeminfo.getCapability("http://tizen.org/feature/platform.version")); // Retrieve the Tizen platform version
 var isInGame = false; // Flag indicating whether the game has started, initial value is false
 var isDialogOpen = false; // Flag indicating whether the dialog is open, initial value is false
 var isGamepadActive = false; // Flag indicating whether the gamepad input is active, initial value is false
@@ -1566,15 +1572,12 @@ function updateAppButton(latestVersion) {
   // Attach the click event listener to the Update App button
   updateAppBtn.off('click');
   updateAppBtn.on('click', function() {
-    // Get current app version
-    const currentVersion = tizen.application.getAppInfo().version;
-
     console.log('%c[index.js, updateAppButton]', 'color: green;', 'Checking for new update release notes...');
     // Fetch the latest release data from the GitHub API
     fetchLatestRelease().then(({ latestVersion, releaseNotes }) => {
       setTimeout(() => {
         // Check if a new version update is available
-        if (checkVersionUpdate(currentVersion, latestVersion)) {
+        if (checkVersionUpdate(appInfo.version, latestVersion)) {
           // Show the Update Moonlight dialog with new version and release notes to inform user to update the app
           updateAppDialog(latestVersion, releaseNotes);
         }
@@ -1660,16 +1663,13 @@ function updateAppDialog(latestVersion, releaseNotes) {
 
 // Check for updates when the Check for Updates button is pressed
 function checkForAppUpdates() {
-  // Get current app version
-  const currentVersion = tizen.application.getAppInfo().version;
-
   console.log('%c[index.js, checkForAppUpdates]', 'color: green;', 'Checking for new application updates...');
   snackbarLog('Checking for available Moonlight updates...');
   // Fetch the latest release data from the GitHub API
   fetchLatestRelease().then(({ latestVersion, releaseNotes }) => {
     setTimeout(() => {
       // Check if a new version update is available
-      if (checkVersionUpdate(currentVersion, latestVersion)) {
+      if (checkVersionUpdate(appInfo.version, latestVersion)) {
         // Show the Update Moonlight dialog with new version and release notes to inform user to update the app
         updateAppDialog(latestVersion, releaseNotes);
       } else {
@@ -1696,15 +1696,12 @@ function checkForAppUpdatesAtStartup() {
 
     // Check if enough time has passed since the last update check
     if (!lastChecked || currentTime - lastChecked > UPDATE_INTERVAL) {
-      // Get current app version
-      const currentVersion = tizen.application.getAppInfo().version;
-
       console.log('%c[index.js, checkForAppUpdatesAtStartup]', 'color: green;', 'Performing auto-check for new application updates...');
       // Fetch the latest release data from the GitHub API
       fetchLatestRelease().then(({ latestVersion }) => {
         setTimeout(() => {
           // Check if a new version update is available
-          if (checkVersionUpdate(currentVersion, latestVersion)) {
+          if (checkVersionUpdate(appInfo.version, latestVersion)) {
             // Show snackbar message with new version to inform user to update the app
             snackbarLogLong(`🚀 Version ${latestVersion} is now available! Check out the latest features & improvements.`);
             // Create and display the Update App button with tooltip and additional layout spacer
@@ -3062,16 +3059,16 @@ function saveGameMode() {
     storeData('gameMode', chosenGameMode, null);
 
     // Warning for Tizen 9.0 platform when enabling game mode
-    if (isPlatformVer === 9.0 && chosenGameMode) {
+    if (parseFloat(platformVer) === 9.0 && chosenGameMode) {
       // Show the Warning dialog and push the view
       setTimeout(() => {
         // Show a warning message when enabling game mode on Tizen 9.0 platform
         warningDialog('Compatibility Warning',
-          'Game Mode (Ultra Low Latency) is not compatible with Tizen ' + isPlatformVer + ' due to platform changes introduced by Samsung. Enabling this option may result in video freezing on the first rendered frame, black screen, unstable performance, and other streaming issues.<br><br>' +
+          'Game Mode (Ultra Low Latency) is not compatible with Tizen ' + platformVer + ' due to platform changes introduced by Samsung. Enabling this option may result in video freezing on the first rendered frame, black screen, unstable performance, and other streaming issues.<br><br>' +
           'For more information about this incompatibility, including available workarounds and potential limitations, please refer to the <b>Known Issues &amp; Limitations</b> page on the Wiki.'
         );
       }, 250);
-    } else if (isPlatformVer < 9.0 && !chosenGameMode) { // Warning other Tizen versions when disabling game mode
+    } else if (parseFloat(platformVer) < 9.0 && !chosenGameMode) { // Warning other Tizen versions when disabling game mode
       // Show a warning message when disabling game mode
       snackbarLogLong('Warning: Disabling game mode may increase latency and affect your game streaming performance!');
     }
@@ -3218,7 +3215,7 @@ function restoreDefaultsSettingsValues() {
   storeData('fullRange', defaultFullRange, null);
 
   // Reset default Game Mode based on Tizen platform version
-  if (isPlatformVer === 9.0) {
+  if (parseFloat(platformVer) === 9.0) {
     // Disable for Tizen 9.0 to avoid compatibility issues
     const incompatibleGameMode = false;
     document.querySelector('#gameModeBtn').MaterialSwitch.off();
@@ -3300,33 +3297,20 @@ function loadSystemInfo() {
 
   // Get the system information from the TV
   if (systemInfoPlaceholder) {
-    var appName = tizen.application.getAppInfo();
-    console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'App Name: ' + (appName.name ? appName.name : 'Unknown') + ' Game Streaming');
-    var appVer = tizen.application.getAppInfo();
-    console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'App Version: ' + (appVer.version ? appVer.version : 'Unknown'));
-    var platformVer = tizen.systeminfo.getCapability("http://tizen.org/feature/platform.version");
+    console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'App Version: ' + appInfo.name + ' v' + appInfo.version);
     console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'Platform Version: Tizen ' + (platformVer ? platformVer : 'Unknown'));
-    var tvModelName = webapis.productinfo.getModel();
-    console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'TV Model Name: ' + (tvModelName ? tvModelName : 'Unknown'));
-    var tvModelFullName = webapis.productinfo.getRealModel();
-    console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'TV Model Full Name: ' + (tvModelFullName ? tvModelFullName : 'Unknown'));
-    var tvModelCode = webapis.productinfo.getModelCode();
-    console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'TV Model Code: ' + (tvModelCode ? tvModelCode : 'Unknown'));
-    var is4kPanelSupported = webapis.productinfo.isUdPanelSupported();
-    console.log('%c[index.js, loadSystemInfo]', 'color: green;', '4K Panel: ' + (is4kPanelSupported ? 'Supported' : 'Unsupported'));
-    var isHdrCapabilitySupported = webapis.avinfo.isHdrTvSupport();
-    console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'HDR Capability: ' + (isHdrCapabilitySupported ? 'Supported' : 'Unsupported'));
-
+    console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'TV Model Series: ' + (modelSeries ? modelSeries : 'Unknown'));
+    console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'TV Model Name: ' + (modelName ? modelName : 'Unknown'));
+    console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'TV Model Group: ' + (modelGroup ? modelGroup : 'Unknown'));
+    console.log('%c[index.js, loadSystemInfo]', 'color: green;', '4K Panel: ' + (is4kPanel ? 'Yes' : 'No'));
+    console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'HDR Capable: ' + (isHdrCapable ? 'Yes' : 'No'));
     // Insert the system information into the placeholder
     systemInfoPlaceholder.innerText =
-      'App Name: ' + (appName.name ? appName.name : 'Unknown') + ' Game Streaming' + '\n' +
-      'App Version: ' + (appVer.version ? appVer.version : 'Unknown') + '\n' +
+      'App Version: ' + appInfo.name + ' v' + appInfo.version + '\n' +
       'Platform Version: Tizen ' + (platformVer ? platformVer : 'Unknown') + '\n' +
-      'TV Model Name: ' + (tvModelName ? tvModelName : 'Unknown') + '\n' +
-      'TV Model Full Name: ' + (tvModelFullName ? tvModelFullName : 'Unknown') + '\n' +
-      'TV Model Code: ' + (tvModelCode ? tvModelCode : 'Unknown') + '\n' +
-      '4K Panel: ' + (is4kPanelSupported ? 'Supported' : 'Unsupported') + '\n' +
-      'HDR Capability: ' + (isHdrCapabilitySupported ? 'Supported' : 'Unsupported');
+      'TV Model Series: ' + (modelSeries ? modelSeries : 'Unknown') + '\n' +
+      'TV Model Name: ' + (modelName ? modelName : 'Unknown') + '\n' +
+      'TV Model Group: ' + (modelGroup ? modelGroup : 'Unknown');
   } else {
     console.error('%c[index.js, loadSystemInfo]', 'color: green;', 'Error: Failed to load system information!');
     systemInfoPlaceholder.innerText = 'Failed to load system information!';
@@ -3544,7 +3528,7 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored gameMode preferences.');
   getData('gameMode', function(previousValue) {
     if (previousValue.gameMode == null) {
-      if (isPlatformVer === 9.0) {
+      if (parseFloat(platformVer) === 9.0) {
         document.querySelector('#gameModeBtn').MaterialSwitch.off(); // Disable for Tizen 9.0 to avoid compatibility issues
       } else {
         document.querySelector('#gameModeBtn').MaterialSwitch.on(); // Set the default state
