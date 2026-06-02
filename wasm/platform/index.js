@@ -23,6 +23,8 @@ var repeatAction = null; // Flag indicating whether the repeat action is set, in
 var lastInvokeTime = 0; // Flag indicating the last invoke time, initial value is 0
 var repeatTimeout = null; // Flag indicating whether the repeat timeout is set, initial value is null
 var navigationTimeout = null; // Flag indicating whether the navigation timeout is set, initial value is null
+const BUILD_TYPE = '__BUILD_TYPE__'; // Placeholder for build type, which should be replaced during the build process
+const BUILD_COMMIT = '__BUILD_COMMIT__'; // Placeholder for build commit, which should be replaced during the build process
 const REPEAT_DELAY = 350; // Repeat delay set to 350ms (milliseconds)
 const REPEAT_INTERVAL = 100; // Repeat interval set to 100ms (milliseconds)
 const ACTION_THRESHOLD = 0.5; // Threshold for initial navigation set to 0.5
@@ -158,6 +160,16 @@ function changeUiModeForWasmLoad() {
 
 function moduleDidLoad() {
   loadHTTPCerts();
+}
+
+// Formats the build version string based on the build type and commit information
+function getBuildVersion(version) {
+  // Append pre-release identifier and short commit SHA to the version number for development builds
+  if (BUILD_TYPE === 'development' && BUILD_COMMIT) {
+    return `${version} (pre-${BUILD_COMMIT})`;
+  }
+  // Return only the version number without any additional metadata for production builds
+  return version;
 }
 
 // Handles repeated execution of the current action based on a specified interval
@@ -3294,10 +3306,11 @@ function initSpecialKeys() {
 function loadSystemInfo() {
   console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'Loading system information...');
   const systemInfoPlaceholder = document.getElementById('systemInfoBtn');
+  const buildVer = getBuildVersion(appInfo.version);
 
   // Get the system information from the TV
   if (systemInfoPlaceholder) {
-    console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'App Version: ' + appInfo.name + ' v' + appInfo.version);
+    console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'App Version: ' + appInfo.name + ' v' + buildVer);
     console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'Platform Version: Tizen ' + (platformVer ? platformVer : 'Unknown'));
     console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'TV Model Series: ' + (modelSeries ? modelSeries : 'Unknown'));
     console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'TV Model Name: ' + (modelName ? modelName : 'Unknown'));
@@ -3306,7 +3319,7 @@ function loadSystemInfo() {
     console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'HDR Capable: ' + (isHdrCapable ? 'Yes' : 'No'));
     // Insert the system information into the placeholder
     systemInfoPlaceholder.innerText =
-      'App Version: ' + appInfo.name + ' v' + appInfo.version + '\n' +
+      'App Version: ' + appInfo.name + ' v' + buildVer + '\n' +
       'Platform Version: Tizen ' + (platformVer ? platformVer : 'Unknown') + '\n' +
       'TV Model Series: ' + (modelSeries ? modelSeries : 'Unknown') + '\n' +
       'TV Model Name: ' + (modelName ? modelName : 'Unknown') + '\n' +
