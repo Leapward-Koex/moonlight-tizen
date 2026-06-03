@@ -134,6 +134,8 @@ function elementId(target) {
 function focusElement(target) {
   const element = resolveElement(target);
   const listener = document.getElementById('listener');
+  // Remove focus from the currently focused element first
+  blurElement(document.activeElement);
   // Check if the element exists before adding focus
   if (!element) {
     console.error('%c[navigation.js, focusElement]', 'color: gray;', 'Cannot focus the unresolved target:', target);
