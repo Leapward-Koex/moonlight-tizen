@@ -3232,6 +3232,8 @@ function restoreDefaultsSettingsValues() {
     const incompatibleGameMode = false;
     document.querySelector('#gameModeBtn').MaterialSwitch.off();
     storeData('gameMode', incompatibleGameMode, null);
+  } else if (parseFloat(platformVer) === 5.5) {
+    // Keep disabled for Tizen 5.5 due to lack of support
   } else {
     // Enable for other Tizen platform versions
     const defaultGameMode = true;
@@ -3543,6 +3545,9 @@ function loadUserDataCb() {
     if (previousValue.gameMode == null) {
       if (parseFloat(platformVer) === 9.0) {
         document.querySelector('#gameModeBtn').MaterialSwitch.off(); // Disable for Tizen 9.0 to avoid compatibility issues
+      } else if (parseFloat(platformVer) === 5.5) {
+        document.querySelector('#gameModeBtn').MaterialSwitch.off(); // Disable for Tizen 5.5 due to lack of support
+        document.querySelector('#gameModeBtn').MaterialSwitch.disable(); // Disable the switch to prevent user interaction
       } else {
         document.querySelector('#gameModeBtn').MaterialSwitch.on(); // Set the default state
       }

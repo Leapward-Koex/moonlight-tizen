@@ -56,6 +56,16 @@ function clickElement(target) {
   // Prevent clicking if the element is disabled based on common disabled states
   if (element.disabled || element.getAttribute('aria-disabled') === 'true' || element.classList.contains('is-disabled')) {
     console.warn('%c[navigation.js, clickElement]', 'color: gray;', 'Cannot click the disabled target element:', element);
+    // Check if the disabled element is the Game Mode switch
+    if (element.id === 'gameModeBtn' && parseFloat(platformVer) === 5.5) {
+      // Show a warning message when attempting to enable game mode on Tizen 5.5 platform
+      setTimeout(() => {
+        warningDialog('Unsupported Feature',
+          'Game Mode (Ultra Low Latency) is not supported on Tizen ' + platformVer + ' due to platform limitations and lack of support from the WASM player. Attempting to enable this option will have no effect, as the decoder will force a fallback to standard Low Latency mode to maintain streaming stability.<br><br>' +
+          'Since the Game Mode cannot be enabled, you may experience slightly higher latency while streaming. To further reduce latency, it is highly recommended to open your TV\'s Picture Settings menu and disable post-processing features such as <b>Picture Clarity</b>, <b>Contrast Enhancer</b>, and other video enhancements.'
+        );
+      }, 250);
+    }
     return;
   }
   // If inside an MDL menu, use the menu item itself for proper behavior

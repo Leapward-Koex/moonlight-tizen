@@ -904,6 +904,11 @@ body {
     white-space: pre-line;
     box-sizing: border-box;
 }
+#gameModeBtn.is-disabled.hovered, #gameModeBtn.is-disabled:hover,
+#gameModeBtn.is-disabled:focus, #gameModeBtn.is-disabled:active {
+    box-shadow: 0 0 2px 3px rgba(170, 170, 170, 1) !important;
+    cursor: not-allowed;
+}
 .mdl-menu__outline {
     color: #fff;
     background-color: #333846;
