@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.12.0
+
+### Added
+- Introduced a new 'Optimize bitrate presets' setting to calculate optimal bitrate values
+- Implemented handling of standard and optimized bitrate presets based on toggle state
+
+### Changed
+- Improved release notes extraction and formatting for better readability
+- Updated 'System info' placeholder and reduced redundant API calls across the codebase
+- Updated versioning logic to inject build metadata for identifying pre-releases
+- Disabled 'Game mode' setting for Tizen 5.5 due to lack of support from WASM player
+- Updated bot-stale workflow to restrict exempted issue labels
+- Configured workflow to close issues if the author does not respond to a request for more information
+
+### Fixed
+- Fixed broken OpenSSL download URL in Emscripten SDK ports
+- Fixed an issue where multiple elements could remain focused during navigation
+
 ## v1.11.1
 
 ### Added
