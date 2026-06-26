@@ -314,7 +314,10 @@ class ListView {
   prevOption() {
     const array = this.func();
     unmark(array[this.index]);
-    this.index = (this.index - 1 + array.length) % array.length;
+    let start = this.index;
+    do {
+      this.index = (this.index - 1 + array.length) % array.length;
+    } while (array[this.index].hasAttribute('disabled') && this.index !== start);
     mark(array[this.index]);
     return array[this.index];
   }
@@ -322,7 +325,10 @@ class ListView {
   nextOption() {
     const array = this.func();
     unmark(array[this.index]);
-    this.index = (this.index + 1) % array.length;
+    let start = this.index;
+    do {
+      this.index = (this.index + 1) % array.length;
+    } while (array[this.index].hasAttribute('disabled') && this.index !== start);
     mark(array[this.index]);
     return array[this.index];
   }
