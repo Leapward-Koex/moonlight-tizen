@@ -91,6 +91,7 @@ function NvHTTP(address, clientUid, userEnteredAddress = '', macAddress) {
   this.httpPort = 0;
   this.externalPort = 0;
   this.clientUid = clientUid;
+  this.isNvidiaServerSoftware = false;
   this.serverUid = '';
   this.ppkstr = null;
   this._pollCount = 0;
@@ -135,6 +136,10 @@ function _base64ToArrayBuffer(base64) {
 }
 
 NvHTTP.prototype = {
+  getUid: function() {
+    return this.isNvidiaServerSoftware ? '0123456789ABCDEF' : this.clientUid;
+  },
+
   // Refreshes the server info using the base URL. This is useful for testing whether we can successfully ping a host at the base URL
   refreshServerInfo: function() {
     if (this.ppkstr == null) {
@@ -389,6 +394,7 @@ NvHTTP.prototype = {
     var serverStatus = $root.find('state').text().trim();
     if (serverStatus) {
       this.serverState = serverStatus;
+      this.isNvidiaServerSoftware = serverStatus.indexOf('MJOLNIR') !== -1;
     }
 
     // GFE 2.8 started keeping current game set to the last game played. As a result, it no longer
@@ -592,11 +598,11 @@ NvHTTP.prototype = {
         return true;
       }
       return sendMessage('pair', [
-        this.serverMajorVersion.toString(), this.address, this.httpPort, randomNumber
+        this.serverMajorVersion.toString(), this.address, this.httpPort, randomNumber, this.getUid()
       ]).then(function(ppkstr) {
         this.ppkstr = ppkstr;
         return sendMessage('openUrl', [
-          this._baseUrlHttps + '/pair?uniqueid=' + this.clientUid + '&devicename=roth&updateState=1&phrase=pairchallenge', this.ppkstr, false
+          this._baseUrlHttps + '/pair?uniqueid=' + this.getUid() + '&devicename=roth&updateState=1&phrase=pairchallenge', this.ppkstr, false
         ]).then(function(ret) {
           $xml = this._parseXML(ret);
           this.paired = $xml.find('paired').html() == '1';
@@ -611,7 +617,7 @@ NvHTTP.prototype = {
   },
 
   _buildUidStr: function() {
-    return 'uniqueid=' + this.clientUid + '&uuid=' + guuid();
+    return 'uniqueid=' + this.getUid() + '&uuid=' + guuid();
   },
 
   _parseXML: function(xmlData) {
