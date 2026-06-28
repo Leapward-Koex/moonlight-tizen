@@ -80,7 +80,7 @@ String.prototype.toHex = function() {
 }
 
 function NvHTTP(address, clientUid, userEnteredAddress = '', macAddress) {
-  console.log('%c[utils.js, NvHTTP]', 'color: gray;', 'NvHTTP Object: \n' + this);
+  // Constructor start
   this.hostname = address;
   this.address = address;
   this.userEnteredAddress = userEnteredAddress; // if the user entered an address, we keep it on hand to try when polling
@@ -108,6 +108,7 @@ function NvHTTP(address, clientUid, userEnteredAddress = '', macAddress) {
   this.supportedDisplayModes = {}; // key: y-resolution:x-resolution, value: array of supported frame rates
 
   _self = this;
+  console.log('%c[utils.js, NvHTTP]', 'color: gray;', 'NvHTTP Object: \n' + this);
 };
 
 function _arrayBufferToBase64(buffer) {
