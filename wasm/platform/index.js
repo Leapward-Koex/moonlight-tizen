@@ -527,8 +527,6 @@ function filterUnsupportedResolutions() {
       if (resWidth > maxSupportedWidth) {
         $(this).addClass('mdl-menu__item--full-bleed-divider unsupported-resolution');
         $(this).attr('disabled', 'disabled');
-        $(this).css('pointer-events', 'none');
-        $(this).css('opacity', '0.5');
         $(this).text($(this).text() + ' [Unsupported]');
       }
     }
