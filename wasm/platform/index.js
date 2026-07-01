@@ -4,7 +4,28 @@ var platformVer = tizen.systeminfo.getCapability("http://tizen.org/feature/platf
 var modelSeries = webapis.productinfo.getModel(); // Retrieve the device model series
 var modelName = webapis.productinfo.getRealModel(); // Retrieve the device model name
 var modelGroup = webapis.productinfo.getModelCode(); // Retrieve the device model group
-var is4kPanel = webapis.productinfo.isUdPanelSupported(); // Check if the device supports 4K panel
+var is4kPanel = typeof webapis.productinfo.isUdPanelSupported === 'function' && webapis.productinfo.isUdPanelSupported(); // Check if the device supports 4K panel
+var is8kPanel = typeof webapis.productinfo.is8KPanelSupported === 'function' && webapis.productinfo.is8KPanelSupported(); // Check if the device supports 8K panel
+
+var maxSupportedWidth = 1920;
+var maxSupportedHeight = 1080;
+try {
+  if (is8kPanel) {
+    maxSupportedWidth = 7680;
+    maxSupportedHeight = 4320;
+  } else if (is4kPanel) {
+    maxSupportedWidth = 3840;
+    maxSupportedHeight = 2160;
+  } else {
+    // Check if the physical screen resolution happens to be 1440p
+    if (window.screen.width >= 2560 || window.screen.height >= 1440) {
+      maxSupportedWidth = 2560;
+      maxSupportedHeight = 1440;
+    }
+  }
+} catch (e) {
+  console.error("Error fetching panel capabilities: " + e.message);
+}
 var isHdrCapable = webapis.avinfo.isHdrTvSupport(); // Check if the device supports HDR
 var hosts = {}; // Hosts is an associative array of NvHTTP objects, keyed by server UID
 var activePolls = {}; // Hosts currently being polled. An associated array of polling IDs, keyed by server UID
@@ -38,6 +59,7 @@ const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // Automatic check for updates inte
 function attachListeners() {
   changeUiModeForWasmLoad();
   initIpAddressFields();
+  filterUnsupportedResolutions();
 
   $('#addHostContainer').on('click', addHostDialog);
   $('#settingsBtn').on('click', showSettings);
@@ -45,7 +67,7 @@ function attachListeners() {
   $('#goBackBtn').on('click', showHosts);
   $('#restoreDefaultsBtn').on('click', restoreDefaultsDialog);
   $('#quitRunningAppBtn').on('click', quitAppDialog);
-  $('.videoResolutionMenu li').on('click', saveResolution);
+  $('.videoResolutionMenu li:not(.unsupported-resolution)').on('click', saveResolution);
   $('.videoFramerateMenu li').on('click', saveFramerate);
   $('#bitrateSlider').on('input', saveBitrate);
   $('#framePacingSwitch').on('click', saveFramePacing);
@@ -501,6 +523,20 @@ function initIpAddressFields() {
   ipAddressFields.forEach(ipAddressField => {
     const element = document.getElementById(ipAddressField.element);
     populateSelectFields(element, 0, 255, ipAddressField.selectedValue);
+  });
+}
+
+function filterUnsupportedResolutions() {
+  $('.videoResolutionMenu li').each(function() {
+    var resData = $(this).data('value');
+    if (resData) {
+      var resWidth = parseInt(resData.split(':')[0], 10);
+      if (resWidth > maxSupportedWidth) {
+        $(this).addClass('mdl-menu__item--full-bleed-divider unsupported-resolution');
+        $(this).attr('disabled', 'disabled');
+        $(this).text($(this).text() + ' [Unsupported]');
+      }
+    }
   });
 }
 
@@ -3358,6 +3394,11 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored resolution preferences.');
   getData('resolution', function(previousValue) {
     if (previousValue.resolution != null) {
+      var resWidth = parseInt(previousValue.resolution.split(':')[0], 10);
+      if (resWidth > maxSupportedWidth) {
+        previousValue.resolution = maxSupportedWidth >= 3840 ? '3840:2160' : '1920:1080';
+        storeData('resolution', previousValue.resolution, null);
+      }
       $('.videoResolutionMenu li').each(function() {
         if ($(this).data('value') === previousValue.resolution) {
           // Update the video resolution field based on the given value
