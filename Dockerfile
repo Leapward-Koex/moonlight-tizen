@@ -33,11 +33,11 @@ ENV PATH=/home/moonlight/tizen-studio/tools/ide/bin:/home/moonlight/tizen-studio
 RUN tizen certificate \
 	-a Moonlight \
 	-f Moonlight \
-	-p 1234
+	-p 123456
 RUN tizen security-profiles add \
 	-n Moonlight \
 	-a /home/moonlight/tizen-studio-data/keystore/author/Moonlight.p12 \
-	-p 1234
+	-p 123456
 
 # Workaround to package applications without gnome-keyring
 # These steps must be repeated each time before packaging an application
@@ -98,7 +98,7 @@ RUN echo \
 	'set timeout -1\n' \
 	'spawn tizen package -t wgt -- build/widget\n' \
 	'expect "Author password:"\n' \
-	'send -- "1234\\r"\n' \
+	'send -- "123456\\r"\n' \
 	'expect "Yes: (Y), No: (N) ?"\n' \
 	'send -- "N\\r"\n' \
 	'expect eof\n' \
