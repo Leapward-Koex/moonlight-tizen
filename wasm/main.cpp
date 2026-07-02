@@ -512,7 +512,9 @@ void stun(int callbackId) {
 }
 
 void pair(int callbackId, std::string serverMajorVersion, std::string address, int httpPort, std::string randomNumber, std::string uniqueId) {
-  if (g_UniqueId) free(g_UniqueId);
+  if (g_UniqueId) {
+    free(g_UniqueId);
+  }
   g_UniqueId = strdup(uniqueId.c_str());
   g_Instance->Pair(callbackId, serverMajorVersion, address, httpPort, randomNumber);
 }
