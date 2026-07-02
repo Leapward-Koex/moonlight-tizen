@@ -30,7 +30,7 @@ var isHdrCapable = webapis.avinfo.isHdrTvSupport(); // Check if the device suppo
 var hosts = {}; // Hosts is an associative array of NvHTTP objects, keyed by server UID
 var activePolls = {}; // Hosts currently being polled. An associated array of polling IDs, keyed by server UID
 var pairingCert; // Loads the generated certificate
-var myUniqueid = '0123456789ABCDEF'; // Use the same UID as other Moonlight clients to allow them to quit each other's games
+var myUniqueid;
 var api; // The `api` should only be set if we're in a host-specific screen, on the initial screen it should always be null
 var isInGame = false; // Flag indicating whether the game has started, initial value is false
 var isDialogOpen = false; // Flag indicating whether the dialog is open, initial value is false
@@ -3663,13 +3663,12 @@ function loadHTTPCertsCb() {
     }
 
     getData('uniqueid', function(savedUniqueid) {
-      // See comment on myUniqueid
-      /*if (savedUniqueid.uniqueid != null) { // We have a saved uniqueid
+      if (savedUniqueid && savedUniqueid.uniqueid != null) { // We have a saved uniqueid
         myUniqueid = savedUniqueid.uniqueid;
       } else {
         myUniqueid = uniqueid();
         storeData('uniqueid', myUniqueid, null);
-      }*/
+      }
 
       if (!pairingCert) { // We couldn't load a cert. Let's attempt to generate a new one.
         console.warn('%c[index.js, loadHTTPCertsCb]', 'color: green;', 'Warning: Local certificate not found! Generating a new one...');

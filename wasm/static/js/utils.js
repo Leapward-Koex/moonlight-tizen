@@ -104,6 +104,7 @@ function NvHTTP(address, clientUid, userEnteredAddress = '', macAddress) {
   this.gfeVersion = '';
   this.serverMajorVersion = 0;
   this.serverState = '';
+  this.isNvidiaServerSoftware = false;
   this.gputype = '';
   this.supportedDisplayModes = {}; // key: y-resolution:x-resolution, value: array of supported frame rates
 
@@ -136,6 +137,10 @@ function _base64ToArrayBuffer(base64) {
 }
 
 NvHTTP.prototype = {
+  getUid: function() {
+    return this.isNvidiaServerSoftware ? '0123456789ABCDEF' : this.clientUid;
+  },
+
   // Refreshes the server info using the base URL. This is useful for testing whether we can successfully ping a host at the base URL
   refreshServerInfo: function() {
     if (this.ppkstr == null) {
@@ -306,6 +311,7 @@ NvHTTP.prototype = {
     string += 'gfe version: ' + this.gfeVersion + '\r\n';
     string += 'server major version: ' + this.serverMajorVersion + '\r\n';
     string += 'server state: ' + this.serverState + '\r\n';
+    string += 'nvidia server software: ' + this.isNvidiaServerSoftware + '\r\n';
     string += 'gpu type: ' + this.gputype + '\r\n';
     string += 'supported display modes: ' + '\r\n';
 
@@ -390,6 +396,8 @@ NvHTTP.prototype = {
     var serverStatus = $root.find('state').text().trim();
     if (serverStatus) {
       this.serverState = serverStatus;
+      // Detect GFE by its historical "MJOLNIR" codename, which was never used by any third-party server
+      this.isNvidiaServerSoftware = serverStatus.includes('MJOLNIR');
     }
 
     // GFE 2.8 started keeping current game set to the last game played. As a result, it no longer
@@ -593,11 +601,11 @@ NvHTTP.prototype = {
         return true;
       }
       return sendMessage('pair', [
-        this.serverMajorVersion.toString(), this.address, this.httpPort, randomNumber
+        this.serverMajorVersion.toString(), this.address, this.httpPort, randomNumber, this.getUid()
       ]).then(function(ppkstr) {
         this.ppkstr = ppkstr;
         return sendMessage('openUrl', [
-          this._baseUrlHttps + '/pair?uniqueid=' + this.clientUid + '&devicename=roth&updateState=1&phrase=pairchallenge', this.ppkstr, false
+          this._baseUrlHttps + '/pair?uniqueid=' + this.getUid() + '&devicename=roth&updateState=1&phrase=pairchallenge', this.ppkstr, false
         ]).then(function(ret) {
           $xml = this._parseXML(ret);
           this.paired = $xml.find('paired').html() == '1';
@@ -612,7 +620,7 @@ NvHTTP.prototype = {
   },
 
   _buildUidStr: function() {
-    return 'uniqueid=' + this.clientUid + '&uuid=' + guuid();
+    return 'uniqueid=' + this.getUid() + '&uuid=' + guuid();
   },
 
   _parseXML: function(xmlData) {
