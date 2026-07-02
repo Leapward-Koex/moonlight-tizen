@@ -91,7 +91,6 @@ function NvHTTP(address, clientUid, userEnteredAddress = '', macAddress) {
   this.httpPort = 0;
   this.externalPort = 0;
   this.clientUid = clientUid;
-  this.isNvidiaServerSoftware = false;
   this.serverUid = '';
   this.ppkstr = null;
   this._pollCount = 0;
@@ -105,6 +104,7 @@ function NvHTTP(address, clientUid, userEnteredAddress = '', macAddress) {
   this.gfeVersion = '';
   this.serverMajorVersion = 0;
   this.serverState = '';
+  this.isNvidiaServerSoftware = false;
   this.gputype = '';
   this.supportedDisplayModes = {}; // key: y-resolution:x-resolution, value: array of supported frame rates
 
@@ -310,6 +310,7 @@ NvHTTP.prototype = {
     string += 'gfe version: ' + this.gfeVersion + '\r\n';
     string += 'server major version: ' + this.serverMajorVersion + '\r\n';
     string += 'server state: ' + this.serverState + '\r\n';
+    string += 'nvidia server software: ' + this.isNvidiaServerSoftware + '\r\n';
     string += 'gpu type: ' + this.gputype + '\r\n';
     string += 'supported display modes: ' + '\r\n';
 
@@ -394,7 +395,8 @@ NvHTTP.prototype = {
     var serverStatus = $root.find('state').text().trim();
     if (serverStatus) {
       this.serverState = serverStatus;
-      this.isNvidiaServerSoftware = serverStatus.indexOf('MJOLNIR') !== -1;
+      // Detect GFE by its historical "MJOLNIR" codename, which was never used by any third-party server
+      this.isNvidiaServerSoftware = serverStatus.includes('MJOLNIR');
     }
 
     // GFE 2.8 started keeping current game set to the last game played. As a result, it no longer
