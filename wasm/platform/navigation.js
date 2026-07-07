@@ -1106,7 +1106,8 @@ const Views = {
   AudioSettings: {
     view: new ListView(() => [
       'selectAudio',
-      'audioSyncBtn',
+      'selectAudioPacketDuration',
+      'selectAudioJitter',
       'playHostAudioBtn'
     ]),
     up: function() {
@@ -1136,6 +1137,72 @@ const Views = {
     switch: function() {
       focusElement(this.view.current());
     },
+    enter: function() {
+      mark(this.view.current());
+    },
+    leave: function() {
+      unmark(this.view.current());
+    },
+  },
+  SelectAudioJitterMenu: {
+    isActive: () => isPopupMenuActive('audioJitterMenu'),
+    view: new ListView(() =>
+      document.getElementById('audioJitterMenu')
+      .parentNode.children[3].children[1].children),
+    up: function() {},
+    down: function() {},
+    left: function() {
+      jitterSlider.stepDown();
+      jitterSlider.dispatchEvent(new Event('input'));
+    },
+    right: function() {
+      jitterSlider.stepUp();
+      jitterSlider.dispatchEvent(new Event('input'));
+    },
+    accept: function() {
+      clickElement(this.view.current());
+      closeActiveVisibleMenu();
+      setTimeout(() => focusElement('selectAudioJitter'), 250);
+    },
+    back: function() {
+      closePopupMenu('selectAudioJitter');
+      closeActiveVisibleMenu();
+      focusElement('selectAudioJitter');
+    },
+    press: function() {},
+    switch: function() {},
+    enter: function() {
+      mark(this.view.current());
+    },
+    leave: function() {
+      unmark(this.view.current());
+    },
+  },
+  SelectAudioPacketDurationMenu: {
+    isActive: () => isPopupMenuActive('audioPacketDurationMenu'),
+    view: new ListView(() =>
+      document.getElementById('audioPacketDurationMenu')
+      .parentNode.children[3].children[1].children),
+    up: function() {
+      this.view.prevOption();
+    },
+    down: function() {
+      this.view.nextOption();
+    },
+    left: function() {},
+    right: function() {},
+    accept: function() {
+      clickElement(this.view.current());
+      closeActiveVisibleMenu();
+      setTimeout(() => focusElement('selectAudioPacketDuration'), 250);
+    },
+    back: function() {
+      closePopupMenu('selectAudioPacketDuration');
+      closeActiveVisibleMenu();
+      focusElement('selectAudioPacketDuration');
+    },
+    press: function() {},
+    switch: function() {},
     enter: function() {
       mark(this.view.current());
     },

@@ -34,6 +34,11 @@ using EmssRenderingMode = samsung::wasm::ElementaryMediaStreamSource::RenderingM
 
 MoonlightInstance* g_Instance;
 
+extern "C" {
+int g_AudioPacketDurationOverride = 0;
+int g_AudioJitterMsOverride = 0;
+}
+
 MoonlightInstance::MoonlightInstance()
   : m_OpusDecoder(NULL),
     m_MouseLocked(false),
@@ -47,19 +52,14 @@ MoonlightInstance::MoonlightInstance()
     m_Dispatcher("Curl"),
     m_Mutex(),
     m_EmssStateChanged(),
-    m_EmssAudioStateChanged(),
     m_EmssVideoStateChanged(),
     m_EmssReadyState(EmssReadyState::kDetached),
-    m_AudioStarted(false),
     m_VideoStarted(false),
-    m_AudioSessionId(0),
     m_VideoSessionId(0),
     m_MediaElement("wasm_module"),
     m_Source(nullptr),
     m_SourceListener(this),
-    m_AudioTrackListener(this),
     m_VideoTrackListener(this),
-    m_AudioTrack(),
     m_VideoTrack() {
       m_Dispatcher.start();
     }
@@ -186,6 +186,14 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
     PostToJs("Selecting the fallback server code mode to: SCM_H264");
   }
 
+  // Apply user-selected audio packet duration override. Auto maps to 10 ms
+  // because it is a stable low-latency default on Tizen's Web Audio path.
+  g_AudioPacketDurationOverride = me->m_AudioPacketDuration != 0 ? me->m_AudioPacketDuration : 10;
+
+  // Apply user-selected Web Audio jitter target. Zero means the scheduler uses
+  // its default of 100 ms.
+  g_AudioJitterMsOverride = me->m_AudioJitterMs;
+
   err = LiStartConnection(&serverInfo, &me->m_StreamConfig, &MoonlightInstance::s_ClCallbacks,
     &MoonlightInstance::s_DrCallbacks, &MoonlightInstance::s_ArCallbacks, NULL, 0, NULL, 0);
   if (err != 0) {
@@ -212,7 +220,7 @@ static void HexStringToBytes(const char* str, char* output) {
 MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+  std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats) {
   PostToJs("Setting the Host address to: " + host + ":" + std::to_string(httpPort));
   PostToJs("Setting the Video resolution to: " + width + "x" + height);
@@ -231,7 +239,8 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   PostToJs("Setting the Flip A/B face buttons to: " + std::to_string(flipABfaceButtons));
   PostToJs("Setting the Flip X/Y face buttons to: " + std::to_string(flipXYfaceButtons));
   PostToJs("Setting the Audio configuration to: " + audioConfig);
-  PostToJs("Setting the Audio synchronization to: " + std::to_string(audioSync));
+  PostToJs("Setting the Audio packet duration to: " + (audioPacketDuration ? std::to_string(audioPacketDuration) + " ms" : "auto"));
+  PostToJs("Setting the Audio jitter buffer to: " + (audioJitterMs ? std::to_string(audioJitterMs) + " ms" : "auto (100 ms)"));
   PostToJs("Setting the Play host audio to: " + std::to_string(playHostAudio));
   PostToJs("Setting the Video codec to: " + videoCodec);
   PostToJs("Setting the Video HDR mode to: " + std::to_string(hdrMode));
@@ -343,7 +352,8 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   m_MouseEmulationEnabled = mouseEmulation;
   m_FlipABfaceButtonsEnabled = flipABfaceButtons;
   m_FlipXYfaceButtonsEnabled = flipXYfaceButtons;
-  m_AudioSyncEnabled = audioSync;
+  m_AudioPacketDuration = audioPacketDuration;
+  m_AudioJitterMs = audioJitterMs;
   m_PlayHostAudioEnabled = playHostAudio;
   m_HdrModeEnabled = hdrMode;
   m_FullRangeEnabled = fullRange;
@@ -490,12 +500,12 @@ int main(int argc, char** argv) {
 MessageResult startStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+  std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats) {
   PostToJs("Starting the streaming session...");
   return g_Instance->StartStream(host, httpPort, width, height, fps, bitrate, rikey, rikeyid, appversion, gfeversion, rtspurl, serverCodecModeSupport,
   framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons, audioConfig,
-  audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats);
+  audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats);
 }
 
 MessageResult stopStream() {

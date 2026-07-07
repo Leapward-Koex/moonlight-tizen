@@ -98,6 +98,10 @@ int notifyAudioPortNegotiationComplete(void) {
         return LastSocketFail();
     }
 
+    // Include audio packets already queued by the OS socket buffer in the
+    // initial drop window so startup begins near live audio.
+    firstReceiveTime = PltGetMillis();
+
     // We may receive audio before our threads are started, but that's okay. We'll
     // drop the first 1 second of audio packets to catch up with the backlog.
     int err = PltCreateThread("AudioPing", AudioPingThreadProc, NULL, &udpPingThread);
