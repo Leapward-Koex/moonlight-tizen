@@ -2335,6 +2335,36 @@ function startGame(host, appID) {
     return;
   }
 
+  // Create the AudioContext while still inside the user gesture. Creating it
+  // later from a Promise callback can trip Tizen's autoplay policy and stall.
+  try {
+    if (window._mlAudioCtx) {
+      try {
+        window._mlAudioCtx.close();
+      } catch (e) {}
+    }
+    const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextConstructor) {
+      try {
+        window._mlAudioCtx = new AudioContextConstructor({ sampleRate: 48000, latencyHint: 'interactive' });
+      } catch (e) {
+        window._mlAudioCtx = new AudioContextConstructor();
+      }
+    } else {
+      window._mlAudioCtx = null;
+    }
+  } catch (e) {
+    window._mlAudioCtx = null;
+  }
+  if (window._mlAudioCtx && window._mlAudioCtx.state === 'suspended') {
+    try {
+      window._mlAudioCtx.resume();
+    } catch (e) {}
+  }
+  if (typeof startAudioScheduler === 'function') {
+    startAudioScheduler();
+  }
+
   // Refresh the server info, because the user might have quit the game
   host.refreshServerInfo().then(function(ret) {
     host.getAppById(appID).then(function(appToStart) {
@@ -2443,18 +2473,6 @@ function startGame(host, appID) {
 
       // Shows a loading message to launch the application and start stream mode
       $('#loadingSpinnerMessage').text('Starting ' + appToStart.title + '...');
-      const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
-      if (AudioContextConstructor && !window._mlAudioCtx) {
-        window._mlAudioCtx = new AudioContextConstructor();
-      }
-      if (window._mlAudioCtx && window._mlAudioCtx.state === 'suspended') {
-        try {
-          window._mlAudioCtx.resume();
-        } catch (e) {}
-      }
-      if (typeof startAudioScheduler === 'function') {
-        startAudioScheduler();
-      }
       showStreamMode();
 
       // Check if user wants to resume the already-running app
