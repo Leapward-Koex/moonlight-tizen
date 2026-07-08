@@ -2675,11 +2675,51 @@ function showAppsMode() {
   Navigation.start();
 }
 
+function resetStreamUiState(reason, host, options) {
+  options = options || {};
+  var canShowApps = !!(host && host.paired);
+
+  logDebugBridge('warn', 'resetting stream UI state', {
+    reason: reason,
+    canShowApps: canShowApps,
+    navigateToApps: !!options.navigateToApps,
+    host: getHostDebugSnapshot(host)
+  });
+
+  if (typeof stopAudioScheduler === 'function') {
+    stopAudioScheduler();
+  }
+
+  $('#loadingSpinnerMessage').text('');
+  $('#connection-warnings, #performance-stats').css({
+    display: 'none',
+    background: 'transparent'
+  }).text('');
+  $('#listener').removeClass('fullscreen');
+  $('#main-content').removeClass('fullscreen');
+  $('#loadingSpinner').css('display', 'none');
+  $('#wasmSpinner').css('display', 'none');
+  $('body').css('backgroundColor', '#282C38');
+  $('#wasm_module').css('display', 'none');
+  isInGame = false;
+
+  if (canShowApps && options.navigateToApps) {
+    showApps(host);
+    setTimeout(() => {
+      Navigation.switch();
+      Navigation.change(Views.Apps);
+    }, 1500);
+  } else {
+    showAppsMode();
+  }
+}
+
 // Show the Apps grid
 function showApps(host) {
   // Safety checking should happen before attempting to show the app list
   if (!host || !host.paired) {
     console.error('%c[index.js, showApps]', 'color: green;', 'Error: Unable to initialize the host properly! Host object: ', host);
+    resetStreamUiState('showApps rejected invalid host', null, { navigateToApps: false });
     return;
   } else {
     console.log('%c[index.js, showApps]', 'color: green;', 'Current host object: \n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
@@ -3249,15 +3289,21 @@ function startGame(host, appID) {
             responseLength: getResponseTextLength(launchResult)
           });
           if (status_code != 200) {
-            $('#loadingSpinnerMessage').text('');
             snackbarLogLong('Error ' + status_code + ': ' + status_message);
-            showApps(host);
-            setTimeout(() => {
-              // Scroll to the current game row
-              Navigation.switch();
-              // Switch to Apps view
-              Navigation.change(Views.Apps);
-            }, 1500);
+            resetStreamUiState('host resume returned status ' + status_code + ': ' + status_message, host, { navigateToApps: true });
+            return;
+          }
+          if (!sessionUrl) {
+            logDebugBridge('error', 'host resume response missing session URL', {
+              operation: 'resume',
+              appID: appID,
+              appTitle: appToStart ? appToStart.title : '',
+              statusCode: status_code,
+              statusMessage: status_message,
+              responseLength: getResponseTextLength(launchResult)
+            });
+            snackbarLogLong('Unable to resume stream: host did not return a session URL.');
+            resetStreamUiState('host resume missing session URL', host, { navigateToApps: true });
             return;
           }
           // Start stream request
@@ -3274,14 +3320,17 @@ function startGame(host, appID) {
             audioConfig, audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
             performanceStats
           ]);
-          resumeStartRequest.then(function() {
-            logDebugBridge('info', 'wasm startRequest resolved', resumeStartRequestDetails);
+          return resumeStartRequest.then(function(event) {
+            logDebugBridge('info', 'wasm startRequest connected', Object.assign({
+              attemptId: event && event.attemptId
+            }, resumeStartRequestDetails));
           }, function(error) {
             logDebugBridge('error', 'wasm startRequest rejected', {
               operation: 'resume',
               appID: appID,
               error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(error) : String(error)
             });
+            resetStreamUiState('wasm resume startRequest rejected', host, { navigateToApps: true });
           });
         }, function(failedResumeApp) {
           console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to resume app with id: ' + appID + '\n Returned error was: ' + failedResumeApp + '!');
@@ -3293,13 +3342,7 @@ function startGame(host, appID) {
             host: getHostDebugSnapshot(host)
           });
           snackbarLog('Failed to resume ' + appToStart.title);
-          showApps(host);
-          setTimeout(() => {
-            // Scroll to the current game row
-            Navigation.switch();
-            // Switch to Apps view
-            Navigation.change(Views.Apps);
-          }, 1500);
+          resetStreamUiState('host resume request failed', host, { navigateToApps: true });
           return;
         });
       }
@@ -3339,15 +3382,21 @@ function startGame(host, appID) {
             status_code = 418;
             status_message = 'Audio capture device is missing. Please reinstall the audio drivers.';
           }
-          $('#loadingSpinnerMessage').text('');
           snackbarLogLong('Error ' + status_code + ': ' + status_message);
-          showApps(host);
-          setTimeout(() => {
-            // Scroll to the current game row
-            Navigation.switch();
-            // Switch to Apps view
-            Navigation.change(Views.Apps);
-          }, 1500);
+          resetStreamUiState('host launch returned status ' + status_code + ': ' + status_message, host, { navigateToApps: true });
+          return;
+        }
+        if (!sessionUrl) {
+          logDebugBridge('error', 'host launch response missing session URL', {
+            operation: 'launch',
+            appID: appID,
+            appTitle: appToStart ? appToStart.title : '',
+            statusCode: status_code,
+            statusMessage: status_message,
+            responseLength: getResponseTextLength(launchResult)
+          });
+          snackbarLogLong('Unable to launch stream: host did not return a session URL.');
+          resetStreamUiState('host launch missing session URL', host, { navigateToApps: true });
           return;
         }
         // Start stream request
@@ -3364,14 +3413,17 @@ function startGame(host, appID) {
           audioConfig, audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
           performanceStats
         ]);
-        launchStartRequest.then(function() {
-          logDebugBridge('info', 'wasm startRequest resolved', launchStartRequestDetails);
+        return launchStartRequest.then(function(event) {
+          logDebugBridge('info', 'wasm startRequest connected', Object.assign({
+            attemptId: event && event.attemptId
+          }, launchStartRequestDetails));
         }, function(error) {
           logDebugBridge('error', 'wasm startRequest rejected', {
             operation: 'launch',
             appID: appID,
             error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(error) : String(error)
           });
+          resetStreamUiState('wasm launch startRequest rejected', host, { navigateToApps: true });
         });
       }, function(failedLaunchApp) {
         console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to launch app with id: ' + appID + '\n Returned error was: ' + failedLaunchApp + '!');
@@ -3383,13 +3435,7 @@ function startGame(host, appID) {
           host: getHostDebugSnapshot(host)
         });
         snackbarLog('Failed to launch ' + appToStart.title + '.');
-        showApps(host);
-        setTimeout(() => {
-          // Scroll to the current game row
-          Navigation.switch();
-          // Switch to Apps view
-          Navigation.change(Views.Apps);
-        }, 1500);
+        resetStreamUiState('host launch request failed', host, { navigateToApps: true });
         return;
       });
     });

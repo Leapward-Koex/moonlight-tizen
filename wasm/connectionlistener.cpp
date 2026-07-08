@@ -58,7 +58,14 @@ void MoonlightInstance::ClConnectionStarted(void) {
 }
 
 void MoonlightInstance::ClConnectionTerminated(int errorCode) {
-  ClLogMessage("Connection listener reports stream terminated, error=%d\n", errorCode);
+  ClLogMessage("Connection listener reports stream terminated, error=%d, lifecycle=%s, attemptId=%u\n",
+    errorCode, g_Instance->GetLifecycleName(), g_Instance->GetStreamAttemptId());
+
+  if (g_Instance->GetLifecycle() == StreamLifecycle::Stopping) {
+    ClLogMessage("Connection termination callback suppressed because stop is already in progress: error=%d, attemptId=%u\n",
+      errorCode, g_Instance->GetStreamAttemptId());
+    return;
+  }
 
   // Teardown the connection
   LiStopConnection();

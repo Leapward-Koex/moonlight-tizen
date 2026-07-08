@@ -32,6 +32,10 @@ const AsyncFunctions = {
 
 var callbacks = {}
 var callbacks_ids = 1;
+var pendingStreamStart = null;
+var activeStreamAttemptId = null;
+var lastSettledStreamStartEvent = null;
+var STREAM_START_TIMEOUT_MS = 60000;
 
 function logWasmMessage(level, eventName, details) {
   if (typeof window.moonlightDebugLog !== 'function') {
@@ -43,6 +47,18 @@ function logWasmMessage(level, eventName, details) {
 }
 
 function classifyWasmMessage(msg) {
+  if (msg.indexOf('streamStarting: ') === 0) {
+    return 'streamStarting';
+  }
+  if (msg.indexOf('streamStarted: ') === 0) {
+    return 'streamStarted';
+  }
+  if (msg.indexOf('streamStartFailed: ') === 0) {
+    return 'streamStartFailed';
+  }
+  if (msg.indexOf('streamStopping: ') === 0) {
+    return 'streamStopping';
+  }
   if (msg.indexOf('streamTerminated: ') === 0) {
     return 'streamTerminated';
   }
@@ -106,9 +122,224 @@ function describeStreamTermination(errorCode) {
       return 'ML_ERROR_PROTECTED_CONTENT';
     case -104:
       return 'ML_ERROR_FRAME_CONVERSION';
+    case -200:
+      return 'ML_ERROR_WASM_START_FAILED';
+    case -201:
+      return 'ML_ERROR_WASM_STOP_FAILED';
     default:
       return 'UNKNOWN';
   }
+}
+
+function parseStreamLifecycleMessage(msg) {
+  var match = msg.match(/^(streamStarting|streamStarted|streamStopping):\s*(\d+)$/);
+  if (match) {
+    return {
+      type: match[1],
+      attemptId: parseInt(match[2], 10)
+    };
+  }
+
+  match = msg.match(/^streamStartFailed:\s*(\d+):(-?\d+):(.*)$/);
+  if (match) {
+    return {
+      type: 'streamStartFailed',
+      attemptId: parseInt(match[1], 10),
+      errorCode: parseInt(match[2], 10),
+      reason: match[3] || ''
+    };
+  }
+
+  match = msg.match(/^streamTerminated:\s*(\d+):(-?\d+)$/);
+  if (match) {
+    return {
+      type: 'streamTerminated',
+      attemptId: parseInt(match[1], 10),
+      errorCode: parseInt(match[2], 10),
+      legacy: false
+    };
+  }
+
+  match = msg.match(/^streamTerminated:\s*(-?\d+)$/);
+  if (match) {
+    return {
+      type: 'streamTerminated',
+      attemptId: null,
+      errorCode: parseInt(match[1], 10),
+      legacy: true
+    };
+  }
+
+  return null;
+}
+
+function clearPendingStreamStartTimer() {
+  if (pendingStreamStart && pendingStreamStart.timer) {
+    clearTimeout(pendingStreamStart.timer);
+    pendingStreamStart.timer = null;
+  }
+}
+
+function createStreamStartError(event, fallbackReason) {
+  var reason = event && event.reason ? event.reason : fallbackReason;
+  var error = new Error(reason || 'stream start failed');
+  if (event) {
+    error.attemptId = event.attemptId;
+    error.errorCode = event.errorCode;
+    error.reason = event.reason;
+    error.lifecycleType = event.type;
+  }
+  return error;
+}
+
+function waitForNativeStreamStart(attemptId, summary, startedAt) {
+  if (!attemptId || isNaN(attemptId)) {
+    return Promise.reject(createStreamStartError({
+      type: 'streamStartFailed',
+      attemptId: attemptId,
+      errorCode: -200,
+      reason: 'native startRequest did not return a valid attempt ID'
+    }));
+  }
+
+  if (pendingStreamStart) {
+    logWasmMessage('warn', 'replacing pending stream start waiter', {
+      previousAttemptId: pendingStreamStart.attemptId,
+      newAttemptId: attemptId
+    });
+    clearPendingStreamStartTimer();
+    pendingStreamStart.reject(createStreamStartError({
+      type: 'streamStartFailed',
+      attemptId: pendingStreamStart.attemptId,
+      errorCode: -200,
+      reason: 'superseded by another stream start request'
+    }));
+    pendingStreamStart = null;
+  }
+
+  if (lastSettledStreamStartEvent) {
+    if (lastSettledStreamStartEvent.attemptId === attemptId) {
+      var settled = lastSettledStreamStartEvent;
+      lastSettledStreamStartEvent = null;
+      logWasmMessage(settled.didStart ? 'info' : 'error', 'using early native stream start event', {
+        attemptId: attemptId,
+        type: settled.event.type,
+        errorCode: settled.event.errorCode,
+        reason: settled.event.reason,
+        elapsedMs: Date.now() - startedAt,
+        params: summary
+      });
+      if (settled.didStart) {
+        return Promise.resolve(settled.event);
+      }
+      return Promise.reject(createStreamStartError(settled.event, 'native stream start failed'));
+    }
+    logWasmMessage('warn', 'discarding stale early native stream start event', {
+      requestedAttemptId: attemptId,
+      cachedAttemptId: lastSettledStreamStartEvent.attemptId,
+      cachedType: lastSettledStreamStartEvent.event ? lastSettledStreamStartEvent.event.type : null
+    });
+    lastSettledStreamStartEvent = null;
+  }
+
+  return new Promise(function(resolve, reject) {
+    pendingStreamStart = {
+      attemptId: attemptId,
+      startedAt: startedAt,
+      params: summary,
+      resolve: resolve,
+      reject: reject,
+      timer: setTimeout(function() {
+        if (!pendingStreamStart || pendingStreamStart.attemptId !== attemptId) {
+          return;
+        }
+        logWasmMessage('error', 'stream start wait timed out', {
+          attemptId: attemptId,
+          elapsedMs: Date.now() - startedAt,
+          params: summary
+        });
+        var error = createStreamStartError({
+          type: 'streamStartFailed',
+          attemptId: attemptId,
+          errorCode: -200,
+          reason: 'timed out waiting for native streamStarted'
+        });
+        pendingStreamStart = null;
+        reject(error);
+      }, STREAM_START_TIMEOUT_MS)
+    };
+
+    logWasmMessage('info', 'waiting for native stream start completion', {
+      attemptId: attemptId,
+      timeoutMs: STREAM_START_TIMEOUT_MS,
+      params: summary
+    });
+  });
+}
+
+function settlePendingStreamStart(event, didStart) {
+  if (!pendingStreamStart) {
+    if (event.attemptId !== null && activeStreamAttemptId === null) {
+      lastSettledStreamStartEvent = {
+        attemptId: event.attemptId,
+        event: event,
+        didStart: didStart
+      };
+    }
+    logWasmMessage(event.type === 'streamStarted' ? 'warn' : 'info', 'stream lifecycle event without pending start waiter', {
+      type: event.type,
+      attemptId: event.attemptId,
+      errorCode: event.errorCode,
+      reason: event.reason
+    });
+    return;
+  }
+
+  if (event.attemptId !== null && pendingStreamStart.attemptId !== event.attemptId) {
+    logWasmMessage('warn', 'ignoring stale stream lifecycle event for pending start', {
+      pendingAttemptId: pendingStreamStart.attemptId,
+      eventAttemptId: event.attemptId,
+      type: event.type,
+      errorCode: event.errorCode,
+      reason: event.reason
+    });
+    return;
+  }
+
+  var pending = pendingStreamStart;
+  clearPendingStreamStartTimer();
+  pendingStreamStart = null;
+
+  logWasmMessage(didStart ? 'info' : 'error', didStart ? 'native stream start completed' : 'native stream start failed', {
+    attemptId: event.attemptId,
+    type: event.type,
+    errorCode: event.errorCode,
+    reason: event.reason,
+    elapsedMs: Date.now() - pending.startedAt,
+    params: pending.params
+  });
+
+  if (didStart) {
+    pending.resolve(event);
+  } else {
+    pending.reject(createStreamStartError(event, 'native stream start failed'));
+  }
+}
+
+function isStaleStreamLifecycleEvent(event) {
+  if (!event || event.attemptId === null) {
+    return false;
+  }
+
+  if (pendingStreamStart && pendingStreamStart.attemptId !== event.attemptId) {
+    return true;
+  }
+
+  if (!pendingStreamStart && activeStreamAttemptId !== null && activeStreamAttemptId !== event.attemptId) {
+    return true;
+  }
+
+  return false;
 }
 
 function summarizeMessageParams(method, params) {
@@ -203,7 +434,12 @@ var sendMessage = function(method, params) {
           params: summary
         });
         if (ret.type === "resolve") {
-          resolve(ret.ret);
+          if (method === 'startRequest') {
+            var attemptId = parseInt(ret.ret, 10);
+            resolve(waitForNativeStreamStart(attemptId, summary, startedAt));
+          } else {
+            resolve(ret.ret);
+          }
         } else {
           reject(ret.ret);
         }
@@ -304,24 +540,98 @@ function handleMessage(msg) {
       message: safeMessage
     });
   }
+  var lifecycleEvent = parseStreamLifecycleMessage(msg);
+
   // If it's a recognized event, notify the appropriate function
-  if (msg.indexOf('streamTerminated: ') === 0) {
-    if (typeof stopAudioScheduler === 'function') {
-      stopAudioScheduler();
+  if (lifecycleEvent && lifecycleEvent.type === 'streamStarting') {
+    if (isStaleStreamLifecycleEvent(lifecycleEvent)) {
+      logWasmMessage('warn', 'ignoring stale stream starting event', {
+        activeAttemptId: activeStreamAttemptId,
+        pendingAttemptId: pendingStreamStart ? pendingStreamStart.attemptId : null,
+        eventAttemptId: lifecycleEvent.attemptId
+      });
+      return;
     }
-    // Remove the on-screen overlays
-    $('#connection-warnings, #performance-stats').css('display', 'none');
-    // Remove the video stream now
-    $('#listener').removeClass('fullscreen');
+    logWasmMessage('info', 'stream starting', {
+      attemptId: lifecycleEvent.attemptId
+    });
+  } else if (lifecycleEvent && lifecycleEvent.type === 'streamStarted') {
+    if (isStaleStreamLifecycleEvent(lifecycleEvent)) {
+      logWasmMessage('warn', 'ignoring stale stream started event', {
+        activeAttemptId: activeStreamAttemptId,
+        pendingAttemptId: pendingStreamStart ? pendingStreamStart.attemptId : null,
+        eventAttemptId: lifecycleEvent.attemptId
+      });
+      return;
+    }
+    settlePendingStreamStart(lifecycleEvent, true);
+    activeStreamAttemptId = lifecycleEvent.attemptId;
+    logWasmMessage('info', 'stream connection established', {
+      attemptId: lifecycleEvent.attemptId
+    });
+    // Prepare the screen for video stream
     $('#loadingSpinner').css('display', 'none');
-    $('body').css('backgroundColor', '#282C38');
-    $('#wasm_module').css('display', 'none');
+    $('body').css('backgroundColor', 'transparent');
+    $('#wasm_module').css('display', '');
+    $('#wasm_module').focus();
+  } else if (lifecycleEvent && lifecycleEvent.type === 'streamStartFailed') {
+    if (isStaleStreamLifecycleEvent(lifecycleEvent)) {
+      logWasmMessage('warn', 'ignoring stale stream start failed event', {
+        activeAttemptId: activeStreamAttemptId,
+        pendingAttemptId: pendingStreamStart ? pendingStreamStart.attemptId : null,
+        eventAttemptId: lifecycleEvent.attemptId,
+        errorCode: lifecycleEvent.errorCode,
+        reason: lifecycleEvent.reason
+      });
+      return;
+    }
+    settlePendingStreamStart(lifecycleEvent, false);
+    if (activeStreamAttemptId === lifecycleEvent.attemptId) {
+      activeStreamAttemptId = null;
+    }
+    logWasmMessage('error', 'stream start failed', {
+      attemptId: lifecycleEvent.attemptId,
+      errorCode: lifecycleEvent.errorCode,
+      reason: lifecycleEvent.reason
+    });
+    snackbarLogLong('Unable to start stream: ' + (lifecycleEvent.reason || describeStreamTermination(lifecycleEvent.errorCode)));
+    if (typeof resetStreamUiState === 'function') {
+      resetStreamUiState('stream start failed: ' + (lifecycleEvent.reason || lifecycleEvent.errorCode), api, { navigateToApps: true });
+    }
+  } else if (lifecycleEvent && lifecycleEvent.type === 'streamStopping') {
+    if (isStaleStreamLifecycleEvent(lifecycleEvent)) {
+      logWasmMessage('warn', 'ignoring stale stream stopping event', {
+        activeAttemptId: activeStreamAttemptId,
+        pendingAttemptId: pendingStreamStart ? pendingStreamStart.attemptId : null,
+        eventAttemptId: lifecycleEvent.attemptId
+      });
+      return;
+    }
+    logWasmMessage('info', 'stream stopping', {
+      attemptId: lifecycleEvent.attemptId
+    });
+  } else if (lifecycleEvent && lifecycleEvent.type === 'streamTerminated') {
+    if (isStaleStreamLifecycleEvent(lifecycleEvent)) {
+      logWasmMessage('warn', 'ignoring stale stream terminated event', {
+        activeAttemptId: activeStreamAttemptId,
+        pendingAttemptId: pendingStreamStart ? pendingStreamStart.attemptId : null,
+        eventAttemptId: lifecycleEvent.attemptId,
+        errorCode: lifecycleEvent.errorCode
+      });
+      return;
+    }
     // Show a termination snackbar message if the termination was unexpected
-    var errorCode = parseInt(msg.replace('streamTerminated: ', ''));
+    var errorCode = lifecycleEvent.errorCode;
+    settlePendingStreamStart(lifecycleEvent, false);
+    if (lifecycleEvent.attemptId === null || activeStreamAttemptId === lifecycleEvent.attemptId) {
+      activeStreamAttemptId = null;
+    }
     logWasmMessage(errorCode === 0 ? 'info' : 'error', 'stream terminated', {
+      attemptId: lifecycleEvent.attemptId,
       errorCode: errorCode,
       reason: describeStreamTermination(errorCode),
-      isInGame: typeof isInGame !== 'undefined' ? isInGame : null
+      isInGame: typeof isInGame !== 'undefined' ? isInGame : null,
+      legacyFormat: !!lifecycleEvent.legacy
     });
     switch (errorCode) {
       case 0: // ML_ERROR_GRACEFUL_TERMINATION
@@ -345,14 +655,23 @@ function handleMessage(msg) {
         snackbarLogLong('Connection terminated');
         break;
     }
-    // Return to the app list with new current game
-    showApps(api);
-    setTimeout(() => {
-      // Scroll to the current game row
-      Navigation.switch();
-      // Switch to Apps view
-      Navigation.change(Views.Apps);
-    }, 1500);
+    if (typeof resetStreamUiState === 'function') {
+      resetStreamUiState('stream terminated: ' + describeStreamTermination(errorCode), api, { navigateToApps: true });
+    } else {
+      if (typeof stopAudioScheduler === 'function') {
+        stopAudioScheduler();
+      }
+      $('#connection-warnings, #performance-stats').css('display', 'none');
+      $('#listener').removeClass('fullscreen');
+      $('#loadingSpinner').css('display', 'none');
+      $('body').css('backgroundColor', '#282C38');
+      $('#wasm_module').css('display', 'none');
+      showApps(api);
+      setTimeout(() => {
+        Navigation.switch();
+        Navigation.change(Views.Apps);
+      }, 1500);
+    }
   } else if (msg === 'Connection Established') {
     logWasmMessage('info', 'stream connection established');
     // Prepare the screen for video stream

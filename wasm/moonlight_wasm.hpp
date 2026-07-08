@@ -1,5 +1,9 @@
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <queue>
 
 #include <emscripten/bind.h>
@@ -82,6 +86,13 @@ enum class LoadResult {
   Success, CertErr, PrivateKeyErr
 };
 
+enum class StreamLifecycle {
+  Idle,
+  Starting,
+  Connected,
+  Stopping
+};
+
 constexpr const char* kCanvasName = "#wasm_module";
 
 class MoonlightInstance {
@@ -120,7 +131,7 @@ class MoonlightInstance {
 
   void OnConnectionStopped(uint32_t unused);
   void OnConnectionStarted(uint32_t error);
-  void StopConnection();
+  MessageResult StopConnection();
 
   static uint32_t ProfilerGetPackedMillis();
   static uint64_t ProfilerGetMillis();
@@ -191,7 +202,18 @@ class MoonlightInstance {
     MoonlightInstance* m_Instance;
   };
 
-  void WaitFor(std::condition_variable* variable, std::function<bool()> condition);
+  bool WaitFor(std::condition_variable* variable, const char* waitName, uint32_t timeoutMs, std::function<bool()> condition);
+  bool TrySetLifecycle(StreamLifecycle expected, StreamLifecycle desired, const char* reason);
+  void SetLifecycle(StreamLifecycle lifecycle, const char* reason);
+  StreamLifecycle GetLifecycle() const;
+  const char* GetLifecycleName() const;
+  uint32_t GetStreamAttemptId() const;
+  void CompleteStartFailure(uint32_t attemptId, int errorCode, const std::string& reason);
+  void ResetMediaStateForStart(uint32_t attemptId);
+  void JoinStaleThreadsIfIdle();
+  void CompleteStop(uint32_t attemptId, int errorCode, uint64_t stopStartMs);
+  static const char* StreamLifecycleName(StreamLifecycle lifecycle);
+  static const char* EmssReadyStateName(EmssReadyState state);
 
   void OpenUrl_private(int callbackId, std::string url, std::string ppk, bool binaryResponse);
   void STUN_private(int callbackId);
@@ -228,10 +250,16 @@ class MoonlightInstance {
   bool m_PerformanceStatsEnabled;
 
   STREAM_CONFIGURATION m_StreamConfig;
-  bool m_Running;
+  std::atomic<bool> m_Running;
+  std::atomic<StreamLifecycle> m_StreamLifecycle;
+  std::atomic<uint32_t> m_StreamAttemptId;
 
   pthread_t m_ConnectionThread;
   pthread_t m_InputThread;
+  pthread_t m_StopThread;
+  std::atomic<bool> m_ConnectionThreadCreated;
+  std::atomic<bool> m_InputThreadCreated;
+  std::atomic<bool> m_StopThreadCreated;
 
   OpusMSDecoder* m_OpusDecoder;
 
