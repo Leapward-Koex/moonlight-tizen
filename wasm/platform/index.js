@@ -74,7 +74,8 @@ var isDialogOpen = false; // Flag indicating whether the dialog is open, initial
 var isPairingInProgress = false; // Flag indicating whether a pairing process is in progress, initial value is false
 var wasPairingCanceled = false; // Flag indicating whether the current pairing process was canceled by the user, initial value is false
 var isGamepadActive = false; // Flag indicating whether the gamepad input is active, initial value is false
-var isClickPrevented = false; // Flag indicating whether the click event should be prevented, initial value is false
+var isHostClickPrevented = false; // Flag indicating whether the host click event should be prevented, initial value is false
+var isGameClickPrevented = false; // Flag indicating whether the game click event should be prevented, initial value is false
 var resFpsWarning = false; // Flag indicating whether the video resolution and frame rate warning message has shown, initial value is false
 var bitrateWarning = false; // Flag indicating whether the video bitrate warning message has shown, initial value is false
 var audioWarning = false; // Flag indicating whether the audio configuration warning message has shown, initial value is false
@@ -1122,15 +1123,15 @@ function addHostToGrid(host, ismDNSDiscovered) {
   hostContainer.off('click');
   hostContainer.on('click', function() {
     // Prevent further clicks
-    if (isClickPrevented) {
+    if (isHostClickPrevented) {
       return;
     }
     // Block subsequent clicks immediately
-    isClickPrevented = true;
+    isHostClickPrevented = true;
     // Select the host when the Click key is pressed
     hostChosen(host);
     // Reset the click flag after 2 second delay
-    setTimeout(() => isClickPrevented = false, 2000);
+    setTimeout(() => isHostClickPrevented = false, 2000);
   });
 
   // Attach the click event listener to the host menu button
@@ -2342,15 +2343,15 @@ function showApps(host) {
           gameContainer.off('click');
           gameContainer.on('click', function() {
             // Prevent further clicks
-            if (isClickPrevented) {
+            if (isGameClickPrevented) {
               return;
             }
             // Block subsequent clicks immediately
-            isClickPrevented = true;
+            isGameClickPrevented = true;
             // Start the game when the Click key is pressed
             startGame(host, app.id);
             // Reset the click flag after 2 second delay
-            setTimeout(() => isClickPrevented = false, 2000);
+            setTimeout(() => isGameClickPrevented = false, 2000);
           });
 
           // Append the game container to the game grid
