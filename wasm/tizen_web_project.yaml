@@ -40,6 +40,7 @@ files:
   - platform/debug_bridge.js
   - platform/gamepad.js
   - platform/index.js
+  - platform/logger.js
   - platform/messages.js
   - platform/navigation.js
   - platform/remote_controller.js

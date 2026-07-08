@@ -1320,7 +1320,8 @@ const Views = {
       'unlockAllFpsBtn',
       'optimizeBitrateBtn',
       'disableWarningsBtn',
-      'performanceStatsBtn'
+      'performanceStatsBtn',
+      'selectLogLevel'
     ]),
     up: function() {
       this.view.prevOption();
@@ -1356,10 +1357,45 @@ const Views = {
       unmark(this.view.current());
     },
   },
+  SelectLogLevelMenu: {
+    isActive: () => isPopupMenuActive('logLevelMenu'),
+    view: new ListView(() =>
+      document.getElementById('logLevelMenu')
+      .parentNode.children[3].children[1].children),
+    up: function() {
+      this.view.prevOption();
+    },
+    down: function() {
+      this.view.nextOption();
+    },
+    left: function() {},
+    right: function() {},
+    accept: function() {
+      clickElement(this.view.current());
+      closeActiveVisibleMenu();
+      setTimeout(() => focusElement('selectLogLevel'), 250);
+    },
+    back: function() {
+      closePopupMenu('selectLogLevel');
+      closeActiveVisibleMenu();
+      focusElement('selectLogLevel');
+    },
+    press: function() {},
+    switch: function() {},
+    enter: function() {
+      mark(this.view.current());
+    },
+    leave: function() {
+      unmark(this.view.current());
+    },
+  },
   AboutSettings: {
     view: new ListView(() => [
       'systemInfoBtn',
       'navigationGuideBtn',
+      'logStatusBtn',
+      'exportLogsBtn',
+      'clearLogsBtn',
       'checkUpdatesBtn',
       'restartAppBtn'
     ]),
@@ -1445,6 +1481,46 @@ const Views = {
     },
     back: function() {
       resolveElement('closeUpdateApp').click();
+    },
+    press: function() {},
+    switch: function() {
+      focusElement(this.view.current());
+    },
+    enter: function() {
+      mark(this.view.current());
+      setTimeout(() => focusElement(this.view.current()), 100);
+    },
+    leave: function() {
+      unmark(this.view.current());
+      setTimeout(() => blurElement(this.view.current()), 100);
+    },
+  },
+  LogExportDialog: {
+    view: new ListView(() => {
+      var actions = [];
+      ['shareLogExport', 'stopLogExport', 'closeLogExport'].forEach(function(id) {
+        var element = document.getElementById(id);
+        if (element && !element.disabled && element.getAttribute('aria-disabled') !== 'true') {
+          actions.push(id);
+        }
+      });
+      return actions.length ? actions : ['closeLogExport'];
+    }),
+    up: function() {},
+    down: function() {},
+    left: function() {
+      this.view.prev();
+      focusElement(this.view.current());
+    },
+    right: function() {
+      this.view.next();
+      focusElement(this.view.current());
+    },
+    accept: function() {
+      clickElement(this.view.current());
+    },
+    back: function() {
+      resolveElement('closeLogExport').click();
     },
     press: function() {},
     switch: function() {

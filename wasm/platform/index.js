@@ -84,6 +84,7 @@ var repeatAction = null; // Flag indicating whether the repeat action is set, in
 var lastInvokeTime = 0; // Flag indicating the last invoke time, initial value is 0
 var repeatTimeout = null; // Flag indicating whether the repeat timeout is set, initial value is null
 var navigationTimeout = null; // Flag indicating whether the navigation timeout is set, initial value is null
+var activeLogExport = null; // Tracks the current temporary diagnostic log export server
 const BUILD_TYPE = '__BUILD_TYPE__'; // Placeholder for build type, which should be replaced during the build process
 const BUILD_COMMIT = '__BUILD_COMMIT__'; // Placeholder for build commit, which should be replaced during the build process
 const REPEAT_DELAY = 350; // Repeat delay set to 350ms (milliseconds)
@@ -251,6 +252,10 @@ function attachListeners() {
   $('#optimizeBitrateSwitch').on('click', saveOptimizeBitrate);
   $('#disableWarningsSwitch').on('click', saveDisableWarnings);
   $('#performanceStatsSwitch').on('click', savePerformanceStats);
+  $('.logLevelMenu li').on('click', saveLogLevel);
+  $('#logStatusBtn').on('click', refreshLogStatus);
+  $('#exportLogsBtn').on('click', logExportDialog);
+  $('#clearLogsBtn').on('click', clearDiagnosticLogs);
   $('#navigationGuideBtn').on('click', navigationGuideDialog);
   $('#checkUpdatesBtn').on('click', checkForAppUpdates);
   $('#restartAppBtn').on('click', restartAppDialog);
@@ -272,6 +277,7 @@ function attachListeners() {
   registerMenu('selectAudioPacketDuration', Views.SelectAudioPacketDurationMenu);
   registerMenu('selectAudioJitter', Views.SelectAudioJitterMenu);
   registerMenu('selectCodec', Views.SelectCodecMenu);
+  registerMenu('selectLogLevel', Views.SelectLogLevelMenu);
 
   $(window).resize(fullscreenWasmModule);
 
@@ -470,6 +476,426 @@ function snackbarLogLong(givenMessage) {
     timeout: 5000
   };
   document.querySelector('#snackbar').MaterialSnackbar.showSnackbar(data);
+}
+
+function getMoonlightLogger() {
+  return window.MoonlightLogger || null;
+}
+
+function formatBytes(bytes) {
+  var value = Number(bytes) || 0;
+  if (value < 1024) {
+    return value + ' B';
+  }
+  if (value < 1024 * 1024) {
+    return (value / 1024).toFixed(1) + ' KB';
+  }
+  return (value / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function setButtonDisabled(buttonId, disabled) {
+  var button = $('#' + buttonId);
+  button.prop('disabled', disabled);
+  button.attr('aria-disabled', disabled ? 'true' : 'false');
+  button.toggleClass('mdl-button--disabled', !!disabled);
+}
+
+function setLogLevelSelection(level) {
+  var logger = getMoonlightLogger();
+  var normalizedLevel = logger ? logger.setLevel(level) : (level || 'off');
+  var label = logger ? logger.getLevelLabel(normalizedLevel) : String(normalizedLevel).toUpperCase();
+  $('#selectLogLevel').text(label).data('value', normalizedLevel);
+}
+
+function refreshLogStatus() {
+  var logger = getMoonlightLogger();
+  if (!logger || typeof logger.getStatus !== 'function') {
+    $('#logStatusBtn').html('Log file support unavailable<i class="settings-action-icon material-icons">refresh</i>');
+    return;
+  }
+
+  logger.getStatus().then(function(status) {
+    var label = 'Level: ' + status.levelLabel + ' | Size: ' + formatBytes(status.sizeBytes);
+    if (!status.available) {
+      label = 'Filesystem unavailable | Level: ' + status.levelLabel;
+    } else if (status.pendingEntries > 0) {
+      label += ' | Pending: ' + status.pendingEntries;
+    }
+    $('#logStatusBtn').html(label + '<i class="settings-action-icon material-icons">refresh</i>');
+  });
+}
+
+function saveLogLevel() {
+  var chosenLevel = $(this).data('value') || 'off';
+  setLogLevelSelection(chosenLevel);
+  storeData('logLevel', chosenLevel, null);
+  refreshLogStatus();
+  snackbarLog('Diagnostic log level set to ' + $('#selectLogLevel').text() + '.');
+}
+
+function clearDiagnosticLogs() {
+  var logger = getMoonlightLogger();
+  if (!logger || typeof logger.clear !== 'function') {
+    snackbarLog('Diagnostic log storage is unavailable.');
+    return;
+  }
+
+  logger.clear().then(function() {
+    refreshLogStatus();
+    snackbarLog('Diagnostic logs cleared.');
+  });
+}
+
+function textToBytesForFile(text) {
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(text);
+  }
+  var bytes = [];
+  var value = String(text || '');
+  for (var i = 0; i < value.length; i += 1) {
+    bytes.push(value.charCodeAt(i) & 0xff);
+  }
+  return bytes;
+}
+
+function writeTextToFile(path, text) {
+  if (typeof tizen === 'undefined' || !tizen.filesystem || typeof tizen.filesystem.openFile !== 'function') {
+    throw new Error('Tizen filesystem is unavailable.');
+  }
+
+  var fileHandle = null;
+  try {
+    fileHandle = tizen.filesystem.openFile(path, 'w');
+    if (typeof fileHandle.writeString === 'function') {
+      fileHandle.writeString(text);
+    } else {
+      fileHandle.writeData(textToBytesForFile(text));
+    }
+  } finally {
+    if (fileHandle && typeof fileHandle.close === 'function') {
+      fileHandle.close();
+    }
+  }
+
+  if (tizen.filesystem.toURI) {
+    return tizen.filesystem.toURI(path);
+  }
+  return path;
+}
+
+function makeLogExportToken() {
+  var bytes = new Uint8Array(12);
+  if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    for (var i = 0; i < bytes.length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  var token = '';
+  for (var j = 0; j < bytes.length; j += 1) {
+    token += bytes[j].toString(36).padStart(2, '0');
+  }
+  return token;
+}
+
+function makeLogExportPortCandidates() {
+  var ports = [];
+  var minPort = 49152;
+  var portRange = 12000;
+
+  for (var i = 0; i < 8; i += 1) {
+    var randomValue = Math.floor(Math.random() * portRange);
+    var port = minPort + randomValue;
+    if (ports.indexOf(port) === -1) {
+      ports.push(port);
+    }
+  }
+
+  return ports;
+}
+
+function isLogExportBindError(error) {
+  var message = error && error.message ? error.message : String(error || '');
+  return /bind|address|port/i.test(message);
+}
+
+function makeLogExportFilename() {
+  var buildVer = getBuildVersion(appInfo.version);
+  var timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return 'moonlight-tizen-' + buildVer + '-' + timestamp + '.ndjson';
+}
+
+function getTvIpAddress() {
+  try {
+    if (typeof webapis !== 'undefined' && webapis.network && typeof webapis.network.getIp === 'function') {
+      var ip = webapis.network.getIp();
+      if (ip && String(ip) !== '0.0.0.0') {
+        return String(ip);
+      }
+    }
+  } catch (error) {
+    console.warn('%c[index.js, getTvIpAddress]', 'color: green;', 'Warning: Failed to read TV IP address: ', error);
+  }
+
+  try {
+    var hostname = window.location && window.location.hostname;
+    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      return hostname;
+    }
+  } catch (error) {
+    // Ignore location fallback failures.
+  }
+  return '';
+}
+
+function stopActiveLogExport() {
+  if (typeof sendMessage !== 'function' || !window.Module || typeof Module.stopLogExportServer !== 'function') {
+    activeLogExport = null;
+    return Promise.resolve();
+  }
+
+  return sendMessage('stopLogExportServer', []).then(function() {
+    activeLogExport = null;
+  }, function(error) {
+    console.warn('%c[index.js, stopActiveLogExport]', 'color: green;', 'Warning: Failed to stop log export server: ', error);
+    activeLogExport = null;
+  });
+}
+
+function updateLogExportDialog(statusText, url) {
+  $('#logExportStatus').text(statusText || '');
+  $('#logExportUrl').text(url || '');
+  var qrElement = document.getElementById('logExportQr');
+  if (qrElement) {
+    qrElement.innerHTML = '';
+    if (url && window.MoonlightLogger && typeof window.MoonlightLogger.renderQrCode === 'function') {
+      window.MoonlightLogger.renderQrCode(url, qrElement);
+    }
+  }
+}
+
+function createLogAppControl(operation, uri, mime, filename, url) {
+  var data = [];
+  if (typeof tizen !== 'undefined' && tizen.ApplicationControlData) {
+    data.push(new tizen.ApplicationControlData('http://tizen.org/appcontrol/data/subject', ['Moonlight diagnostic logs']));
+    data.push(new tizen.ApplicationControlData('http://tizen.org/appcontrol/data/text', [
+      'Moonlight diagnostic logs' + (url ? '\n' + url : '')
+    ]));
+    if (uri) {
+      data.push(new tizen.ApplicationControlData('http://tizen.org/appcontrol/data/path', [uri]));
+      data.push(new tizen.ApplicationControlData('http://tizen.org/appcontrol/data/name', [filename || 'moonlight-log.ndjson']));
+    }
+  }
+  return new tizen.ApplicationControl(operation, uri || null, mime || null, null, data);
+}
+
+function findLogAppControl(appControl) {
+  return new Promise(function(resolve, reject) {
+    if (typeof tizen === 'undefined' || !tizen.application || typeof tizen.application.findAppControl !== 'function') {
+      reject(new Error('Tizen application controls are unavailable.'));
+      return;
+    }
+    tizen.application.findAppControl(appControl, function(appInfos) {
+      resolve(appInfos || []);
+    }, function(error) {
+      reject(error);
+    });
+  });
+}
+
+function launchLogAppControl(appControl) {
+  return findLogAppControl(appControl).then(function(appInfos) {
+    if (!appInfos.length) {
+      throw new Error('No compatible share or email provider is installed.');
+    }
+    return new Promise(function(resolve, reject) {
+      tizen.application.launchAppControl(appControl, null, resolve, reject);
+    });
+  });
+}
+
+function probeLogShareProvider() {
+  setButtonDisabled('shareLogExport', true);
+  if (typeof tizen === 'undefined' || !tizen.application || !tizen.ApplicationControl) {
+    return;
+  }
+
+  var controls = [
+    createLogAppControl('http://tizen.org/appcontrol/operation/share', activeLogExport && activeLogExport.url, 'text/plain', activeLogExport && activeLogExport.filename, activeLogExport && activeLogExport.url),
+    createLogAppControl('http://tizen.org/appcontrol/operation/send', activeLogExport && activeLogExport.url, 'text/plain', activeLogExport && activeLogExport.filename, activeLogExport && activeLogExport.url),
+    createLogAppControl('http://tizen.org/appcontrol/operation/compose', null, 'message/rfc822', activeLogExport && activeLogExport.filename, activeLogExport && activeLogExport.url)
+  ];
+  var probe = Promise.resolve(false);
+  controls.forEach(function(appControl) {
+    probe = probe.then(function(found) {
+      if (found) {
+        return true;
+      }
+      return findLogAppControl(appControl).then(function(appInfos) {
+        return !!appInfos.length;
+      }, function() {
+        return false;
+      });
+    });
+  });
+  probe.then(function(found) {
+    setButtonDisabled('shareLogExport', !found);
+  });
+}
+
+function shareLogExport() {
+  if (!activeLogExport || !activeLogExport.text) {
+    snackbarLog('No log export is ready to share.');
+    return;
+  }
+  if (typeof tizen === 'undefined' || !tizen.application || !tizen.ApplicationControl) {
+    snackbarLog('Share and email are unavailable on this platform.');
+    return;
+  }
+
+  var filename = activeLogExport.filename || makeLogExportFilename();
+  var fileUri = null;
+  try {
+    fileUri = writeTextToFile('documents/Moonlight/' + filename, activeLogExport.text);
+  } catch (error) {
+    console.warn('%c[index.js, shareLogExport]', 'color: green;', 'Warning: Failed to prepare public log copy: ', error);
+  }
+
+  var controls = [];
+  if (fileUri) {
+    controls.push(createLogAppControl('http://tizen.org/appcontrol/operation/share', fileUri, 'application/x-ndjson', filename, activeLogExport.url));
+    controls.push(createLogAppControl('http://tizen.org/appcontrol/operation/send', fileUri, 'application/x-ndjson', filename, activeLogExport.url));
+  }
+  controls.push(createLogAppControl('http://tizen.org/appcontrol/operation/share', activeLogExport.url, 'text/plain', filename, activeLogExport.url));
+  controls.push(createLogAppControl('http://tizen.org/appcontrol/operation/send', activeLogExport.url, 'text/plain', filename, activeLogExport.url));
+  controls.push(createLogAppControl('http://tizen.org/appcontrol/operation/compose', null, 'message/rfc822', filename, activeLogExport.url));
+
+  var chain = Promise.reject(new Error('No compatible share or email provider is installed.'));
+  controls.forEach(function(appControl) {
+    chain = chain.catch(function() {
+      return launchLogAppControl(appControl);
+    });
+  });
+
+  chain.then(function() {
+    snackbarLog('Log export sent to a share provider.');
+  }, function(error) {
+    snackbarLogLong(error && error.message ? error.message : 'No compatible share or email provider is installed.');
+    setButtonDisabled('shareLogExport', true);
+  });
+}
+
+function startLogExportServer(text, filename) {
+  if (typeof sendMessage !== 'function' || !window.Module || typeof Module.startLogExportServer !== 'function') {
+    updateLogExportDialog('Log export server is not available until the Moonlight runtime is loaded.', '');
+    setButtonDisabled('stopLogExport', true);
+    setButtonDisabled('shareLogExport', true);
+    return;
+  }
+
+  var ipAddress = getTvIpAddress();
+  if (!ipAddress) {
+    updateLogExportDialog('Unable to read this TV IP address. Share may still work if a provider is available.', '');
+  }
+
+  var token = makeLogExportToken();
+  var candidatePorts = makeLogExportPortCandidates();
+  function tryStartExport(index, lastError) {
+    if (index >= candidatePorts.length) {
+      return Promise.reject(lastError || new Error('Unable to bind export socket.'));
+    }
+    return sendMessage('startLogExportServer', [text, filename, token, candidatePorts[index]]).then(null, function(error) {
+      if (isLogExportBindError(error)) {
+        return tryStartExport(index + 1, error);
+      }
+      return Promise.reject(error);
+    });
+  }
+
+  tryStartExport(0, null).then(function(ret) {
+    var url = ipAddress ? 'http://' + ipAddress + ':' + ret.port + ret.path : '';
+    activeLogExport = {
+      text: text,
+      filename: ret.filename || filename,
+      url: url,
+      port: ret.port,
+      token: token
+    };
+
+    updateLogExportDialog(
+      url ? 'Temporary download is ready. The link expires after one download or 10 minutes.' : 'Temporary export is ready, but the TV IP address is unavailable.',
+      url
+    );
+    setButtonDisabled('stopLogExport', false);
+    probeLogShareProvider();
+  }, function(error) {
+    updateLogExportDialog(error && error.message ? error.message : String(error), '');
+    setButtonDisabled('stopLogExport', true);
+    setButtonDisabled('shareLogExport', true);
+  });
+}
+
+function prepareLogExport() {
+  var logger = getMoonlightLogger();
+  if (!logger || typeof logger.getExportText !== 'function') {
+    updateLogExportDialog('Diagnostic log storage is unavailable.', '');
+    setButtonDisabled('stopLogExport', true);
+    setButtonDisabled('shareLogExport', true);
+    return;
+  }
+
+  updateLogExportDialog('Preparing log export...', '');
+  setButtonDisabled('stopLogExport', true);
+  setButtonDisabled('shareLogExport', true);
+  logger.getExportText().then(function(text) {
+    if (!text || text.trim().length === 0) {
+      updateLogExportDialog('No diagnostic logs are available. Increase the log level and reproduce the issue first.', '');
+      return;
+    }
+    startLogExportServer(text, makeLogExportFilename());
+  });
+}
+
+function closeLogExportDialog() {
+  var logExportDialogOverlay = document.querySelector('#logExportDialogOverlay');
+  var logExportDialog = document.querySelector('#logExportDialog');
+
+  stopActiveLogExport().then(function() {
+    logExportDialogOverlay.style.display = 'none';
+    logExportDialog.close();
+    isDialogOpen = false;
+    Navigation.pop();
+    Navigation.switch();
+    refreshLogStatus();
+  });
+}
+
+function logExportDialog() {
+  var logExportDialogOverlay = document.querySelector('#logExportDialogOverlay');
+  var logExportDialog = document.querySelector('#logExportDialog');
+
+  logExportDialogOverlay.style.display = 'flex';
+  logExportDialog.showModal();
+  isDialogOpen = true;
+  Navigation.push(Views.LogExportDialog);
+
+  $('#closeLogExport').off('click');
+  $('#closeLogExport').on('click', closeLogExportDialog);
+
+  $('#stopLogExport').off('click');
+  $('#stopLogExport').on('click', function() {
+    stopActiveLogExport().then(function() {
+      updateLogExportDialog('Temporary download stopped.', '');
+      setButtonDisabled('stopLogExport', true);
+      setButtonDisabled('shareLogExport', true);
+    });
+  });
+
+  $('#shareLogExport').off('click');
+  $('#shareLogExport').on('click', shareLogExport);
+
+  prepareLogExport();
 }
 
 // Handle layout elements when displaying the Hosts view
@@ -1643,6 +2069,7 @@ function handleSettingsView(category) {
       navigateSettingsView(Views.AdvancedSettings);
       break;
     case 'aboutSettings': // Navigate to the AboutSettings view
+      refreshLogStatus();
       navigateSettingsView(Views.AboutSettings);
       break;
     default:
@@ -3753,6 +4180,11 @@ function restoreDefaultsSettingsValues() {
   const defaultPerformanceStats = false;
   document.querySelector('#performanceStatsBtn').MaterialSwitch.off();
   storeData('performanceStats', defaultPerformanceStats, null);
+
+  const defaultLogLevel = 'off';
+  setLogLevelSelection(defaultLogLevel);
+  storeData('logLevel', defaultLogLevel, null);
+  refreshLogStatus();
 }
 
 function initSamsungKeys() {
@@ -3806,6 +4238,7 @@ function loadSystemInfo() {
   console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'Loading system information...');
   const systemInfoPlaceholder = document.getElementById('systemInfoBtn');
   const buildVer = getBuildVersion(appInfo.version);
+  refreshLogStatus();
 
   // Get the system information from the TV
   if (systemInfoPlaceholder) {
@@ -3835,6 +4268,14 @@ function loadUserData() {
 }
 
 function loadUserDataCb() {
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored diagnostic log preferences.');
+  getData('logLevel', function(previousValue) {
+    var logger = getMoonlightLogger();
+    var storedLogLevel = previousValue.logLevel != null ? previousValue.logLevel : (logger ? logger.getLevel() : 'off');
+    setLogLevelSelection(storedLogLevel);
+    refreshLogStatus();
+  });
+
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored resolution preferences.');
   getData('resolution', function(previousValue) {
     if (previousValue.resolution != null) {

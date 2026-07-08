@@ -1,6 +1,12 @@
 param(
   [string]$Source = "",
-  [string]$ProjectRoot = ""
+  [string]$ProjectRoot = "",
+  [switch]$EnableDebugBridge,
+  [switch]$DisableDebugBridge,
+  [string]$DebugBridgeServerUrl = "",
+  [string]$DebugBridgeHostIp = "",
+  [int]$DebugBridgePort = 49321,
+  [string]$DebugBridgeTokenPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -98,6 +104,33 @@ if (-not (Test-IsInsidePath -Path $sourcePath -Root $repoRoot)) {
 
 foreach ($file in $requiredRuntimeFiles) {
   Copy-Item -LiteralPath (Join-Path $sourcePath $file) -Destination (Join-Path $projectPath $file) -Force
+}
+
+if ($EnableDebugBridge -and $DisableDebugBridge) {
+  throw "Use either -EnableDebugBridge or -DisableDebugBridge, not both."
+}
+
+if ($EnableDebugBridge -or $DisableDebugBridge) {
+  $debugBridgeArgs = @{
+    ProjectRoot = $projectPath
+  }
+  if ($EnableDebugBridge) {
+    $debugBridgeArgs.Enable = $true
+    if (-not [string]::IsNullOrWhiteSpace($DebugBridgeServerUrl)) {
+      $debugBridgeArgs.ServerUrl = $DebugBridgeServerUrl
+    }
+    if (-not [string]::IsNullOrWhiteSpace($DebugBridgeHostIp)) {
+      $debugBridgeArgs.HostIp = $DebugBridgeHostIp
+    }
+    $debugBridgeArgs.Port = $DebugBridgePort
+    if (-not [string]::IsNullOrWhiteSpace($DebugBridgeTokenPath)) {
+      $debugBridgeArgs.TokenPath = $DebugBridgeTokenPath
+    }
+  } else {
+    $debugBridgeArgs.Disable = $true
+  }
+
+  & (Join-Path $PSScriptRoot "write-debug-bridge-config.ps1") @debugBridgeArgs
 }
 
 Write-Host "Synced generated wasm runtime files from $sourcePath to $projectPath"

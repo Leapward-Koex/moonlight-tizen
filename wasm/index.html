@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="static/css/material-icons.css">
   <link rel="stylesheet" href="static/css/material.min.css">
   <link rel="stylesheet" href="static/css/style.css">
+  <script type="text/javascript" src="platform/logger.js"></script>
   <script type="text/javascript" src="platform.js"></script>
 </head>
 <body data-name="moonlight-tizen" data-tools="emscripten" data-configs="Debug Release" data-path="{tc}/{config}">
@@ -422,6 +423,22 @@
                 </label>
               </div>
             </div>
+            <div class="setting-option">
+              <label>Diagnostic log level</label>
+              <span class="mdl-list__item-text-body">
+                - Controls how much diagnostic information Moonlight stores on this TV.
+              </span>
+              <div id="logLevelMenu">
+                <button type="button" id="selectLogLevel" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-value="off">Off</button>
+              </div>
+              <ul class="logLevelMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectLogLevel">
+                <li class="mdl-menu__item" data-value="off">Off</li>
+                <li class="mdl-menu__item" data-value="error">Error</li>
+                <li class="mdl-menu__item" data-value="warn">Warn</li>
+                <li class="mdl-menu__item" data-value="info">Info</li>
+                <li class="mdl-menu__item" data-value="debug">Debug</li>
+              </ul>
+            </div>
           </div>
           <div id="aboutSettings" class="settings-options">
             <div class="setting-option">
@@ -440,6 +457,38 @@
                 <button type="button" id="navigationGuideBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" aria-label="Navigation Guide">
                   Discover navigation controls for all input devices
                   <img src="static/res/ic_tv_remote_48px.svg" id="navigationGuideIcon">
+                </button>
+              </div>
+            </div>
+            <div class="setting-option">
+              <label>Diagnostic log storage</label>
+              <span class="mdl-list__item-text-body"></span>
+              <div id="logStatusMenu">
+                <button type="button" id="logStatusBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" aria-label="Diagnostic Log Storage">
+                  Loading log status...
+                  <i class="settings-action-icon material-icons">refresh</i>
+                </button>
+              </div>
+            </div>
+            <div class="setting-option">
+              <label>Export diagnostic logs</label>
+              <span class="mdl-list__item-text-body">
+                - Creates a temporary one-time download link for the current sanitized log file.
+              </span>
+              <div id="exportLogsMenu">
+                <button type="button" id="exportLogsBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" aria-label="Export Diagnostic Logs">
+                  Export logs
+                  <i class="settings-action-icon material-icons">file_download</i>
+                </button>
+              </div>
+            </div>
+            <div class="setting-option">
+              <label>Clear diagnostic logs</label>
+              <span class="mdl-list__item-text-body"></span>
+              <div id="clearLogsMenu">
+                <button type="button" id="clearLogsBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" aria-label="Clear Diagnostic Logs">
+                  Clear logs
+                  <i class="settings-action-icon material-icons">delete</i>
                 </button>
               </div>
             </div>
@@ -723,6 +772,21 @@
       <div class="mdl-dialog__actions">
         <button type="button" id="cancelExitApp" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect">Cancel</button>
         <button type="button" id="continueExitApp" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect">Exit</button>
+      </div>
+    </dialog>
+  </div>
+  <div id="logExportDialogOverlay" class="dialog-overlay">
+    <dialog id="logExportDialog" class="mdl-dialog large-dialog">
+      <h3 id="logExportDialogTitle" class="mdl-dialog__title">Export Logs</h3>
+      <div class="mdl-dialog__content">
+        <p id="logExportStatus">Preparing log export...</p>
+        <div id="logExportQr"></div>
+        <div id="logExportUrl"></div>
+      </div>
+      <div class="mdl-dialog__actions">
+        <button type="button" id="shareLogExport" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect">Share</button>
+        <button type="button" id="stopLogExport" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect">Stop</button>
+        <button type="button" id="closeLogExport" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect">Close</button>
       </div>
     </dialog>
   </div>

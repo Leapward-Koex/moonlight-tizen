@@ -340,6 +340,35 @@ body {
     align-items: center;
     justify-content: center;
 }
+#logExportDialog {
+    max-width: 900px;
+}
+#logExportQr {
+    width: 260px;
+    height: 260px;
+    margin: 10px auto 20px auto;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+}
+#logExportQr svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+#logExportUrl {
+    color: #ececec;
+    background-color: #282C38;
+    min-height: 34px;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 1.25rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+#logExportStatus {
+    font-size: 1.35rem;
+}
 .navGuideContainer {
     display: inline-flex;
     align-items: center;
@@ -871,7 +900,8 @@ body {
     border: 1px solid #FFA620;
 }
 #selectResolution, #selectFramerate, #selectBitrate, #removeAllHostsBtn,
-#selectAudio, #selectAudioPacketDuration, #selectAudioJitter, #selectCodec, #navigationGuideBtn, #checkUpdatesBtn, #restartAppBtn {
+#selectAudio, #selectAudioPacketDuration, #selectAudioJitter, #selectCodec, #selectLogLevel,
+#navigationGuideBtn, #logStatusBtn, #exportLogsBtn, #clearLogsBtn, #checkUpdatesBtn, #restartAppBtn {
     font-size: 1.45rem;
     letter-spacing: 0.5px;
     text-indent: 36px;
@@ -880,7 +910,8 @@ body {
 #sortAppsListBtn, #optimizeGamesBtn, #removeAllHostsBtn, #rumbleFeedbackBtn, #mouseEmulationBtn,
 #flipABfaceButtonsBtn, #flipXYfaceButtonsBtn, #selectAudio, #selectAudioPacketDuration, #selectAudioJitter, #playHostAudioBtn,
 #selectCodec, #hdrModeBtn, #fullRangeBtn, #gameModeBtn, #unlockAllFpsBtn, #optimizeBitrateBtn,
-#disableWarningsBtn, #performanceStatsBtn, #navigationGuideBtn, #checkUpdatesBtn, #restartAppBtn {
+#disableWarningsBtn, #performanceStatsBtn, #selectLogLevel, #navigationGuideBtn, #logStatusBtn,
+#exportLogsBtn, #clearLogsBtn, #checkUpdatesBtn, #restartAppBtn {
     color: #ececec;
     background-color: #404354;
     width: 100%;
@@ -933,11 +964,11 @@ body {
     background-color: #484C5F;
 }
 .videoResolutionMenu, .videoFramerateMenu, .videoBitrateMenu,
-.audioConfigMenu, .audioPacketDurationMenu, .audioJitterMenu, .videoCodecMenu, .mdl-menu__container {
+.audioConfigMenu, .audioPacketDurationMenu, .audioJitterMenu, .videoCodecMenu, .logLevelMenu, .mdl-menu__container {
     width: 59.4% !important;
 }
 .videoResolutionMenu, .videoFramerateMenu, .videoBitrateMenu,
-.audioConfigMenu, .audioPacketDurationMenu, .videoCodecMenu, .mdl-menu__outline {
+.audioConfigMenu, .audioPacketDurationMenu, .videoCodecMenu, .logLevelMenu, .mdl-menu__outline {
     width: 100% !important;
     top: 2.5px !important;
     border-radius: 0 0 8px 8px;
@@ -1001,9 +1032,14 @@ body {
 #videoBitrateMenu > #selectBitrate, #audioConfigMenu > #selectAudio,
 #audioPacketDurationMenu > #selectAudioPacketDuration,
 #audioJitterMenu > #selectAudioJitter,
-#videoCodecMenu > #selectCodec {
+#videoCodecMenu > #selectCodec, #logLevelMenu > #selectLogLevel {
     color: #ececec;
     background: url('../res/ic_arrow_drop_down_48px.svg') 94.8% 50% no-repeat rgba(64, 67, 84, 1);
+}
+.settings-action-icon {
+    float: right;
+    margin: 12px 46px 0 0;
+    font-size: 32px !important;
 }
 #removeAllHostsIcon, #navigationGuideIcon, #checkUpdatesIcon,
 #restartApplicationIcon {
@@ -1032,8 +1068,10 @@ body {
 #playHostAudioBtn:hover, #playHostAudioBtn:focus, #selectCodec:hover, #selectCodec:focus, #hdrModeBtn:hover, #hdrModeBtn:focus, #fullRangeBtn:hover,
 #fullRangeBtn:focus, #gameModeBtn:hover, #gameModeBtn:focus, #unlockAllFpsBtn:hover, #unlockAllFpsBtn:focus, #optimizeBitrateBtn:hover,
 #optimizeBitrateBtn:focus, #disableWarningsBtn:hover, #disableWarningsBtn:focus, #performanceStatsBtn:hover, #performanceStatsBtn:focus,
-#systemInfoBtn:hover, #systemInfoBtn:focus, #navigationGuideBtn:hover, #navigationGuideBtn:focus, #checkUpdatesBtn:hover, #checkUpdatesBtn:focus,
-#restartAppBtn:hover, #restartAppBtn:focus {
+#selectLogLevel:hover, #selectLogLevel:focus, #systemInfoBtn:hover, #systemInfoBtn:focus, #navigationGuideBtn:hover, #navigationGuideBtn:focus,
+#logStatusBtn:hover, #logStatusBtn:focus, #exportLogsBtn:hover, #exportLogsBtn:focus, #clearLogsBtn:hover, #clearLogsBtn:focus,
+#checkUpdatesBtn:hover, #checkUpdatesBtn:focus, #restartAppBtn:hover, #restartAppBtn:focus, #shareLogExport:hover, #shareLogExport:focus,
+#stopLogExport:hover, #stopLogExport:focus, #closeLogExport:hover, #closeLogExport:focus {
     background-color: #404354;
     box-shadow: 0 0 2px 3px rgba(0, 163, 198, 1);
 }

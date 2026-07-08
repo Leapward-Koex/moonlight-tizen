@@ -51,9 +51,42 @@ Observed emulator facts:
 - Secure commands like `shell 0 applist`, `shell 0 getduid`, and `shell 0 app_launcher` can work.
 - `tz run --debug-mode` has still launched with `debug 0` and no forwarded inspector port.
 
+## Samsung MCP Tools First
+
+When the Samsung Tizen MCP servers are available in Codex, use them before manual `tz`, `sdb`, CDP, or debug-bridge work.
+
+Current expected servers:
+
+- `tizen-doctor-mcp`: use for `validate_environment`, `get_available_ides_info`, `launch_emulator`, `discover_devices`, `connect_tv_target`, `build_project`, `install_app`, `launch_app`, and `uninstall_app`.
+- `tizen-simulator-mcp`: use for `start_simulator`, `stop_simulator`, `install_app`, `launch_app`, `list_apps`, `uninstall_app`, `get_simulator_info`, `remote_press`, `open_devtools`, `toggle_fullscreen`, and `minimize_window`.
+
+Example user-facing prompts:
+
+```text
+Use tizen-doctor-mcp.validate_environment for this repo and summarize missing Tizen prerequisites.
+```
+
+```text
+Use tizen-doctor-mcp.discover_devices, then install and launch build\codex-tizen-run\Moonlight-patched-scott-samsung.wgt on the active emulator.
+```
+
+```text
+Use tizen-simulator-mcp.start_simulator, install the Moonlight WGT, list_apps to confirm the app ID, and launch the app.
+```
+
+```text
+Use tizen-simulator-mcp.remote_press for enter, back, left, right, up, and down on the running app.
+```
+
+```text
+Use tizen-simulator-mcp.get_simulator_info and open_devtools for the running simulator.
+```
+
+Use manual CLI commands only when the MCP server is unavailable, returns an insufficient error, or lacks the exact operation needed. Use the debug bridge only when MCP tools do not expose app-internal Moonlight state such as logs, `getState`, local storage, or Add Host form automation.
+
 ## Remote Debug Bridge
 
-When emulator logs, inspector access, or text input are unreliable, use the app's dev-only HTTP polling bridge before spending time on `dlog` or manual emulator input. The tracked app config at `wasm/platform/debug_bridge_config.js` is disabled by default. Only enable it in ignored staged build output.
+When MCP tools do not expose the app-internal state needed, use the app's dev-only HTTP polling bridge before spending time on `dlog` or manual emulator input. The tracked app config at `wasm/platform/debug_bridge_config.js` is disabled by default. Only enable it in ignored staged build output.
 
 Start the local server on a LAN address the emulator can reach. Do not use `localhost` in the app config:
 
@@ -99,7 +132,7 @@ Allowed app commands are `nav`, `click`, `setValue`, `addHost`, `getState`, `loc
 
 ## VS Code Extension DevTools
 
-When the VS Code Tizen extension starts a web debug session, it opens a Chrome DevTools window for the running app. That Chrome window is backed by a local Chrome DevTools Protocol endpoint, so Codex can attach directly while the session is open. The observed frontend looked like:
+Prefer `tizen-simulator-mcp.open_devtools` for simulator DevTools. When the VS Code Tizen extension starts a web debug session, it opens a Chrome DevTools window for the running app. That Chrome window is backed by a local Chrome DevTools Protocol endpoint, so Codex can attach directly while the session is open. The observed frontend looked like:
 
 ```text
 http://127.0.0.1:35276/devtools/inspector.html?ws=127.0.0.1:35276/devtools/page/<target-id>
@@ -236,6 +269,6 @@ node --check tools/debug-bridge-server.mjs
 git -c safe.directory=C:/Dev/moonlight-tizen diff --check -- wasm/index.html wasm/platform/index.js wasm/platform/audio.js wasm/platform/debug_bridge.js wasm/platform/debug_bridge_config.js tools/debug-bridge-server.mjs .codex/skills/tizen-emulator-deploy/SKILL.md AGENTS.md .gitignore
 ```
 
-After launch, prefer the Remote Debug Bridge for startup logs, `getState`, and input-sensitive flows such as Add Host. Visual verification is still useful; if Windows Computer Use is available, follow its own skill instructions first, then capture the `Tizen Emulator` window and verify the Moonlight UI reaches the expected screen.
+After launch, prefer the Samsung MCP tools for install/launch status, simulator state, DevTools, and remote input. Use the Remote Debug Bridge for startup logs, `getState`, and input-sensitive flows such as Add Host when the MCP tools do not expose enough app-internal state. Visual verification is still useful; if Windows Computer Use is available, follow its own skill instructions first, then capture the `Tizen Emulator` window and verify the Moonlight UI reaches the expected screen.
 
 For startup/loading failures, suspect top-level JavaScript exceptions before `common.js` appends `moonlight-wasm.js`. In this repo, unguarded `tizen`/`webapis` platform probes in `wasm/platform/index.js` were enough to leave the emulator stuck on loading.

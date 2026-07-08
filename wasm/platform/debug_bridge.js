@@ -12,6 +12,11 @@
   };
 
   function installDebugLogHelper() {
+    if (window.MoonlightLogger && typeof window.MoonlightLogger.installGlobalHelper === 'function') {
+      window.MoonlightLogger.installGlobalHelper();
+      return;
+    }
+
     window.moonlightDebugLog = function(level) {
       var bridge = window.MoonlightDebugBridge;
       if (!bridge || typeof bridge.log !== 'function') {
@@ -271,6 +276,22 @@
       };
       xhr.send(payload);
     });
+  }
+
+  function subscribeToMoonlightLogger() {
+    if (!window.MoonlightLogger || typeof window.MoonlightLogger.addSink !== 'function') {
+      return false;
+    }
+
+    window.MoonlightLogger.addSink(function(entry) {
+      if (!entry) {
+        return;
+      }
+      enqueue(entry.level || 'info', entry.args || [entry.message || ''], Object.assign({
+        source: 'moonlight-logger'
+      }, entry.meta || {}));
+    });
+    return true;
   }
 
   function flush() {
@@ -664,23 +685,25 @@
     }, meta || {}));
   }
 
-  wrapConsole();
+  if (!subscribeToMoonlightLogger()) {
+    wrapConsole();
 
-  window.addEventListener('error', function(event) {
-    enqueue('error', [event.message || 'window error'], {
-      source: 'window.onerror',
-      filename: event.filename || '',
-      lineno: event.lineno || 0,
-      colno: event.colno || 0,
-      error: event.error ? serializeError(event.error) : null
+    window.addEventListener('error', function(event) {
+      enqueue('error', [event.message || 'window error'], {
+        source: 'window.onerror',
+        filename: event.filename || '',
+        lineno: event.lineno || 0,
+        colno: event.colno || 0,
+        error: event.error ? serializeError(event.error) : null
+      });
     });
-  });
 
-  window.addEventListener('unhandledrejection', function(event) {
-    enqueue('error', ['unhandledrejection', event.reason], {
-      source: 'unhandledrejection'
+    window.addEventListener('unhandledrejection', function(event) {
+      enqueue('error', ['unhandledrejection', event.reason], {
+        source: 'unhandledrejection'
+      });
     });
-  });
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function() {

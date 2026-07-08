@@ -13,6 +13,10 @@ const SyncFunctions = {
   'stopRequest': (...args) => Module.stopStream(...args),
   // no parameters
   'toggleStats': (...args) => Module.toggleStats(...args),
+  // payload, filename, token, requestedPort
+  'startLogExportServer': (...args) => Module.startLogExportServer(...args),
+  // no parameters
+  'stopLogExportServer': (...args) => Module.stopLogExportServer(...args),
 };
 
 const AsyncFunctions = {

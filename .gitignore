@@ -60,3 +60,4 @@ dir.stamp
 .DS_Store
 
 .env
+agents.override.md

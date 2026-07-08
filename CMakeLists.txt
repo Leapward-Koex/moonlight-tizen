@@ -236,6 +236,7 @@ add_executable(moonlight-wasm
     wasm/gamepad.cpp
     wasm/http.cpp
     wasm/input.cpp
+    wasm/log_export_server.cpp
     wasm/main.cpp
     wasm/profiling.cpp
     wasm/wasmplayer.cpp
