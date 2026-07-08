@@ -1,6 +1,7 @@
 #include "moonlight_wasm.hpp"
 
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 
@@ -54,6 +55,37 @@ static std::string s_StatString = "";
 static VIDEO_STATS m_ActiveWndVideoStats;
 static VIDEO_STATS m_LastWndVideoStats;
 static VIDEO_STATS m_GlobalVideoStats;
+
+namespace {
+
+struct H264ProfileSelection {
+  const char* mimeType;
+  const char* label;
+};
+
+uint64_t CalculateH264MacroblocksPerSecond(int width, int height, int framerate) {
+  if (width <= 0 || height <= 0 || framerate <= 0) {
+    return 0;
+  }
+
+  const uint64_t macroblockWidth = (static_cast<uint64_t>(width) + 15) / 16;
+  const uint64_t macroblockHeight = (static_cast<uint64_t>(height) + 15) / 16;
+  return macroblockWidth * macroblockHeight * static_cast<uint64_t>(framerate);
+}
+
+H264ProfileSelection SelectH264Profile(int width, int height, int framerate) {
+  const uint64_t macroblocksPerSecond = CalculateH264MacroblocksPerSecond(width, height, framerate);
+
+  if (macroblocksPerSecond <= 522240) {
+    return { "video/mp4; codecs=\"avc1.64002A\"", "H.264 High Level Profile 4.2" };
+  }
+  if (macroblocksPerSecond <= 983040) {
+    return { "video/mp4; codecs=\"avc1.640033\"", "H.264 High Level Profile 5.1" };
+  }
+  return { "video/mp4; codecs=\"avc1.640034\"", "H.264 High Level Profile 5.2" };
+}
+
+}
 
 MoonlightInstance::SourceListener::SourceListener(
   MoonlightInstance* instance
@@ -128,10 +160,9 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   {
     const char *mimetype = "video/mp4"; // MIME-type: Video MP4 Container
     if (videoFormat & VIDEO_FORMAT_H264) {
-      mimetype = "video/mp4; codecs=\"avc1.64002A\""; // Video codec: H.264 High Level Profile 4.2
-      /* NOTE: Depending on the capabilities of the TV, it may support higher-level codec profiles, such as:
-      5.1 (avc1.640033); */
-      ClLogMessage("Video codec profile selected: H.264 High Level Profile 4.2\n");
+      const H264ProfileSelection profile = SelectH264Profile(width, height, redrawRate);
+      mimetype = profile.mimeType;
+      ClLogMessage("Video codec profile selected: %s\n", profile.label);
     } else if (videoFormat & VIDEO_FORMAT_H265) {
       mimetype = "video/mp4; codecs=\"hev1.1.6.L153.B0\""; // Video Codec: HEVC Main Level Profile 5.1
       /* NOTE: Depending on the capabilities of the TV, it may support higher-level codec profiles, such as:
