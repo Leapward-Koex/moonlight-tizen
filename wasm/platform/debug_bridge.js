@@ -534,7 +534,11 @@
         isInGame: safeGlobalValue('isInGame'),
         isPairingInProgress: safeGlobalValue('isPairingInProgress'),
         hasNavigation: typeof Navigation !== 'undefined',
-        hasAddHostDialog: typeof addHostDialog === 'function'
+        hasAddHostDialog: typeof addHostDialog === 'function',
+        hasTizenTvWasm: typeof window.tizentvwasm !== 'undefined',
+        hasTizenSocketHostBindings: !!(window.tizentvwasm && window.tizentvwasm.SocketsHostBindings),
+        hasTizenSocketManager: !!(window.tizentvwasm && window.tizentvwasm.SocketsManager),
+        hasSharedArrayBuffer: typeof window.SharedArrayBuffer !== 'undefined'
       }
     };
   }
