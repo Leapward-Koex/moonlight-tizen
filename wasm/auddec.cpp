@@ -1,6 +1,7 @@
 #include "moonlight_wasm.hpp"
 
 #include <emscripten.h>
+#include <stdlib.h>
 
 extern "C" int g_AudioJitterMsOverride;
 
@@ -10,18 +11,10 @@ static int s_sampleRate = 0;
 
 static OpusMSDecoder* s_OpusDecoder = nullptr;
 
-// Rotating PCM slots give the main thread time to read HEAP16 before the
-// decoder overwrites the next frame.
-static constexpr int kNumSlots = 32;
-static constexpr int kMaxFrameElems = 8192; // 960 * 8 channels rounded up
-static opus_int16 s_frameSlots[kNumSlots][kMaxFrameElems];
-static int s_slotIdx = 0;
-
 int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, void* context, int arFlags) {
   s_channelCount = (size_t)opusConfig->channelCount;
   s_samplesPerFrame = (size_t)opusConfig->samplesPerFrame;
   s_sampleRate = opusConfig->sampleRate;
-  s_slotIdx = 0;
 
   int rc;
   s_OpusDecoder = opus_multistream_decoder_create(
@@ -60,24 +53,33 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
     return;
   }
 
-  opus_int16* dst = s_frameSlots[s_slotIdx % kNumSlots];
+  size_t frameElems = s_samplesPerFrame * s_channelCount;
+  opus_int16* dst = (opus_int16*)malloc(frameElems * sizeof(*dst));
+  if (!dst) {
+    return;
+  }
+
   int decodedSamples = opus_multistream_decode(
     s_OpusDecoder, (const unsigned char*)sampleData, sampleLength,
     dst, (int)s_samplesPerFrame, 0);
   if (decodedSamples <= 0) {
+    free(dst);
     return;
   }
 
-  int slotPtr = (int)(size_t)dst;
+  int framePtr = (int)(size_t)dst;
   int samplesPerFrame = decodedSamples;
   int channels = (int)s_channelCount;
   int sampleRate = s_sampleRate;
   MAIN_THREAD_ASYNC_EM_ASM({
-    if (typeof _audReceiveFrame === 'function') {
-      _audReceiveFrame($0, $1, $2, $3);
+    try {
+      if (typeof _audReceiveFrame === 'function') {
+        _audReceiveFrame($0, $1, $2, $3);
+      }
+    } finally {
+      _free($0);
     }
-  }, slotPtr, samplesPerFrame, channels, sampleRate);
-  s_slotIdx++;
+  }, framePtr, samplesPerFrame, channels, sampleRate);
 }
 
 AUDIO_RENDERER_CALLBACKS MoonlightInstance::s_ArCallbacks = {

@@ -6,6 +6,18 @@
 
 var _audNextTime = 0.0;
 var _audStarted = false;
+var _audStats = {
+  droppedFrames: 0,
+  lateResyncs: 0,
+  maxLeadMs: 0
+};
+
+function _audUpdateStats(leadSeconds) {
+  if (leadSeconds > 0) {
+    _audStats.maxLeadMs = Math.max(_audStats.maxLeadMs, Math.round(leadSeconds * 1000));
+  }
+  window._mlAudioStats = _audStats;
+}
 
 function _audReceiveFrame(ptr, samplesPerFrame, channels, sampleRate) {
   var ctx = window._mlAudioCtx;
@@ -29,15 +41,22 @@ function _audReceiveFrame(ptr, samplesPerFrame, channels, sampleRate) {
   var now = ctx.currentTime;
   var targetSeconds = (window._mlAudioTargetMs || 100) / 1000.0;
   var frameSeconds = samplesPerFrame / sampleRate;
+  var minScheduleLead = Math.max(frameSeconds, 0.01);
+  var maxScheduleLead = targetSeconds + Math.max(0.05, frameSeconds * 4);
 
   if (!_audStarted) {
     _audNextTime = now + Math.max(0, targetSeconds - frameSeconds);
     _audStarted = true;
   } else if (_audNextTime < now) {
-    _audNextTime = now + Math.min(targetSeconds, Math.max(frameSeconds, 0.02));
+    _audStats.lateResyncs++;
+    _audNextTime = now + Math.min(targetSeconds, minScheduleLead);
   }
 
-  if (_audNextTime > now + targetSeconds + frameSeconds) {
+  var leadSeconds = _audNextTime - now;
+  _audUpdateStats(leadSeconds);
+
+  if (leadSeconds > maxScheduleLead) {
+    _audStats.droppedFrames++;
     return;
   }
 
@@ -60,6 +79,10 @@ function _audReceiveFrame(ptr, samplesPerFrame, channels, sampleRate) {
 function startAudioScheduler() {
   _audNextTime = 0.0;
   _audStarted = false;
+  _audStats.droppedFrames = 0;
+  _audStats.lateResyncs = 0;
+  _audStats.maxLeadMs = 0;
+  window._mlAudioStats = _audStats;
 }
 
 function stopAudioScheduler() {

@@ -2514,7 +2514,14 @@ function ensureMoonlightAudioContext() {
   }
 
   try {
-    window._mlAudioCtx = new AudioContextConstructor();
+    try {
+      window._mlAudioCtx = new AudioContextConstructor({
+        latencyHint: 'interactive',
+        sampleRate: 48000
+      });
+    } catch (e) {
+      window._mlAudioCtx = new AudioContextConstructor();
+    }
   } catch (e) {
     window._mlAudioCtx = null;
   }
