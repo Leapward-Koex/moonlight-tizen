@@ -50,6 +50,9 @@ MoonlightInstance::MoonlightInstance()
     m_MouseDeltaY(0),
     m_HttpThreadPoolSequence(0),
     m_Dispatcher("Curl"),
+    m_Running(false),
+    m_ConnectionThread(),
+    m_InputThread(),
     m_Mutex(),
     m_EmssStateChanged(),
     m_EmssVideoStateChanged(),
@@ -62,18 +65,26 @@ MoonlightInstance::MoonlightInstance()
     m_VideoTrackListener(this),
     m_VideoTrack() {
       m_Dispatcher.start();
+      ClLogMessage("MoonlightInstance initialized\n");
     }
 
 MoonlightInstance::~MoonlightInstance() { 
+  ClLogMessage("MoonlightInstance shutting down\n");
   m_Dispatcher.stop();
 }
 
 void MoonlightInstance::OnConnectionStarted(uint32_t unused) {
+  ClLogMessage("OnConnectionStarted: running=%d, videoStarted=%d, source=%d\n",
+    m_Running, m_VideoStarted.load(), m_Source ? 1 : 0);
+
   // Tell the front end
   PostToJs(std::string("Connection Established"));
 }
 
 void MoonlightInstance::OnConnectionStopped(uint32_t error) {
+  ClLogMessage("OnConnectionStopped: error=%u, runningBefore=%d, videoStarted=%d, source=%d\n",
+    error, m_Running, m_VideoStarted.load(), m_Source ? 1 : 0);
+
   // Not running anymore
   m_Running = false;
 
@@ -87,10 +98,18 @@ void MoonlightInstance::OnConnectionStopped(uint32_t error) {
 void MoonlightInstance::StopConnection() {
   pthread_t t;
 
+  ClLogMessage("StopConnection requested: running=%d, videoStarted=%d, source=%d\n",
+    m_Running, m_VideoStarted.load(), m_Source ? 1 : 0);
+
   // Stopping needs to happen in a separate thread to avoid a potential deadlock
   // caused by us getting a callback to the main thread while inside
   // LiStopConnection.
-  pthread_create(&t, NULL, MoonlightInstance::StopThreadFunc, NULL);
+  int err = pthread_create(&t, NULL, MoonlightInstance::StopThreadFunc, NULL);
+  if (err != 0) {
+    ClLogMessage("Failed to create stop thread: %d\n", err);
+  } else {
+    ClLogMessage("Stop thread created\n");
+  }
 
   // We'll need to call the listener ourselves since our connection terminated
   // callback won't be invoked for a manually requested termination.
@@ -98,9 +117,14 @@ void MoonlightInstance::StopConnection() {
 }
 
 void* MoonlightInstance::StopThreadFunc(void* context) {
+  uint64_t stopStartMs = LiGetMillis();
+  ClLogMessage("Stop thread started; joining connection thread\n");
+
   // We must join the connection thread first, because LiStopConnection must
   // not be invoked during LiStartConnection.
   pthread_join(g_Instance->m_ConnectionThread, NULL);
+  ClLogMessage("Stop thread joined connection thread after %llu ms\n",
+    (unsigned long long)(LiGetMillis() - stopStartMs));
 
   // Force raise all modifier keys to avoid leaving them down after disconnecting
   LiSendKeyboardEvent(0xA0, KEY_ACTION_UP, 0);
@@ -115,10 +139,14 @@ void* MoonlightInstance::StopThreadFunc(void* context) {
 
   // We also need to stop this thread after the connection thread, because it
   // depends on being initialized there.
+  ClLogMessage("Stop thread joining input thread\n");
   pthread_join(g_Instance->m_InputThread, NULL);
+  ClLogMessage("Stop thread joined input thread; calling LiStopConnection\n");
 
   // Stop the connection
   LiStopConnection();
+  ClLogMessage("Stop thread completed after %llu ms\n",
+    (unsigned long long)(LiGetMillis() - stopStartMs));
   return NULL;
 }
 
@@ -140,6 +168,13 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
   MoonlightInstance* me = (MoonlightInstance*)context;
   int err;
   SERVER_INFORMATION serverInfo;
+  uint64_t connectStartMs = LiGetMillis();
+
+  ClLogMessage("Connection thread started: host=%s:%d, appVersion=%s, gfeVersion=%s, videoFormats=0x%x, audioConfig=0x%x, packetSize=%d, audioPacketDurationSetting=%d, audioJitterSetting=%d, playHostAudio=%d\n",
+    me->m_Host.c_str(), me->m_HttpPort, me->m_AppVersion.c_str(), me->m_GfeVersion.c_str(),
+    me->m_StreamConfig.supportedVideoFormats, me->m_StreamConfig.audioConfiguration,
+    me->m_StreamConfig.packetSize, me->m_AudioPacketDuration, me->m_AudioJitterMs,
+    me->m_PlayHostAudioEnabled);
 
   // Post a status update before we begin
   PostToJs(std::string("Starting connection to ") + me->m_Host);
@@ -193,10 +228,15 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
   // Apply user-selected Web Audio jitter target. Zero means the scheduler uses
   // its default of 100 ms.
   g_AudioJitterMsOverride = me->m_AudioJitterMs;
+  ClLogMessage("Audio startup overrides applied: packetDurationMs=%d, jitterTargetMs=%d\n",
+    g_AudioPacketDurationOverride, g_AudioJitterMsOverride != 0 ? g_AudioJitterMsOverride : 100);
 
   err = LiStartConnection(&serverInfo, &me->m_StreamConfig, &MoonlightInstance::s_ClCallbacks,
     &MoonlightInstance::s_DrCallbacks, &MoonlightInstance::s_ArCallbacks, NULL, 0, NULL, 0);
   if (err != 0) {
+    ClLogMessage("LiStartConnection failed after %llu ms: err=%d\n",
+      (unsigned long long)(LiGetMillis() - connectStartMs), err);
+
     // Notify the JS code that the stream has ended!
     // NB: We pass error code 0 here to avoid triggering a "Connection terminated" warning message.
     PostToJs(MSG_STREAM_TERMINATED + std::to_string(0));
@@ -206,7 +246,13 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
   // Set running state before starting connection-specific threads
   me->m_Running = true;
 
-  pthread_create(&me->m_InputThread, NULL, MoonlightInstance::InputThreadFunc, me);
+  int inputThreadErr = pthread_create(&me->m_InputThread, NULL, MoonlightInstance::InputThreadFunc, me);
+  if (inputThreadErr != 0) {
+    ClLogMessage("Failed to create input polling thread: %d\n", inputThreadErr);
+  } else {
+    ClLogMessage("Connection established after %llu ms; input polling thread started\n",
+      (unsigned long long)(LiGetMillis() - connectStartMs));
+  }
 
   return NULL;
 }
@@ -222,6 +268,11 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats) {
+  ClLogMessage("StartStream requested: host=%s:%d, mode=%sx%s@%s, bitrate=%s Kbps, codec=%s, audio=%s, audioPacketDuration=%d, audioJitterMs=%d, playHostAudio=%d, gameMode=%d, runningBefore=%d, videoStarted=%d, sourceExisting=%d\n",
+    host.c_str(), httpPort, width.c_str(), height.c_str(), fps.c_str(), bitrate.c_str(),
+    videoCodec.c_str(), audioConfig.c_str(), audioPacketDuration, audioJitterMs, playHostAudio,
+    gameMode, m_Running, m_VideoStarted.load(), m_Source ? 1 : 0);
+
   PostToJs("Setting the Host address to: " + host + ":" + std::to_string(httpPort));
   PostToJs("Setting the Video resolution to: " + width + "x" + height);
   PostToJs("Setting the Video frame rate to: " + fps + " FPS");
@@ -311,6 +362,10 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
     m_StreamConfig.supportedVideoFormats = VIDEO_FORMAT_H264;
     PostToJs("Selecting the fallback video format to: VIDEO_FORMAT_H264");
   }
+  ClLogMessage("Stream configuration prepared: width=%d, height=%d, fps=%d, bitrate=%d, packetSize=%d, supportedVideoFormats=0x%x, audioConfiguration=0x%x, remoteStreaming=%d\n",
+    m_StreamConfig.width, m_StreamConfig.height, m_StreamConfig.fps, m_StreamConfig.bitrate,
+    m_StreamConfig.packetSize, m_StreamConfig.supportedVideoFormats,
+    m_StreamConfig.audioConfiguration, m_StreamConfig.streamingRemotely);
 
   // Initialize the color range with default value
   m_StreamConfig.colorRange = 0;
@@ -364,8 +419,16 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   // Initialize the rendering surface before starting the connection
   if (InitializeRenderingSurface(m_StreamConfig.width, m_StreamConfig.height)) {
     // Start the worker thread to establish the connection
-    pthread_create(&m_ConnectionThread, NULL, MoonlightInstance::ConnectionThreadFunc, this);
+    int err = pthread_create(&m_ConnectionThread, NULL, MoonlightInstance::ConnectionThreadFunc, this);
+    if (err != 0) {
+      ClLogMessage("Failed to create connection thread: %d\n", err);
+      OnConnectionStopped(0);
+      return MessageResult::Reject(emscripten::val(err));
+    }
+    ClLogMessage("Connection thread created for host=%s:%d\n", m_Host.c_str(), m_HttpPort);
   } else {
+    ClLogMessage("Failed to initialize rendering surface: width=%d, height=%d\n",
+      m_StreamConfig.width, m_StreamConfig.height);
     // Failed to initialize renderer
     OnConnectionStopped(0);
   }
@@ -374,6 +437,8 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
 }
 
 MessageResult MoonlightInstance::StopStream() {
+  ClLogMessage("StopStream requested\n");
+
   // Begin connection teardown
   StopConnection();
 
@@ -502,6 +567,8 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats) {
+  MoonlightInstance::ClLogMessage("JS bridge invoked startStream: host=%s:%d, width=%s, height=%s, fps=%s, bitrate=%s\n",
+    host.c_str(), httpPort, width.c_str(), height.c_str(), fps.c_str(), bitrate.c_str());
   PostToJs("Starting the streaming session...");
   return g_Instance->StartStream(host, httpPort, width, height, fps, bitrate, rikey, rikeyid, appversion, gfeversion, rtspurl, serverCodecModeSupport,
   framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons, audioConfig,
@@ -509,6 +576,7 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
 }
 
 MessageResult stopStream() {
+  MoonlightInstance::ClLogMessage("JS bridge invoked stopStream\n");
   PostToJs("Stopping the streaming session...");
   return g_Instance->StopStream();
 }

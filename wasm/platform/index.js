@@ -103,6 +103,19 @@ function logDebugBridge(level, eventName, details) {
   }, details || {}));
 }
 
+function getAudioContextDebugSnapshot(audioContext) {
+  if (!audioContext) {
+    return null;
+  }
+  return {
+    state: audioContext.state,
+    sampleRate: audioContext.sampleRate,
+    currentTime: audioContext.currentTime,
+    baseLatency: typeof audioContext.baseLatency === 'number' ? audioContext.baseLatency : null,
+    outputLatency: typeof audioContext.outputLatency === 'number' ? audioContext.outputLatency : null
+  };
+}
+
 function getElementDataValue(selector) {
   try {
     var value = $(selector).data('value');
@@ -2932,40 +2945,86 @@ function handleOnScreenOverlays() {
 
 function ensureMoonlightAudioContext() {
   if (window._mlAudioCtx && window._mlAudioCtx.state !== 'closed') {
+    logDebugBridge('debug', 'audio context reused', {
+      context: getAudioContextDebugSnapshot(window._mlAudioCtx)
+    });
     return window._mlAudioCtx;
   }
 
   const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
   if (!AudioContextConstructor) {
     window._mlAudioCtx = null;
+    logDebugBridge('error', 'audio context unavailable', {
+      hasAudioContext: !!window.AudioContext,
+      hasWebkitAudioContext: !!window.webkitAudioContext
+    });
     return null;
   }
 
   try {
     try {
+      logDebugBridge('info', 'audio context create requested', {
+        latencyHint: 'interactive',
+        requestedSampleRate: 48000
+      });
       window._mlAudioCtx = new AudioContextConstructor({
         latencyHint: 'interactive',
         sampleRate: 48000
       });
     } catch (e) {
+      logDebugBridge('warn', 'audio context create with requested sample rate failed; retrying default constructor', {
+        error: e && e.message ? e.message : String(e)
+      });
       window._mlAudioCtx = new AudioContextConstructor();
     }
   } catch (e) {
     window._mlAudioCtx = null;
+    logDebugBridge('error', 'audio context create failed', {
+      error: e && e.message ? e.message : String(e)
+    });
   }
 
+  logDebugBridge(window._mlAudioCtx ? 'info' : 'error', 'audio context create complete', {
+    context: getAudioContextDebugSnapshot(window._mlAudioCtx)
+  });
   return window._mlAudioCtx;
 }
 
 function resumeMoonlightAudioContext() {
   const audioContext = ensureMoonlightAudioContext();
+  if (!audioContext) {
+    logDebugBridge('error', 'audio context resume skipped because context is unavailable');
+    return audioContext;
+  }
+
   if (audioContext && audioContext.state === 'suspended') {
     try {
+      logDebugBridge('warn', 'audio context resume requested', {
+        context: getAudioContextDebugSnapshot(audioContext)
+      });
       const resumePromise = audioContext.resume();
       if (resumePromise && typeof resumePromise.catch === 'function') {
-        resumePromise.catch(function() {});
+        resumePromise.then(function() {
+          logDebugBridge('info', 'audio context resume resolved', {
+            context: getAudioContextDebugSnapshot(audioContext)
+          });
+        }).catch(function(error) {
+          logDebugBridge('error', 'audio context resume rejected', {
+            error: error && error.message ? error.message : String(error),
+            context: getAudioContextDebugSnapshot(audioContext)
+          });
+        });
       }
-    } catch (e) {}
+    } catch (e) {
+      logDebugBridge('error', 'audio context resume threw', {
+        error: e && e.message ? e.message : String(e),
+        context: getAudioContextDebugSnapshot(audioContext)
+      });
+    }
+  } else {
+    logDebugBridge('debug', 'audio context resume not needed', {
+      context: getAudioContextDebugSnapshot(audioContext)
+    });
   }
   return audioContext;
 }
@@ -3152,6 +3211,10 @@ function startGame(host, appID) {
       resumeMoonlightAudioContext();
       if (typeof startAudioScheduler === 'function') {
         startAudioScheduler();
+      } else {
+        logDebugBridge('error', 'audio scheduler start function missing before stream request', {
+          hasAudioJsStats: !!window._mlAudioStats
+        });
       }
       showStreamMode();
 

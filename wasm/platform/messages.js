@@ -111,6 +111,68 @@ function describeStreamTermination(errorCode) {
   }
 }
 
+function summarizeMessageParams(method, params) {
+  var values = Array.isArray(params) ? params : [];
+  if (method === 'startRequest') {
+    return {
+      host: values[0],
+      httpPort: values[1],
+      width: values[2],
+      height: values[3],
+      fps: values[4],
+      bitrateKbps: values[5],
+      hasRemoteInputKey: !!values[6],
+      hasRemoteInputKeyId: values[7] != null,
+      appVersion: values[8],
+      gfeVersion: values[9],
+      hasRtspSessionUrl: !!values[10],
+      rtspSessionUrlLength: values[10] ? String(values[10]).length : 0,
+      serverCodecModeSupport: values[11],
+      framePacing: values[12],
+      optimizeGames: values[13],
+      rumbleFeedback: values[14],
+      mouseEmulation: values[15],
+      flipABfaceButtons: values[16],
+      flipXYfaceButtons: values[17],
+      audioConfig: values[18],
+      audioPacketDuration: values[19],
+      audioJitterMs: values[20],
+      playHostAudio: values[21],
+      videoCodec: values[22],
+      hdrMode: values[23],
+      fullRange: values[24],
+      gameMode: values[25],
+      disableWarnings: values[26],
+      performanceStats: values[27]
+    };
+  }
+  if (method === 'openUrl') {
+    return {
+      urlLength: values[0] ? String(values[0]).length : 0,
+      hasPrivateKey: !!values[1],
+      binaryResponse: values[2]
+    };
+  }
+  if (method === 'httpInit') {
+    return {
+      hasCert: !!values[0],
+      hasPrivateKey: !!values[1],
+      hasUniqueId: !!values[2]
+    };
+  }
+  if (method === 'pair') {
+    return {
+      serverMajorVersion: values[0],
+      address: values[1],
+      httpPort: values[2],
+      hasPin: !!values[3]
+    };
+  }
+  return {
+    paramCount: values.length
+  };
+}
+
 /**
  * var sendMessage - Sends a message with arguments to the Wasm module
  *
@@ -119,30 +181,110 @@ function describeStreamTermination(errorCode) {
  * @return {void}        The Wasm module calls back through the handleMessage method
  */
 var sendMessage = function(method, params) {
+  var args = Array.isArray(params) ? params : [];
+  var summary = summarizeMessageParams(method, args);
+  var startedAt = Date.now();
+  var lifecycleMethod = method === 'startRequest' || method === 'stopRequest';
+  logWasmMessage(lifecycleMethod ? 'info' : 'debug', 'wasm method requested', {
+    method: method,
+    isSync: !!SyncFunctions[method],
+    isAsync: !!AsyncFunctions[method],
+    params: summary
+  });
+
   if (SyncFunctions[method]) {
     return new Promise(function(resolve, reject) {
-      const ret = SyncFunctions[method](...params);
-      if (ret.type === "resolve") {
-        resolve(ret.ret);
-      } else {
-        reject(ret.ret);
+      try {
+        const ret = SyncFunctions[method](...args);
+        logWasmMessage(ret.type === "resolve" ? (lifecycleMethod ? 'info' : 'debug') : 'error', 'wasm sync method completed', {
+          method: method,
+          resultType: ret.type,
+          elapsedMs: Date.now() - startedAt,
+          params: summary
+        });
+        if (ret.type === "resolve") {
+          resolve(ret.ret);
+        } else {
+          reject(ret.ret);
+        }
+      } catch (error) {
+        logWasmMessage('error', 'wasm sync method threw', {
+          method: method,
+          elapsedMs: Date.now() - startedAt,
+          error: error && error.message ? error.message : String(error),
+          params: summary
+        });
+        reject(error);
       }
     });
+  } else if (!AsyncFunctions[method]) {
+    logWasmMessage('error', 'wasm method rejected because no bridge function exists', {
+      method: method,
+      params: summary
+    });
+    return Promise.reject(new Error('Unknown Wasm bridge method: ' + method));
   } else {
     return new Promise(function(resolve, reject) {
       const id = callbacks_ids++;
       callbacks[id] = {
         'resolve': resolve,
-        'reject': reject
+        'reject': reject,
+        method: method,
+        startedAt: startedAt,
+        params: summary
       };
 
-      AsyncFunctions[method](id, ...params);
+      try {
+        AsyncFunctions[method](id, ...args);
+        logWasmMessage('debug', 'wasm async method dispatched', {
+          method: method,
+          callbackId: id,
+          params: summary
+        });
+      } catch (error) {
+        delete callbacks[id];
+        logWasmMessage('error', 'wasm async method threw during dispatch', {
+          method: method,
+          callbackId: id,
+          elapsedMs: Date.now() - startedAt,
+          error: error && error.message ? error.message : String(error),
+          params: summary
+        });
+        reject(error);
+      }
     });
   }
 }
 
 var handlePromiseMessage = function(callbackId, type, msg) {
-  callbacks[callbackId][type](msg);
+  var callback = callbacks[callbackId];
+  if (!callback) {
+    logWasmMessage('error', 'wasm async callback missing', {
+      callbackId: callbackId,
+      type: type
+    });
+    return;
+  }
+
+  logWasmMessage(type === 'resolve' ? 'debug' : 'error', 'wasm async method completed', {
+    method: callback.method,
+    callbackId: callbackId,
+    resultType: type,
+    elapsedMs: Date.now() - callback.startedAt,
+    params: callback.params
+  });
+
+  if (typeof callback[type] !== 'function') {
+    logWasmMessage('error', 'wasm async callback type invalid', {
+      method: callback.method,
+      callbackId: callbackId,
+      type: type
+    });
+    delete callbacks[callbackId];
+    return;
+  }
+
+  callback[type](msg);
   delete callbacks[callbackId];
 }
 

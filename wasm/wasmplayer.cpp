@@ -46,6 +46,10 @@ static std::chrono::time_point<std::chrono::steady_clock> s_lastTime;
 
 static bool s_hasFirstFrame = false;
 static bool s_FramePacingEnabled = false;
+static bool s_loggedFirstDecodeUnit = false;
+static bool s_loggedFirstAppend = false;
+static uint32_t s_DecodeUnitsBeforeVideoStart = 0;
+static uint64_t s_VideoSetupStartMs = 0;
 
 static uint32_t total_bytes = 0;
 static int m_LastFrameNumber = 0;
@@ -92,21 +96,21 @@ MoonlightInstance::SourceListener::SourceListener(
 ) : m_Instance(instance) {}
 
 void MoonlightInstance::SourceListener::OnSourceOpen() {
-  ClLogMessage("EMSS::OnOpen\n");
+  ClLogMessage("EMSS::OnOpen (source ready)\n");
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_EmssReadyState = EmssReadyState::kOpen;
   m_Instance->m_EmssStateChanged.notify_all();
 }
 
 void MoonlightInstance::SourceListener::OnSourceOpenPending() {
-  ClLogMessage("EMSS::OnOpenPending\n");
+  ClLogMessage("EMSS::OnOpenPending (source opening)\n");
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_EmssReadyState = EmssReadyState::kOpenPending;
   m_Instance->m_EmssStateChanged.notify_all();
 }
 
 void MoonlightInstance::SourceListener::OnSourceClosed() {
-  ClLogMessage("EMSS::OnClosed\n");
+  ClLogMessage("EMSS::OnClosed (source detached/closed)\n");
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_EmssReadyState = EmssReadyState::kClosed;
   m_Instance->m_EmssStateChanged.notify_all();
@@ -117,21 +121,25 @@ MoonlightInstance::VideoTrackListener::VideoTrackListener(
 ) : m_Instance(instance) {}
 
 void MoonlightInstance::VideoTrackListener::OnTrackOpen() {
-  ClLogMessage("VIDEO ElementaryMediaTrack::OnTrackOpen\n");
+  ClLogMessage("VIDEO ElementaryMediaTrack::OnTrackOpen (sessionId=%u)\n",
+    static_cast<unsigned int>(m_Instance->m_VideoSessionId.load()));
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_VideoStarted = true;
   m_Instance->m_EmssVideoStateChanged.notify_all();
   LiRequestIdrFrame();
 }
 
-void MoonlightInstance::VideoTrackListener::OnTrackClosed(samsung::wasm::ElementaryMediaTrack::CloseReason) {
-  ClLogMessage("VIDEO ElementaryMediaTrack::OnTrackClosed\n");
+void MoonlightInstance::VideoTrackListener::OnTrackClosed(samsung::wasm::ElementaryMediaTrack::CloseReason reason) {
+  ClLogMessage("VIDEO ElementaryMediaTrack::OnTrackClosed (reason=%d, sessionId=%u)\n",
+    static_cast<int>(reason), static_cast<unsigned int>(m_Instance->m_VideoSessionId.load()));
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_VideoStarted = false;
 }
 
 void MoonlightInstance::VideoTrackListener::OnSessionIdChanged(samsung::wasm::SessionId new_session_id) {
-  ClLogMessage("VIDEO ElementaryMediaTrack::OnSessionIdChanged\n");
+  ClLogMessage("VIDEO ElementaryMediaTrack::OnSessionIdChanged: old=%u, new=%u\n",
+    static_cast<unsigned int>(m_Instance->m_VideoSessionId.load()),
+    static_cast<unsigned int>(new_session_id));
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_VideoSessionId.store(new_session_id);
 }
@@ -149,9 +157,13 @@ bool MoonlightInstance::InitializeRenderingSurface(int width, int height) {
 }
 
 int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height, int redrawRate, void* context, int drFlags) {
+  ClLogMessage("Video startup setup: format=0x%x, width=%d, height=%d, fps=%d, drFlags=0x%x, source=%d, videoStarted=%d\n",
+    videoFormat, width, height, redrawRate, drFlags, g_Instance->m_Source ? 1 : 0,
+    g_Instance->m_VideoStarted.load());
   ClLogMessage("Video: binding source to element\n");
   g_Instance->m_MediaElement.SetSrc(g_Instance->m_Source.get());
 
+  ClLogMessage("Video: waiting for source closed state before adding track\n");
   g_Instance->WaitFor(&g_Instance->m_EmssStateChanged, [] {
     return g_Instance->m_EmssReadyState == EmssReadyState::kClosed;
   });
@@ -204,10 +216,18 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
       g_Instance->m_VideoTrack = std::move(*add_track_result);
       g_Instance->m_VideoTrack.SetListener(&g_Instance->m_VideoTrackListener);
     }
+    else {
+      ClLogMessage("Video: AddTrack failed for mimeType=%s, width=%d, height=%d, fps=%d\n",
+        mimetype, width, height, redrawRate);
+      return -1;
+    }
   }
 
   ClLogMessage("Video: opening source\n");
-  g_Instance->m_Source->Open([](EmssOperationResult){});
+  g_Instance->m_Source->Open([](EmssOperationResult result) {
+    ClLogMessage("Video: source open callback result=%d\n", static_cast<int>(result));
+  });
+  ClLogMessage("Video: waiting for source open-pending state\n");
   g_Instance->WaitFor(&g_Instance->m_EmssStateChanged, [] {
     return g_Instance->m_EmssReadyState == EmssReadyState::kOpenPending;
   });
@@ -215,7 +235,7 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   ClLogMessage("Video: source ready, calling Play\n");
   g_Instance->m_MediaElement.Play([](EmssOperationResult err) {
     if (err != EmssOperationResult::kSuccess) {
-      ClLogMessage("Video: Play error\n");
+      ClLogMessage("Video: Play error result=%d\n", static_cast<int>(err));
     } else {
       ClLogMessage("Video: Play success\n");
     }
@@ -231,6 +251,7 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
 }
 
 int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int redrawRate, void* context, int drFlags) {
+  s_VideoSetupStartMs = LiGetMillis();
   ClLogMessage("Video decoding setup has started.\n");
 
   // Resize the decode buffer based on initial decode buffer length
@@ -250,6 +271,9 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
 
   // Flag indicating whether this is the first frame of video to be decoded
   s_hasFirstFrame = false;
+  s_loggedFirstDecodeUnit = false;
+  s_loggedFirstAppend = false;
+  s_DecodeUnitsBeforeVideoStart = 0;
 
   // Initialize the last second timestamp to zero
   s_lastSec = 0s;
@@ -285,6 +309,10 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
 }
 
 void MoonlightInstance::VidDecCleanup(void) {
+  ClLogMessage("Video decoder cleanup: setupLifetimeMs=%llu, decodeUnitsBeforeVideoStart=%u, totalBytes=%u\n",
+    (unsigned long long)(s_VideoSetupStartMs ? LiGetMillis() - s_VideoSetupStartMs : 0),
+    s_DecodeUnitsBeforeVideoStart, total_bytes);
+
   // Clear the decode buffer
   s_DecodeBuffer.clear();
 
@@ -295,7 +323,21 @@ void MoonlightInstance::VidDecCleanup(void) {
 int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   // Check if video playback has not started
   if (!g_Instance->m_VideoStarted) {
+    s_DecodeUnitsBeforeVideoStart++;
+    if (s_DecodeUnitsBeforeVideoStart <= 3 || (s_DecodeUnitsBeforeVideoStart % 100) == 0) {
+      ClLogMessage("Video decode unit arrived before track open: count=%u, frameNumber=%d, frameType=%d, fullLength=%u\n",
+        s_DecodeUnitsBeforeVideoStart, decodeUnit->frameNumber, decodeUnit->frameType,
+        decodeUnit->fullLength);
+    }
     return DR_OK;
+  }
+
+  if (!s_loggedFirstDecodeUnit) {
+    s_loggedFirstDecodeUnit = true;
+    ClLogMessage("First video decode unit accepted after %llu ms: frameNumber=%d, frameType=%d, fullLength=%u, receiveToQueueMs=%u\n",
+      (unsigned long long)(s_VideoSetupStartMs ? LiGetMillis() - s_VideoSetupStartMs : 0),
+      decodeUnit->frameNumber, decodeUnit->frameType, decodeUnit->fullLength,
+      decodeUnit->enqueueTimeMs - decodeUnit->receiveTimeMs);
   }
 
   // Declare variables for entry data, offset, and total length
@@ -474,8 +516,18 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     // Track total render time and count rendered frames
     m_ActiveWndVideoStats.totalRenderTime += afterRender - beforeRender;
     m_ActiveWndVideoStats.renderedFrames++;
+    if (!s_loggedFirstAppend) {
+      s_loggedFirstAppend = true;
+      ClLogMessage("First video packet appended after %llu ms: frameNumber=%d, keyFrame=%d, packetBytes=%u, renderCallMs=%u, sessionId=%u\n",
+        (unsigned long long)(s_VideoSetupStartMs ? LiGetMillis() - s_VideoSetupStartMs : 0),
+        decodeUnit->frameNumber, decodeUnit->frameType == FRAME_TYPE_IDR, offset,
+        afterRender - beforeRender, static_cast<unsigned int>(g_Instance->m_VideoSessionId.load()));
+    }
   } else {
-    ClLogMessage("Append video packet failed\n");
+    ClLogMessage("Append video packet failed: frameNumber=%d, frameType=%d, bytes=%u, sessionId=%u, videoStarted=%d\n",
+      decodeUnit->frameNumber, decodeUnit->frameType, offset,
+      static_cast<unsigned int>(g_Instance->m_VideoSessionId.load()),
+      g_Instance->m_VideoStarted.load());
     return DR_NEED_IDR;
   }
 
