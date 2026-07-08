@@ -71,13 +71,22 @@
 #include <stdio.h>
 #include "Limelight.h"
 
+#ifdef __EMSCRIPTEN__
+#define LC_FALLBACK_LOG(message) emscripten_log(EM_LOG_CONSOLE, "%s", message)
+#else
+#define LC_FALLBACK_LOG(message) fprintf(stderr, "%s", message)
+#endif
+
 #ifdef LC_LOG
 #define Limelog(format, ...) \
     do { \
+        char message[1024]; \
+        snprintf(message, sizeof(message), format, ##__VA_ARGS__); \
         if (ListenerCallbacks.logMessage) { \
-            char message[1024]; \
-            snprintf(message, sizeof(message), format, ##__VA_ARGS__); \
-            ListenerCallbacks.logMessage(message); \
+            ListenerCallbacks.logMessage("%s", message); \
+        } \
+        else { \
+            LC_FALLBACK_LOG(message); \
         } \
     } while(0)
 #else

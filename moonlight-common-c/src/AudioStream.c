@@ -17,6 +17,16 @@ static unsigned short lastSeq;
 static bool pingThreadStarted;
 static bool receivedDataFromPeer;
 static uint64_t firstReceiveTime;
+static uint64_t audioStreamStartTime;
+static uint32_t audioPacketsReceived;
+static uint32_t audioDataPacketsReceived;
+static uint32_t audioFecPacketsReceived;
+static uint32_t audioPacketsSubmitted;
+static uint32_t audioResyncPacketsDropped;
+static uint32_t audioRuntPackets;
+static uint32_t audioQueueOverflows;
+static uint32_t audioDecryptFailures;
+static uint32_t audioPlcRequests;
 
 #ifdef LC_DEBUG
 #define INVALID_OPUS_HEADER 0x00
@@ -72,6 +82,16 @@ int initializeAudioStream(void) {
     receivedDataFromPeer = false;
     pingThreadStarted = false;
     firstReceiveTime = 0;
+    audioStreamStartTime = PltGetMillis();
+    audioPacketsReceived = 0;
+    audioDataPacketsReceived = 0;
+    audioFecPacketsReceived = 0;
+    audioPacketsSubmitted = 0;
+    audioResyncPacketsDropped = 0;
+    audioRuntPackets = 0;
+    audioQueueOverflows = 0;
+    audioDecryptFailures = 0;
+    audioPlcRequests = 0;
     audioDecryptionCtx = PltCreateCryptoContext();
 #ifdef LC_DEBUG
     opusHeaderByte = INVALID_OPUS_HEADER;
@@ -80,6 +100,9 @@ int initializeAudioStream(void) {
     // Copy and byte-swap the AV RI key ID used for the audio encryption IV
     memcpy(&avRiKeyId, StreamConfig.remoteInputAesIv, sizeof(avRiKeyId));
     avRiKeyId = BE32(avRiKeyId);
+
+    Limelog("Audio stream initialized: audioConfig=0x%x, encryptionFlags=0x%x, arCaps=0x%x\n",
+            StreamConfig.audioConfiguration, StreamConfig.encryptionFlags, AudioCallbacks.capabilities);
 
     return 0;
 }
@@ -91,12 +114,17 @@ int notifyAudioPortNegotiationComplete(void) {
     LC_ASSERT(!pingThreadStarted);
     LC_ASSERT(AudioPortNumber != 0);
 
+    Limelog("Audio port negotiation complete: audioPort=%u, addressFamily=%d\n",
+            AudioPortNumber, RemoteAddr.ss_family);
+
     // For GFE 3.22 compatibility, we must start the audio ping thread before the RTSP handshake.
     // It will not reply to our RTSP PLAY request until the audio ping has been received.
     rtpSocket = bindUdpSocket(RemoteAddr.ss_family, &LocalAddr, AddrLen, 0, SOCK_QOS_TYPE_AUDIO);
     if (rtpSocket == INVALID_SOCKET) {
+        Limelog("Audio UDP socket bind failed: error=%d\n", (int)LastSocketError());
         return LastSocketFail();
     }
+    Limelog("Audio UDP socket bound; starting ping thread\n");
 
     // Include audio packets already queued by the OS socket buffer in the
     // initial drop window so startup begins near live audio.
@@ -106,10 +134,12 @@ int notifyAudioPortNegotiationComplete(void) {
     // drop the first 1 second of audio packets to catch up with the backlog.
     int err = PltCreateThread("AudioPing", AudioPingThreadProc, NULL, &udpPingThread);
     if (err != 0) {
+        Limelog("Audio ping thread creation failed: %d\n", err);
         return err;
     }
 
     pingThreadStarted = true;
+    Limelog("Audio ping thread started\n");
     return 0;
 }
 
@@ -128,10 +158,14 @@ static void freePacketList(PLINKED_BLOCKING_QUEUE_ENTRY entry) {
 
 // Tear down the audio stream once we're done with it
 void destroyAudioStream(void) {
+    Limelog("Destroying audio stream: socketOpen=%d, pingThreadStarted=%d\n",
+            rtpSocket != INVALID_SOCKET, pingThreadStarted);
+
     if (rtpSocket != INVALID_SOCKET) {
         if (pingThreadStarted) {
             PltInterruptThread(&udpPingThread);
             PltJoinThread(&udpPingThread);
+            Limelog("Audio ping thread stopped\n");
         }
 
         closeSocket(rtpSocket);
@@ -141,6 +175,7 @@ void destroyAudioStream(void) {
     PltDestroyCryptoContext(audioDecryptionCtx);
     freePacketList(LbqDestroyLinkedBlockingQueue(&packetQueue));
     RtpaCleanupQueue(&rtpAudioQueue);
+    Limelog("Audio stream destroyed\n");
 }
 
 static bool queuePacketToLbq(PQUEUED_AUDIO_PACKET* packet) {
@@ -153,7 +188,9 @@ static bool queuePacketToLbq(PQUEUED_AUDIO_PACKET* packet) {
             *packet = NULL;
         }
         else if (err == LBQ_BOUND_EXCEEDED) {
-            Limelog("Audio packet queue overflow\n");
+            audioQueueOverflows++;
+            Limelog("Audio packet queue overflow: overflows=%u, queuedFrames=%d\n",
+                    audioQueueOverflows, LiGetPendingAudioFrames());
 
             // The audio queue is full, so free all existing items and try again
             freePacketList(LbqFlushQueueItems(&packetQueue));
@@ -168,6 +205,8 @@ static void decodeInputData(PQUEUED_AUDIO_PACKET packet) {
     // packet. Trigger packet loss concealment logic in libopus by
     // invoking the decoder with a NULL buffer.
     if (packet->header.size == 0) {
+        audioPlcRequests++;
+        audioPacketsSubmitted++;
         AudioCallbacks.decodeAndPlaySample(NULL, 0);
         return;
     }
@@ -199,7 +238,9 @@ static void decodeInputData(PQUEUED_AUDIO_PACKET packet) {
                                NULL, 0,
                                (unsigned char*)(rtp + 1), dataLength,
                                decryptedOpusData, &dataLength)) {
-            Limelog("Failed to decrypt audio packet (sequence number: %u)\n", rtp->sequenceNumber);
+            audioDecryptFailures++;
+            Limelog("Failed to decrypt audio packet (sequence number: %u, failures=%u)\n",
+                    rtp->sequenceNumber, audioDecryptFailures);
             LC_ASSERT_VT(false);
             return;
         }
@@ -219,6 +260,7 @@ static void decodeInputData(PQUEUED_AUDIO_PACKET packet) {
         }
 #endif
 
+        audioPacketsSubmitted++;
         AudioCallbacks.decodeAndPlaySample((char*)decryptedOpusData, dataLength);
     }
     else {
@@ -236,6 +278,7 @@ static void decodeInputData(PQUEUED_AUDIO_PACKET packet) {
         }
 #endif
 
+        audioPacketsSubmitted++;
         AudioCallbacks.decodeAndPlaySample((char*)(rtp + 1), packet->header.size - sizeof(*rtp));
     }
 }
@@ -247,9 +290,11 @@ static void AudioReceiveThreadProc(void* context) {
     bool useSelect;
     uint32_t packetsToDrop;
     int waitingForAudioMs;
+    int nextAudioWaitLogMs;
 
     packet = NULL;
     packetsToDrop = 500 / AudioPacketDuration;
+    nextAudioWaitLogMs = 1000;
 
     if (setNonFatalRecvTimeoutMs(rtpSocket, UDP_RECV_POLL_TIMEOUT_MS) < 0) {
         // SO_RCVTIMEO failed, so use select() to wait
@@ -259,6 +304,10 @@ static void AudioReceiveThreadProc(void* context) {
         // SO_RCVTIMEO timeout set for recv()
         useSelect = false;
     }
+
+    Limelog("Audio receive thread started: packetSize=%d, audioPacketDuration=%d, initialDropMs=%d, useSelect=%d, encrypted=%d\n",
+            MAX_PACKET_SIZE, AudioPacketDuration, packetsToDrop * AudioPacketDuration,
+            useSelect, AudioEncryptionEnabled);
 
     waitingForAudioMs = 0;
     while (!PltIsThreadInterrupted(&receiveThread)) {
@@ -282,6 +331,11 @@ static void AudioReceiveThreadProc(void* context) {
             
             if (!receivedDataFromPeer) {
                 waitingForAudioMs += UDP_RECV_POLL_TIMEOUT_MS;
+                if (waitingForAudioMs >= nextAudioWaitLogMs) {
+                    Limelog("Still waiting for first audio packet after %d ms (audioPort=%u)\n",
+                            waitingForAudioMs, AudioPortNumber);
+                    nextAudioWaitLogMs += 1000;
+                }
             }
             else {
                 // If we hit this path, there are no queued audio packets on the host PC,
@@ -293,14 +347,28 @@ static void AudioReceiveThreadProc(void* context) {
 
         if (packet->header.size < (int)sizeof(RTP_PACKET)) {
             // Runt packet
+            audioRuntPackets++;
+            if (audioRuntPackets <= 3 || (audioRuntPackets % 100) == 0) {
+                Limelog("Discarding runt audio packet: size=%d, runts=%u\n",
+                        packet->header.size, audioRuntPackets);
+            }
             continue;
         }
 
         rtp = (PRTP_PACKET)&packet->data[0];
+        audioPacketsReceived++;
+        if (rtp->packetType == 97) {
+            audioDataPacketsReceived++;
+        }
+        else {
+            audioFecPacketsReceived++;
+        }
 
         if (!receivedDataFromPeer) {
             receivedDataFromPeer = true;
-            Limelog("Received first audio packet after %d ms\n", waitingForAudioMs);
+            Limelog("Received first audio packet after %d ms (size=%d, type=%u, seq=%u, timestamp=%u)\n",
+                    waitingForAudioMs, packet->header.size, rtp->packetType,
+                    BE16(rtp->sequenceNumber), BE32(rtp->timestamp));
 
             if (firstReceiveTime != 0) {
                 packetsToDrop += (uint32_t)(PltGetMillis() - firstReceiveTime) / AudioPacketDuration;
@@ -314,7 +382,12 @@ static void AudioReceiveThreadProc(void* context) {
         if (packetsToDrop > 0) {
             // Only count actual audio data (not FEC) in the packets to drop calculation
             if (rtp->packetType == 97) {
+                audioResyncPacketsDropped++;
                 packetsToDrop--;
+                if (audioResyncPacketsDropped <= 3 || packetsToDrop == 0) {
+                    Limelog("Dropping startup audio packet for resync: dropped=%u, remainingDropMs=%u\n",
+                            audioResyncPacketsDropped, packetsToDrop * AudioPacketDuration);
+                }
             }
             continue;
         }
@@ -382,6 +455,11 @@ static void AudioReceiveThreadProc(void* context) {
     if (packet != NULL) {
         free(packet);
     }
+
+    Limelog("Audio receive thread exiting: received=%u, data=%u, fec=%u, submitted=%u, startupDrops=%u, runts=%u, decryptFailures=%u, plcRequests=%u\n",
+            audioPacketsReceived, audioDataPacketsReceived, audioFecPacketsReceived,
+            audioPacketsSubmitted, audioResyncPacketsDropped, audioRuntPackets,
+            audioDecryptFailures, audioPlcRequests);
 }
 
 static void AudioDecoderThreadProc(void* context) {
@@ -402,6 +480,10 @@ static void AudioDecoderThreadProc(void* context) {
 }
 
 void stopAudioStream(void) {
+    Limelog("Stopping audio stream: received=%u, submitted=%u, startupDrops=%u, overflows=%u, pendingFrames=%d, pendingDurationMs=%d\n",
+            audioPacketsReceived, audioPacketsSubmitted, audioResyncPacketsDropped,
+            audioQueueOverflows, LiGetPendingAudioFrames(), LiGetPendingAudioDuration());
+
     if (!receivedDataFromPeer) {
         Limelog("No audio traffic was ever received from the host!\n");
     }
@@ -421,6 +503,11 @@ void stopAudioStream(void) {
     }
 
     AudioCallbacks.cleanup();
+    Limelog("Audio stream stopped: lifetimeMs=%llu, received=%u, data=%u, fec=%u, submitted=%u, startupDrops=%u, runts=%u, overflows=%u, decryptFailures=%u, plcRequests=%u\n",
+            (unsigned long long)(PltGetMillis() - audioStreamStartTime),
+            audioPacketsReceived, audioDataPacketsReceived, audioFecPacketsReceived,
+            audioPacketsSubmitted, audioResyncPacketsDropped, audioRuntPackets,
+            audioQueueOverflows, audioDecryptFailures, audioPlcRequests);
 }
 
 int startAudioStream(void* audioContext, int arFlags) {
@@ -440,25 +527,35 @@ int startAudioStream(void* audioContext, int arFlags) {
     }
 
     chosenConfig.samplesPerFrame = 48 * AudioPacketDuration;
+    Limelog("Starting audio stream: audioPacketDuration=%d, sampleRate=%d, channels=%d, streams=%d, coupledStreams=%d, samplesPerFrame=%d, arFlags=0x%x, directSubmit=%d\n",
+            AudioPacketDuration, chosenConfig.sampleRate, chosenConfig.channelCount,
+            chosenConfig.streams, chosenConfig.coupledStreams, chosenConfig.samplesPerFrame,
+            arFlags, (AudioCallbacks.capabilities & CAPABILITY_DIRECT_SUBMIT) != 0);
 
     err = AudioCallbacks.init(StreamConfig.audioConfiguration, &chosenConfig, audioContext, arFlags);
     if (err != 0) {
+        Limelog("Audio renderer init failed: %d\n", err);
         return err;
     }
+    Limelog("Audio renderer init complete\n");
 
     AudioCallbacks.start();
+    Limelog("Audio renderer start callback complete\n");
 
     err = PltCreateThread("AudioRecv", AudioReceiveThreadProc, NULL, &receiveThread);
     if (err != 0) {
+        Limelog("Audio receive thread creation failed: %d\n", err);
         AudioCallbacks.stop();
         closeSocket(rtpSocket);
         AudioCallbacks.cleanup();
         return err;
     }
+    Limelog("Audio receive thread created\n");
 
     if ((AudioCallbacks.capabilities & CAPABILITY_DIRECT_SUBMIT) == 0) {
         err = PltCreateThread("AudioDec", AudioDecoderThreadProc, NULL, &decoderThread);
         if (err != 0) {
+            Limelog("Audio decoder thread creation failed: %d\n", err);
             AudioCallbacks.stop();
             PltInterruptThread(&receiveThread);
             PltJoinThread(&receiveThread);
@@ -466,8 +563,10 @@ int startAudioStream(void* audioContext, int arFlags) {
             AudioCallbacks.cleanup();
             return err;
         }
+        Limelog("Audio decoder thread created\n");
     }
 
+    Limelog("Audio stream started\n");
     return 0;
 }
 

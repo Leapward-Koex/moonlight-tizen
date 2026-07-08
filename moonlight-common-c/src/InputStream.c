@@ -7,6 +7,7 @@ static bool encryptedControlStream;
 static bool needsBatchedScroll;
 static int batchedScrollDelta;
 static PPLT_CRYPTO_CONTEXT cryptoContext;
+static uint64_t inputStreamStartTimeMs;
 
 static LINKED_BLOCKING_QUEUE packetQueue;
 static LINKED_BLOCKING_QUEUE packetHolderFreeList;
@@ -94,6 +95,7 @@ typedef struct _PACKET_HOLDER {
 
 // Initializes the input stream
 int initializeInputStream(void) {
+    inputStreamStartTimeMs = PltGetMillis();
     memcpy(currentAesIv, StreamConfig.remoteInputAesIv, sizeof(currentAesIv));
     
     // Set a high maximum queue size limit to ensure input isn't dropped
@@ -123,12 +125,17 @@ int initializeInputStream(void) {
     memset(&currentAbsoluteMouseState, 0, sizeof(currentAbsoluteMouseState));
     PltCreateMutex(&batchedInputMutex);
 
+    Limelog("Input stream initialized: appMajor=%d, encryptedControl=%d, needsBatchedScroll=%d, maxQueuedPackets=%d\n",
+            AppVersionQuad[0], encryptedControlStream, needsBatchedScroll, MAX_QUEUED_INPUT_PACKETS);
+
     return 0;
 }
 
 // Destroys and cleans up the input stream
 void destroyInputStream(void) {
     PLINKED_BLOCKING_QUEUE_ENTRY entry, nextEntry;
+    Limelog("Destroying input stream: initialized=%d, inputSockOpen=%d\n",
+            initialized, inputSock != INVALID_SOCKET);
     
     PltDestroyCryptoContext(cryptoContext);
 
@@ -155,6 +162,7 @@ void destroyInputStream(void) {
     }
 
     PltDeleteMutex(&batchedInputMutex);
+    Limelog("Input stream destroyed\n");
 }
 
 static int encryptData(unsigned char* plaintext, int plaintextLen,
@@ -696,20 +704,26 @@ static int sendEnableHaptics(void) {
 // Begin the input stream
 int startInputStream(void) {
     int err;
+    Limelog("Starting input stream: appMajor=%d, usesControlStream=%d\n",
+            AppVersionQuad[0], AppVersionQuad[0] >= 5);
 
     // After Gen 5, we send input on the control stream
     if (AppVersionQuad[0] < 5) {
         inputSock = connectTcpSocket(&RemoteAddr, AddrLen,
             35043, INPUT_STREAM_TIMEOUT_SEC);
         if (inputSock == INVALID_SOCKET) {
+            Limelog("Failed to connect legacy input socket: port=35043, error=%d\n",
+                    (int)LastSocketError());
             return LastSocketFail();
         }
 
         enableNoDelay(inputSock);
+        Limelog("Legacy input socket connected: port=35043\n");
     }
 
     err = PltCreateThread("InputSend", inputSendThreadProc, NULL, &inputSendThread);
     if (err != 0) {
+        Limelog("Input send thread creation failed: %d\n", err);
         if (inputSock != INVALID_SOCKET) {
             closeSocket(inputSock);
             inputSock = INVALID_SOCKET;
@@ -719,15 +733,21 @@ int startInputStream(void) {
 
     // Allow input packets to be queued now
     initialized = true;
+    Limelog("Input send thread created; input queue enabled\n");
 
     // GFE will not send haptics events without this magic packet first
     sendEnableHaptics();
 
+    Limelog("Input stream started\n");
     return err;
 }
 
 // Stops the input stream
 int stopInputStream(void) {
+    uint64_t stopStartMs = PltGetMillis();
+    Limelog("Stopping input stream: initialized=%d, inputSockOpen=%d\n",
+            initialized, inputSock != INVALID_SOCKET);
+
     // No more packets should be queued now
     initialized = false;
     LbqSignalQueueShutdown(&packetHolderFreeList);
@@ -746,6 +766,9 @@ int stopInputStream(void) {
         inputSock = INVALID_SOCKET;
     }
 
+    Limelog("Input stream stopped: elapsedMs=%llu, lifetimeMs=%llu\n",
+            (unsigned long long)(PltGetMillis() - stopStartMs),
+            (unsigned long long)(inputStreamStartTimeMs ? PltGetMillis() - inputStreamStartTimeMs : 0));
     return 0;
 }
 
