@@ -11,8 +11,19 @@
     }
   };
 
+  function installDebugLogHelper() {
+    window.moonlightDebugLog = function(level) {
+      var bridge = window.MoonlightDebugBridge;
+      if (!bridge || typeof bridge.log !== 'function') {
+        return;
+      }
+      bridge.log.apply(bridge, arguments);
+    };
+  }
+
   if (!config.enabled || !config.serverUrl || !config.token) {
     window.MoonlightDebugBridge = disabledApi;
+    installDebugLogHelper();
     return;
   }
 
@@ -694,6 +705,7 @@
     getState: executeGetState,
     executeCommand: executeCommand
   };
+  installDebugLogHelper();
 
   enqueue('info', ['debug bridge enabled', clientId], {
     source: 'debug-bridge',

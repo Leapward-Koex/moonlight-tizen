@@ -614,6 +614,23 @@ NvHTTP.prototype = {
   },
 
   launchApp: function(appId, mode, sops, rikey, rikeyid, enableHdr, localAudio, surroundAudioInfo, gamepadMask) {
+    if (typeof window.moonlightDebugLog === 'function') {
+      window.moonlightDebugLog('info', 'nvhttp launchApp openUrl', {
+        source: 'utils.js',
+        hostname: this.hostname,
+        address: this.address,
+        httpsPort: this.httpsPort,
+        appId: appId,
+        mode: mode,
+        sops: sops,
+        enableHdr: enableHdr,
+        localAudio: localAudio,
+        surroundAudioInfo: surroundAudioInfo,
+        gamepadMask: gamepadMask,
+        remoteInputKeyGenerated: !!rikey,
+        remoteInputKeyIdGenerated: rikeyid !== null && typeof rikeyid !== 'undefined'
+      });
+    }
     return sendMessage('openUrl', [
       this._baseUrlHttps + '/launch?' + this._buildUidStr() + '&appid=' + appId + '&mode=' + mode +
       '&additionalStates=1&sops=' + sops + '&rikey=' + rikey + '&rikeyid=' + rikeyid + '&hdrMode=' + enableHdr +
@@ -623,6 +640,22 @@ NvHTTP.prototype = {
   },
 
   resumeApp: function(mode, sops, rikey, rikeyid, enableHdr, localAudio, surroundAudioInfo, gamepadMask) {
+    if (typeof window.moonlightDebugLog === 'function') {
+      window.moonlightDebugLog('info', 'nvhttp resumeApp openUrl', {
+        source: 'utils.js',
+        hostname: this.hostname,
+        address: this.address,
+        httpsPort: this.httpsPort,
+        mode: mode,
+        sops: sops,
+        enableHdr: enableHdr,
+        localAudio: localAudio,
+        surroundAudioInfo: surroundAudioInfo,
+        gamepadMask: gamepadMask,
+        remoteInputKeyGenerated: !!rikey,
+        remoteInputKeyIdGenerated: rikeyid !== null && typeof rikeyid !== 'undefined'
+      });
+    }
     return sendMessage('openUrl', [
       this._baseUrlHttps + '/resume?' + this._buildUidStr() + '&mode=' + mode +
       '&additionalStates=1&sops=' + sops + '&rikey=' + rikey + '&rikeyid=' + rikeyid + '&hdrMode=' + enableHdr +

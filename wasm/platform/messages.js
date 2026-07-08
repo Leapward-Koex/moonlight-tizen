@@ -29,6 +29,84 @@ const AsyncFunctions = {
 var callbacks = {}
 var callbacks_ids = 1;
 
+function logWasmMessage(level, eventName, details) {
+  if (typeof window.moonlightDebugLog !== 'function') {
+    return;
+  }
+  window.moonlightDebugLog(level, eventName, Object.assign({
+    source: 'messages.js'
+  }, details || {}));
+}
+
+function classifyWasmMessage(msg) {
+  if (msg.indexOf('streamTerminated: ') === 0) {
+    return 'streamTerminated';
+  }
+  if (msg.indexOf('ProgressMsg: ') === 0) {
+    return 'ProgressMsg';
+  }
+  if (msg.indexOf('TransientMsg: ') === 0) {
+    return 'TransientMsg';
+  }
+  if (msg.indexOf('DialogMsg: ') === 0) {
+    return 'DialogMsg';
+  }
+  if (msg.indexOf('NoWarningMsg: ') === 0) {
+    return 'NoWarningMsg';
+  }
+  if (msg.indexOf('WarningMsg: ') === 0) {
+    return 'WarningMsg';
+  }
+  if (msg.indexOf('NoStatMsg: ') === 0) {
+    return 'NoStatMsg';
+  }
+  if (msg.indexOf('StatMsg: ') === 0) {
+    return 'StatMsg';
+  }
+  if (msg.indexOf('controllerRumble: ') === 0) {
+    return 'controllerRumble';
+  }
+  if (msg.indexOf('mouseEmulationOn') === 0) {
+    return 'mouseEmulationOn';
+  }
+  if (msg.indexOf('mouseEmulationOff') === 0) {
+    return 'mouseEmulationOff';
+  }
+  return 'Other';
+}
+
+function sanitizeWasmMessage(msg) {
+  if (msg.indexOf('Setting the Remote input key to: ') === 0) {
+    return 'Setting the Remote input key to: [redacted]';
+  }
+  if (msg.indexOf('Setting the Remote input key ID to: ') === 0) {
+    return 'Setting the Remote input key ID to: [redacted]';
+  }
+  if (msg.indexOf('Setting the RTSP session URL to: ') === 0) {
+    return 'Setting the RTSP session URL to: [redacted]';
+  }
+  return msg;
+}
+
+function describeStreamTermination(errorCode) {
+  switch (errorCode) {
+    case 0:
+      return 'ML_ERROR_GRACEFUL_TERMINATION';
+    case -100:
+      return 'ML_ERROR_NO_VIDEO_TRAFFIC';
+    case -101:
+      return 'ML_ERROR_NO_VIDEO_FRAME';
+    case -102:
+      return 'ML_ERROR_UNEXPECTED_EARLY_TERMINATION';
+    case -103:
+      return 'ML_ERROR_PROTECTED_CONTENT';
+    case -104:
+      return 'ML_ERROR_FRAME_CONVERSION';
+    default:
+      return 'UNKNOWN';
+  }
+}
+
 /**
  * var sendMessage - Sends a message with arguments to the Wasm module
  *
@@ -71,7 +149,15 @@ var handlePromiseMessage = function(callbackId, type, msg) {
  * @return {void}
  */
 function handleMessage(msg) {
-  console.log('%c[messages.js, handleMessage]', 'color: gray;', 'Message data: ', msg);
+  var safeMessage = sanitizeWasmMessage(msg);
+  console.log('%c[messages.js, handleMessage]', 'color: gray;', 'Message data: ', safeMessage);
+  var messageType = classifyWasmMessage(msg);
+  if (messageType !== 'StatMsg') {
+    logWasmMessage('info', 'wasm message received', {
+      type: messageType,
+      message: safeMessage
+    });
+  }
   // If it's a recognized event, notify the appropriate function
   if (msg.indexOf('streamTerminated: ') === 0) {
     if (typeof stopAudioScheduler === 'function') {
@@ -86,6 +172,11 @@ function handleMessage(msg) {
     $('#wasm_module').css('display', 'none');
     // Show a termination snackbar message if the termination was unexpected
     var errorCode = parseInt(msg.replace('streamTerminated: ', ''));
+    logWasmMessage(errorCode === 0 ? 'info' : 'error', 'stream terminated', {
+      errorCode: errorCode,
+      reason: describeStreamTermination(errorCode),
+      isInGame: typeof isInGame !== 'undefined' ? isInGame : null
+    });
     switch (errorCode) {
       case 0: // ML_ERROR_GRACEFUL_TERMINATION
         break;
@@ -117,28 +208,45 @@ function handleMessage(msg) {
       Navigation.change(Views.Apps);
     }, 1500);
   } else if (msg === 'Connection Established') {
+    logWasmMessage('info', 'stream connection established');
     // Prepare the screen for video stream
     $('#loadingSpinner').css('display', 'none');
     $('body').css('backgroundColor', 'transparent');
     $('#wasm_module').css('display', '');
     $('#wasm_module').focus();
   } else if (msg.indexOf('ProgressMsg: ') === 0) {
+    logWasmMessage('info', 'stream progress', {
+      progress: msg.replace('ProgressMsg: ', '')
+    });
     // Show progress message under loading spinner
     $('#loadingSpinnerMessage').text(msg.replace('ProgressMsg: ', ''));
   } else if (msg.indexOf('TransientMsg: ') === 0) {
+    logWasmMessage('warn', 'stream transient message', {
+      message: msg.replace('TransientMsg: ', '')
+    });
     // Show transient message as notification
     snackbarLogLong(msg.replace('TransientMsg: ', ''));
   } else if (msg.indexOf('DialogMsg: ') === 0) {
+    logWasmMessage('error', 'stream dialog message', {
+      message: msg.replace('DialogMsg: ', '')
+    });
     // Show dialog message using the warning dialog
     warningDialog('Warning', msg.replace('DialogMsg: ', ''));
   } else if (msg === 'displayVideo') {
+    logWasmMessage('info', 'stream display video');
     // Show the video stream now
     $('#listener').addClass('fullscreen');
   } else if (msg.indexOf('NoWarningMsg: ') === 0) {
+    logWasmMessage('info', 'stream warning cleared', {
+      message: msg.replace('NoWarningMsg: ', '')
+    });
     // Hide the connection warnings overlay
     $('#connection-warnings').css('background', 'transparent');
     $('#connection-warnings').text('');
   } else if (msg.indexOf('WarningMsg: ') === 0) {
+    logWasmMessage('warn', 'stream connection warning', {
+      message: msg.replace('WarningMsg: ', '')
+    });
     // Show the connection warnings overlay
     $('#connection-warnings').css('background', 'rgba(0, 0, 0, 0.5)');
     $('#connection-warnings').text(msg.replace('WarningMsg: ', ''));

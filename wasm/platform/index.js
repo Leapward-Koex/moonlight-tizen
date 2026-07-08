@@ -92,6 +92,127 @@ const NAVIGATION_DELAY = 150; // Navigation delay set to 150ms (milliseconds)
 const UPDATE_TIMESTAMP = 'lastUpdateCheck'; // Use the update check timestamp key to determine the last update check
 const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // Automatic check for updates interval is set to 24 hours
 
+function logDebugBridge(level, eventName, details) {
+  if (typeof window.moonlightDebugLog !== 'function') {
+    return;
+  }
+  window.moonlightDebugLog(level, eventName, Object.assign({
+    source: 'index.js'
+  }, details || {}));
+}
+
+function getElementDataValue(selector) {
+  try {
+    var value = $(selector).data('value');
+    return value == null ? '' : value;
+  } catch (e) {
+    return '';
+  }
+}
+
+function getElementInputValue(selector) {
+  try {
+    return $(selector).val();
+  } catch (e) {
+    return '';
+  }
+}
+
+function getSwitchState(selector) {
+  try {
+    return $(selector).parent().hasClass('is-checked') ? 1 : 0;
+  } catch (e) {
+    return null;
+  }
+}
+
+function getStreamSettingsSnapshot() {
+  var resolution = getElementDataValue('#selectResolution').toString();
+  var resolutionParts = resolution.split(':');
+  return {
+    resolution: resolution,
+    width: resolutionParts[0] || '',
+    height: resolutionParts[1] || '',
+    frameRate: getElementDataValue('#selectFramerate').toString(),
+    bitrateMbps: getElementInputValue('#bitrateSlider'),
+    optimizeBitrate: getSwitchState('#optimizeBitrateSwitch'),
+    framePacing: getSwitchState('#framePacingSwitch'),
+    optimizeGames: getSwitchState('#optimizeGamesSwitch'),
+    audioConfig: getElementDataValue('#selectAudio').toString(),
+    audioPacketDuration: getElementDataValue('#selectAudioPacketDuration').toString(),
+    audioJitterMs: getElementInputValue('#jitterSlider'),
+    playHostAudio: getSwitchState('#playHostAudioSwitch'),
+    videoCodec: getElementDataValue('#selectCodec').toString(),
+    hdrMode: getSwitchState('#hdrModeSwitch'),
+    fullRange: getSwitchState('#fullRangeSwitch'),
+    gameMode: getSwitchState('#gameModeSwitch'),
+    disableWarnings: getSwitchState('#disableWarningsSwitch'),
+    performanceStats: getSwitchState('#performanceStatsSwitch')
+  };
+}
+
+function getDisplayModeSummary(displayModes) {
+  try {
+    var keys = Object.keys(displayModes || {});
+    return {
+      count: keys.length,
+      sample: keys.slice(0, 20).map(function(key) {
+        return key + '=' + displayModes[key];
+      })
+    };
+  } catch (e) {
+    return {
+      count: 0,
+      sample: []
+    };
+  }
+}
+
+function getHostDebugSnapshot(host) {
+  if (!host) {
+    return null;
+  }
+  return {
+    hostname: host.hostname,
+    address: host.address,
+    httpPort: host.httpPort,
+    httpsPort: host.httpsPort,
+    paired: host.paired,
+    online: host.online,
+    currentGame: host.currentGame,
+    appVersion: host.appVersion,
+    gfeVersion: host.gfeVersion,
+    serverMajorVersion: host.serverMajorVersion,
+    serverState: host.serverState,
+    serverCodecModeSupport: host.serverCodecModeSupport,
+    isNvidiaServerSoftware: host.isNvidiaServerSoftware,
+    gpuType: host.gputype,
+    displayModes: getDisplayModeSummary(host.supportedDisplayModes)
+  };
+}
+
+function getHostDisplayModeSupport(host, width, height) {
+  if (!host || !host.supportedDisplayModes) {
+    return null;
+  }
+  var key = height + ':' + width;
+  return {
+    key: key,
+    refreshRates: host.supportedDisplayModes[key] || []
+  };
+}
+
+function getResponseTextLength(response) {
+  if (response == null) {
+    return 0;
+  }
+  try {
+    return response.toString().length;
+  } catch (e) {
+    return null;
+  }
+}
+
 // Called by the common.js module
 function attachListeners() {
   changeUiModeForWasmLoad();
@@ -2321,6 +2442,13 @@ function quitAppDialog() {
 // Handle layout elements when displaying the Stream view
 function showStreamMode() {
   console.log('%c[index.js, showStreamMode]', 'color: green;', 'Entering "Show Stream" mode.');
+  logDebugBridge('info', 'show stream mode', {
+    settings: getStreamSettingsSnapshot(),
+    windowSize: {
+      width: window.innerWidth,
+      height: window.innerHeight
+    }
+  });
   $('#main-header').hide();
   $('#main-content').children().not('#listener, #loadingSpinner').hide();
   $('#main-content').addClass('fullscreen');
@@ -2349,6 +2477,16 @@ function fullscreenWasmModule() {
   module.width = zoom * streamWidth;
   module.height = zoom * streamHeight;
   module.style.marginTop = ((screenHeight - module.height) / 2) + 'px';
+  logDebugBridge('debug', 'fullscreen wasm module calculated', {
+    streamWidth: streamWidth,
+    streamHeight: streamHeight,
+    screenWidth: screenWidth,
+    screenHeight: screenHeight,
+    zoom: zoom,
+    moduleWidth: module.width,
+    moduleHeight: module.height,
+    marginTop: module.style.marginTop
+  });
 }
 
 // Handle on-screen overlays when the streaming session starts
@@ -2401,8 +2539,19 @@ function resumeMoonlightAudioContext() {
 function startGame(host, appID) {
   if (!host || !host.paired) {
     console.error('%c[index.js, startGame]', 'color: green;', 'Error: Attempted to start a game, but the host was not initialized properly! Host object: ', host);
+    logDebugBridge('error', 'stream start rejected invalid host', {
+      appID: appID,
+      hasHost: !!host,
+      host: getHostDebugSnapshot(host)
+    });
     return;
   }
+
+  logDebugBridge('info', 'stream start requested', {
+    appID: appID,
+    host: getHostDebugSnapshot(host),
+    settings: getStreamSettingsSnapshot()
+  });
 
   // Create/resume the AudioContext while still inside the user gesture. The
   // scheduler itself starts only once stream setup is actually underway.
@@ -2410,9 +2559,26 @@ function startGame(host, appID) {
 
   // Refresh the server info, because the user might have quit the game
   host.refreshServerInfo().then(function(ret) {
+    logDebugBridge('info', 'stream host refresh complete', {
+      appID: appID,
+      host: getHostDebugSnapshot(host)
+    });
     host.getAppById(appID).then(function(appToStart) {
+      logDebugBridge('info', 'stream app resolved', {
+        appID: appID,
+        appTitle: appToStart ? appToStart.title : '',
+        currentGame: host.currentGame,
+        host: getHostDebugSnapshot(host)
+      });
       if (host.currentGame != 0 && host.currentGame != appID) {
         host.getAppById(host.currentGame).then(function(currentApp) {
+          logDebugBridge('warn', 'stream start blocked by running app', {
+            requestedAppID: appID,
+            requestedAppTitle: appToStart ? appToStart.title : '',
+            currentGame: host.currentGame,
+            currentAppTitle: currentApp ? currentApp.title : '',
+            host: getHostDebugSnapshot(host)
+          });
           // Find the existing overlay and dialog elements
           var quitAppOverlay = document.querySelector('#quitAppDialogOverlay');
           var quitAppDialog = document.querySelector('#quitAppDialog');
@@ -2488,6 +2654,37 @@ function startGame(host, appID) {
       const gameMode = $('#gameModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const disableWarnings = $('#disableWarningsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const performanceStats = $('#performanceStatsSwitch').parent().hasClass('is-checked') ? 1 : 0;
+      var streamMode = streamWidth + 'x' + streamHeight + 'x' + frameRate;
+      var streamStartDetails = {
+        appID: appID,
+        appTitle: appToStart ? appToStart.title : '',
+        host: getHostDebugSnapshot(host),
+        streamMode: streamMode,
+        streamWidth: streamWidth,
+        streamHeight: streamHeight,
+        frameRate: frameRate,
+        bitrateKbps: bitrate,
+        framePacing: framePacing,
+        optimizeGames: optimizeGames,
+        rumbleFeedback: rumbleFeedback,
+        mouseEmulation: mouseEmulation,
+        flipABfaceButtons: flipABfaceButtons,
+        flipXYfaceButtons: flipXYfaceButtons,
+        audioConfig: audioConfig,
+        audioPacketDuration: audioPacketDuration,
+        audioJitterMs: audioJitterMs,
+        playHostAudio: playHostAudio,
+        videoCodec: videoCodec,
+        hdrMode: hdrMode,
+        fullRange: fullRange,
+        gameMode: gameMode,
+        disableWarnings: disableWarnings,
+        performanceStats: performanceStats,
+        gamepadMask: gamepadMask,
+        remoteInputKeyGenerated: rikey.length > 0,
+        remoteInputKeyIdGenerated: rikeyid !== null && typeof rikeyid !== 'undefined',
+        selectedDisplayModeSupport: getHostDisplayModeSupport(host, streamWidth, streamHeight)
+      };
 
       console.log('%c[index.js, startGame]', 'color: green;', 'startRequest:' + 
       '\n Host address: ' + host.address + ':' + host.httpPort + 
@@ -2510,6 +2707,7 @@ function startGame(host, appID) {
       '\n Game Mode: ' + gameMode + 
       '\n Disable connection warnings: ' + disableWarnings + 
       '\n Performance statistics: ' + performanceStats);
+      logDebugBridge('info', 'stream request parameters prepared', streamStartDetails);
 
       // Hide on-screen overlays until the streaming session begins
       $('#connection-warnings, #performance-stats').css('background', 'transparent').text('');
@@ -2524,9 +2722,12 @@ function startGame(host, appID) {
 
       // Check if user wants to resume the already-running app
       if (host.currentGame == appID) {
+        logDebugBridge('info', 'host resume request sending', Object.assign({
+          operation: 'resume'
+        }, streamStartDetails));
         // If the app is already running, we can just resume it
         return host.resumeApp(
-          streamWidth + 'x' + streamHeight + 'x' + frameRate, // Resolution and frame rate
+          streamMode, // Resolution and frame rate
           optimizeGames, // Optimize game settings (SOPS)
           rikey, rikeyid, // Remote input key and key ID
           hdrMode, // Auto HDR video streaming
@@ -2538,6 +2739,17 @@ function startGame(host, appID) {
           $root = $xml.find('root');
           var status_code = $root.attr('status_code');
           var status_message = $root.attr('status_message');
+          var sessionUrl = $root.find('sessionUrl0').text().trim();
+          logDebugBridge(status_code != 200 ? 'warn' : 'info', 'host resume response', {
+            operation: 'resume',
+            appID: appID,
+            appTitle: appToStart ? appToStart.title : '',
+            statusCode: status_code,
+            statusMessage: status_message,
+            hasSessionUrl: !!sessionUrl,
+            sessionUrlLength: sessionUrl.length,
+            responseLength: getResponseTextLength(launchResult)
+          });
           if (status_code != 200) {
             $('#loadingSpinnerMessage').text('');
             snackbarLogLong('Error ' + status_code + ': ' + status_message);
@@ -2551,15 +2763,37 @@ function startGame(host, appID) {
             return;
           }
           // Start stream request
-          sendMessage('startRequest', [
+          var resumeStartRequestDetails = Object.assign({
+            operation: 'resume',
+            hasSessionUrl: !!sessionUrl,
+            sessionUrlLength: sessionUrl.length
+          }, streamStartDetails);
+          logDebugBridge('info', 'wasm startRequest sending', resumeStartRequestDetails);
+          var resumeStartRequest = sendMessage('startRequest', [
             host.address, host.httpPort, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
-            host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
+            host.appVersion, host.gfeVersion, sessionUrl, host.serverCodecModeSupport,
             framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
             audioConfig, audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
             performanceStats
           ]);
+          resumeStartRequest.then(function() {
+            logDebugBridge('info', 'wasm startRequest resolved', resumeStartRequestDetails);
+          }, function(error) {
+            logDebugBridge('error', 'wasm startRequest rejected', {
+              operation: 'resume',
+              appID: appID,
+              error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(error) : String(error)
+            });
+          });
         }, function(failedResumeApp) {
           console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to resume app with id: ' + appID + '\n Returned error was: ' + failedResumeApp + '!');
+          logDebugBridge('error', 'host resume request failed', {
+            operation: 'resume',
+            appID: appID,
+            appTitle: appToStart ? appToStart.title : '',
+            error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(failedResumeApp) : String(failedResumeApp),
+            host: getHostDebugSnapshot(host)
+          });
           snackbarLog('Failed to resume ' + appToStart.title);
           showApps(host);
           setTimeout(() => {
@@ -2573,9 +2807,12 @@ function startGame(host, appID) {
       }
 
       // If the user wants to launch the app, then we start launching it
+      logDebugBridge('info', 'host launch request sending', Object.assign({
+        operation: 'launch'
+      }, streamStartDetails));
       host.launchApp(
         appID, // App ID
-        streamWidth + 'x' + streamHeight + 'x' + frameRate, // Resolution and frame rate
+        streamMode, // Resolution and frame rate
         optimizeGames, // Optimize game settings (SOPS)
         rikey, rikeyid, // Remote input key and key ID
         hdrMode, // Auto HDR video streaming
@@ -2587,6 +2824,17 @@ function startGame(host, appID) {
         $root = $xml.find('root');
         var status_code = $root.attr('status_code');
         var status_message = $root.attr('status_message');
+        var sessionUrl = $root.find('sessionUrl0').text().trim();
+        logDebugBridge(status_code != 200 ? 'warn' : 'info', 'host launch response', {
+          operation: 'launch',
+          appID: appID,
+          appTitle: appToStart ? appToStart.title : '',
+          statusCode: status_code,
+          statusMessage: status_message,
+          hasSessionUrl: !!sessionUrl,
+          sessionUrlLength: sessionUrl.length,
+          responseLength: getResponseTextLength(launchResult)
+        });
         if (status_code != 200) {
           if (status_code == 4294967295 && status_message == 'Invalid') {
             // Special case handling an audio capture error which GFE doesn't provide any useful status message
@@ -2605,15 +2853,37 @@ function startGame(host, appID) {
           return;
         }
         // Start stream request
-        sendMessage('startRequest', [
+        var launchStartRequestDetails = Object.assign({
+          operation: 'launch',
+          hasSessionUrl: !!sessionUrl,
+          sessionUrlLength: sessionUrl.length
+        }, streamStartDetails);
+        logDebugBridge('info', 'wasm startRequest sending', launchStartRequestDetails);
+        var launchStartRequest = sendMessage('startRequest', [
           host.address, host.httpPort, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
-          host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
+          host.appVersion, host.gfeVersion, sessionUrl, host.serverCodecModeSupport,
           framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
           audioConfig, audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
           performanceStats
         ]);
+        launchStartRequest.then(function() {
+          logDebugBridge('info', 'wasm startRequest resolved', launchStartRequestDetails);
+        }, function(error) {
+          logDebugBridge('error', 'wasm startRequest rejected', {
+            operation: 'launch',
+            appID: appID,
+            error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(error) : String(error)
+          });
+        });
       }, function(failedLaunchApp) {
         console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to launch app with id: ' + appID + '\n Returned error was: ' + failedLaunchApp + '!');
+        logDebugBridge('error', 'host launch request failed', {
+          operation: 'launch',
+          appID: appID,
+          appTitle: appToStart ? appToStart.title : '',
+          error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(failedLaunchApp) : String(failedLaunchApp),
+          host: getHostDebugSnapshot(host)
+        });
         snackbarLog('Failed to launch ' + appToStart.title + '.');
         showApps(host);
         setTimeout(() => {
@@ -2627,6 +2897,12 @@ function startGame(host, appID) {
     });
   }, function(failedRefreshInfo) {
     console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo + ' and failed server was: ' + '\n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
+    logDebugBridge('error', 'stream host refresh failed', {
+      appID: appID,
+      error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(failedRefreshInfo) : String(failedRefreshInfo),
+      host: getHostDebugSnapshot(host),
+      settings: getStreamSettingsSnapshot()
+    });
   });
 }
 
@@ -2819,25 +3095,55 @@ function saveHosts() {
 }
 
 function saveResolution() {
+  var previousResolution = $('#selectResolution').data('value');
   var chosenResolution = $(this).data('value');
   $('#selectResolution').text($(this).text()).data('value', chosenResolution);
   console.log('%c[index.js, saveResolution]', 'color: green;', 'Saving resolution value: ' + chosenResolution);
+  logDebugBridge('info', 'resolution selected', {
+    previousResolution: previousResolution,
+    chosenResolution: chosenResolution,
+    label: $(this).text(),
+    maxSupportedWidth: maxSupportedWidth,
+    maxSupportedHeight: maxSupportedHeight,
+    settingsBeforePreset: getStreamSettingsSnapshot()
+  });
   storeData('resolution', chosenResolution, null);
 
   // Update the bitrate value based on the selected resolution
-  $('#optimizeBitrateSwitch').prop('checked') ? optimizeBitratePresets() : standardBitratePresets();
+  var presetMode = $('#optimizeBitrateSwitch').prop('checked') ? 'optimized' : 'standard';
+  presetMode === 'optimized' ? optimizeBitratePresets() : standardBitratePresets();
+  logDebugBridge('info', 'resolution applied', {
+    previousResolution: previousResolution,
+    chosenResolution: chosenResolution,
+    bitratePresetMode: presetMode,
+    settingsAfterPreset: getStreamSettingsSnapshot()
+  });
   // Trigger warning check after changing video resolution
   warnResolutionFramerate();
 }
 
 function saveFramerate() {
+  var previousFramerate = $('#selectFramerate').data('value');
   var chosenFramerate = $(this).data('value');
   $('#selectFramerate').text($(this).text()).data('value', chosenFramerate);
   console.log('%c[index.js, saveFramerate]', 'color: green;', 'Saving framerate value: ' + chosenFramerate);
+  logDebugBridge('info', 'framerate selected', {
+    previousFramerate: previousFramerate,
+    chosenFramerate: chosenFramerate,
+    label: $(this).text(),
+    settingsBeforePreset: getStreamSettingsSnapshot()
+  });
   storeData('frameRate', chosenFramerate, null);
 
   // Update the bitrate value based on the selected frame rate
-  $('#optimizeBitrateSwitch').prop('checked') ? optimizeBitratePresets() : standardBitratePresets();
+  var presetMode = $('#optimizeBitrateSwitch').prop('checked') ? 'optimized' : 'standard';
+  presetMode === 'optimized' ? optimizeBitratePresets() : standardBitratePresets();
+  logDebugBridge('info', 'framerate applied', {
+    previousFramerate: previousFramerate,
+    chosenFramerate: chosenFramerate,
+    bitratePresetMode: presetMode,
+    settingsAfterPreset: getStreamSettingsSnapshot()
+  });
   // Trigger warning check after changing video frame rate
   warnResolutionFramerate();
 }
@@ -2851,10 +3157,22 @@ function warnResolutionFramerate() {
   if (!resFpsWarning && chosenResolutionWidth > '1920' && chosenResolutionHeight > '1080' && chosenFramerate > '60') {
     // Warn only if video resolution is greater than 1080p and frame rate is greater than 60 FPS
     snackbarLogLong('Warning: This resolution and frame rate may not perform well on lower-end devices or slower connections!');
+    logDebugBridge('warn', 'resolution framerate warning shown', {
+      width: chosenResolutionWidth,
+      height: chosenResolutionHeight,
+      frameRate: chosenFramerate,
+      settings: getStreamSettingsSnapshot()
+    });
     // Set flag for video resolution and frame rate warning
     resFpsWarning = true;
   } else if (resFpsWarning && (chosenResolutionWidth <= '1920' || chosenResolutionHeight <= '1080' || chosenFramerate <= '60')) {
     // Reset the flag for video resolution and frame rate warning if the condition goes back to normal (1080p and 60 FPS)
+    logDebugBridge('info', 'resolution framerate warning cleared', {
+      width: chosenResolutionWidth,
+      height: chosenResolutionHeight,
+      frameRate: chosenFramerate,
+      settings: getStreamSettingsSnapshot()
+    });
     resFpsWarning = false;
   }
 }
@@ -2863,6 +3181,11 @@ function saveBitrate() {
   var chosenBitrate = $('#bitrateSlider').val();
   $('#selectBitrate').html(chosenBitrate + ' Mbps');
   console.log('%c[index.js, saveBitrate]', 'color: green;', 'Saving bitrate value: ' + chosenBitrate);
+  logDebugBridge('debug', 'bitrate saved', {
+    bitrateMbps: chosenBitrate,
+    bitrateKbps: parseFloat(chosenBitrate) * 1000,
+    settings: getStreamSettingsSnapshot()
+  });
   storeData('bitrate', chosenBitrate, null);
 
   // Trigger warning check after changing video bitrate
@@ -2957,6 +3280,12 @@ function standardBitratePresets() {
 
   // Update the bitrate value
   saveBitrate();
+  logDebugBridge('info', 'standard bitrate preset applied', {
+    resolution: res,
+    frameRate: frameRate,
+    bitrateMbps: $('#bitrateSlider').val(),
+    settings: getStreamSettingsSnapshot()
+  });
 }
 
 function optimizeBitratePresets() {
@@ -2992,6 +3321,19 @@ function optimizeBitratePresets() {
 
   // Update the bitrate value
   saveBitrate();
+  logDebugBridge('info', 'optimized bitrate preset applied', {
+    width: width,
+    height: height,
+    frameRate: frameRate,
+    videoCodec: videoCodec,
+    hdrMode: hdrMode,
+    codecMultiplier: codecMultiplier,
+    bitrateFactor: bitrateFactor,
+    baseBitrate: baseBitrate,
+    finalBitrateKbps: finalBitrate,
+    bitrateMbps: $('#bitrateSlider').val(),
+    settings: getStreamSettingsSnapshot()
+  });
 }
 
 function saveFramePacing() {
@@ -3488,15 +3830,28 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored resolution preferences.');
   getData('resolution', function(previousValue) {
     if (previousValue.resolution != null) {
+      var storedResolution = previousValue.resolution;
       var resWidth = parseInt(previousValue.resolution.split(':')[0], 10);
       if (resWidth > maxSupportedWidth) {
         previousValue.resolution = maxSupportedWidth >= 3840 ? '3840:2160' : '1920:1080';
         storeData('resolution', previousValue.resolution, null);
+        logDebugBridge('warn', 'stored resolution clamped', {
+          storedResolution: storedResolution,
+          clampedResolution: previousValue.resolution,
+          maxSupportedWidth: maxSupportedWidth,
+          maxSupportedHeight: maxSupportedHeight
+        });
       }
       $('.videoResolutionMenu li').each(function() {
         if ($(this).data('value') === previousValue.resolution) {
           // Update the video resolution field based on the given value
           $('#selectResolution').text($(this).text()).data('value', previousValue.resolution);
+          logDebugBridge('info', 'stored resolution applied', {
+            storedResolution: storedResolution,
+            appliedResolution: previousValue.resolution,
+            label: $(this).text(),
+            settings: getStreamSettingsSnapshot()
+          });
         }
       });
     }
