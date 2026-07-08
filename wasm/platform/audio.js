@@ -5,6 +5,7 @@
 // Tizen TV overlays and removes the EMSS audio-track path.
 
 var _audNextTime = 0.0;
+var _audStarted = false;
 
 function _audReceiveFrame(ptr, samplesPerFrame, channels, sampleRate) {
   var ctx = window._mlAudioCtx;
@@ -12,21 +13,31 @@ function _audReceiveFrame(ptr, samplesPerFrame, channels, sampleRate) {
     return;
   }
 
+  if (ctx.state === 'closed') {
+    return;
+  }
+
   if (ctx.state === 'suspended') {
     try {
-      ctx.resume();
+      var resumePromise = ctx.resume();
+      if (resumePromise && typeof resumePromise.catch === 'function') {
+        resumePromise.catch(function() {});
+      }
     } catch (e) {}
-    return;
   }
 
   var now = ctx.currentTime;
   var targetSeconds = (window._mlAudioTargetMs || 100) / 1000.0;
+  var frameSeconds = samplesPerFrame / sampleRate;
 
-  if (_audNextTime < now) {
-    _audNextTime = now;
+  if (!_audStarted) {
+    _audNextTime = now + Math.max(0, targetSeconds - frameSeconds);
+    _audStarted = true;
+  } else if (_audNextTime < now) {
+    _audNextTime = now + Math.min(targetSeconds, Math.max(frameSeconds, 0.02));
   }
 
-  if (_audNextTime > now + targetSeconds) {
+  if (_audNextTime > now + targetSeconds + frameSeconds) {
     return;
   }
 
@@ -48,8 +59,10 @@ function _audReceiveFrame(ptr, samplesPerFrame, channels, sampleRate) {
 
 function startAudioScheduler() {
   _audNextTime = 0.0;
+  _audStarted = false;
 }
 
 function stopAudioScheduler() {
   _audNextTime = 0.0;
+  _audStarted = false;
 }

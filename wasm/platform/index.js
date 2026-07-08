@@ -1,11 +1,48 @@
 // Initialize global variables and constants
-var appInfo = tizen.application.getAppInfo(); // Retrieve the application information
-var platformVer = tizen.systeminfo.getCapability("http://tizen.org/feature/platform.version"); // Retrieve the device platform version
-var modelSeries = webapis.productinfo.getModel(); // Retrieve the device model series
-var modelName = webapis.productinfo.getRealModel(); // Retrieve the device model name
-var modelGroup = webapis.productinfo.getModelCode(); // Retrieve the device model group
-var is4kPanel = typeof webapis.productinfo.isUdPanelSupported === 'function' && webapis.productinfo.isUdPanelSupported(); // Check if the device supports 4K panel
-var is8kPanel = typeof webapis.productinfo.is8KPanelSupported === 'function' && webapis.productinfo.is8KPanelSupported(); // Check if the device supports 8K panel
+function getPlatformValue(label, reader, fallback) {
+  try {
+    var value = reader();
+    return value == null ? fallback : value;
+  } catch (e) {
+    console.warn('Warning: Failed to read ' + label + ': ' + (e && e.message ? e.message : e));
+    return fallback;
+  }
+}
+
+function callPlatformMethod(object, method, fallback, label) {
+  return getPlatformValue(label || method, function() {
+    if (!object || typeof object[method] !== 'function') {
+      return fallback;
+    }
+    return object[method]();
+  }, fallback);
+}
+
+var productInfo = getPlatformValue('product info API', function() {
+  return typeof webapis !== 'undefined' ? webapis.productinfo : null;
+}, null);
+var avInfo = getPlatformValue('AV info API', function() {
+  return typeof webapis !== 'undefined' ? webapis.avinfo : null;
+}, null);
+var appInfo = getPlatformValue('application information', function() {
+  if (typeof tizen === 'undefined' || !tizen.application || typeof tizen.application.getAppInfo !== 'function') {
+    return { name: 'Moonlight', version: '0.0.0' };
+  }
+  return tizen.application.getAppInfo();
+}, { name: 'Moonlight', version: '0.0.0' }); // Retrieve the application information
+appInfo.name = appInfo.name || 'Moonlight';
+appInfo.version = appInfo.version || '0.0.0';
+var platformVer = getPlatformValue('platform version', function() {
+  if (typeof tizen === 'undefined' || !tizen.systeminfo || typeof tizen.systeminfo.getCapability !== 'function') {
+    return '';
+  }
+  return tizen.systeminfo.getCapability("http://tizen.org/feature/platform.version");
+}, ''); // Retrieve the device platform version
+var modelSeries = callPlatformMethod(productInfo, 'getModel', '', 'device model series'); // Retrieve the device model series
+var modelName = callPlatformMethod(productInfo, 'getRealModel', '', 'device model name'); // Retrieve the device model name
+var modelGroup = callPlatformMethod(productInfo, 'getModelCode', '', 'device model group'); // Retrieve the device model group
+var is4kPanel = !!callPlatformMethod(productInfo, 'isUdPanelSupported', false, '4K panel support'); // Check if the device supports 4K panel
+var is8kPanel = !!callPlatformMethod(productInfo, 'is8KPanelSupported', false, '8K panel support'); // Check if the device supports 8K panel
 
 var maxSupportedWidth = 1920;
 var maxSupportedHeight = 1080;
@@ -26,7 +63,7 @@ try {
 } catch (e) {
   console.error("Error fetching panel capabilities: " + e.message);
 }
-var isHdrCapable = webapis.avinfo.isHdrTvSupport(); // Check if the device supports HDR
+var isHdrCapable = !!callPlatformMethod(avInfo, 'isHdrTvSupport', false, 'HDR support'); // Check if the device supports HDR
 var hosts = {}; // Hosts is an associative array of NvHTTP objects, keyed by server UID
 var activePolls = {}; // Hosts currently being polled. An associated array of polling IDs, keyed by server UID
 var pairingCert; // Loads the generated certificate
@@ -747,6 +784,7 @@ function addHostDialog() {
       return;
     }
     // Disable the Continue button to prevent multiple connection requests
+    var hostConnectionLabel = parsedHostInput.addr + ':' + parsedHostInput.port;
     setTimeout(() => {
       // Add disabled state after 2 seconds
       $('#continueAddHost').addClass('mdl-button--disabled').prop('disabled', true);
@@ -760,7 +798,7 @@ function addHostDialog() {
     // Send a connection request to the Host object based on the given IP address
     var _nvhttpHost = new NvHTTP(parsedHostInput.addr, myUniqueid, parsedHostInput.addr);
     _nvhttpHost.httpPort = parsedHostInput.port;
-    console.log('%c[index.js, addHostDialog]', 'color: green;', 'Sending connection request to host address ' + _nvhttpHost.hostname);
+    console.log('%c[index.js, addHostDialog]', 'color: green;', 'Sending connection request to host address ' + hostConnectionLabel);
     _nvhttpHost.refreshServerInfoAtAddress(parsedHostInput.addr).then(function(success) {
       snackbarLog('Connecting to ' + _nvhttpHost.hostname + '...');
       // Close the dialog if the user has provided the IP address
@@ -796,13 +834,11 @@ function addHostDialog() {
       initIpAddressFields();
     }.bind(this), function(failure) {
       console.error('%c[index.js, addHostDialog]', 'color: green;', 'Error: Failed API object:\n', _nvhttpHost, '\n' + _nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-      snackbarLogLong('Failed to connect to ' + (_nvhttpHost.hostname || 'the host') + '. Ensure Sunshine is running on your PC or GameStream is enabled in GeForce Experience SHIELD settings.');
+      snackbarLogLong('Failed to connect to ' + hostConnectionLabel + '. Ensure Sunshine is running on your PC or GameStream is enabled in GeForce Experience SHIELD settings.');
       // Re-enable the Continue button after failure processing
       $('#continueAddHost').removeClass('mdl-button--disabled').prop('disabled', false);
-      // Clear the input field after failure processing
-      $('#ipAddressTextInput').val('');
+      // Keep the input field intact so the user can correct or retry it.
       updateIpAddressInputValidationState();
-      initIpAddressFields();
     }.bind(this));
   });
 }
@@ -2328,6 +2364,39 @@ function handleOnScreenOverlays() {
   performanceStatsSwitch.checked ? $('#performance-stats').css('display', 'inline-block') : $('#performance-stats').css('display', 'none');
 }
 
+function ensureMoonlightAudioContext() {
+  if (window._mlAudioCtx && window._mlAudioCtx.state !== 'closed') {
+    return window._mlAudioCtx;
+  }
+
+  const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextConstructor) {
+    window._mlAudioCtx = null;
+    return null;
+  }
+
+  try {
+    window._mlAudioCtx = new AudioContextConstructor();
+  } catch (e) {
+    window._mlAudioCtx = null;
+  }
+
+  return window._mlAudioCtx;
+}
+
+function resumeMoonlightAudioContext() {
+  const audioContext = ensureMoonlightAudioContext();
+  if (audioContext && audioContext.state === 'suspended') {
+    try {
+      const resumePromise = audioContext.resume();
+      if (resumePromise && typeof resumePromise.catch === 'function') {
+        resumePromise.catch(function() {});
+      }
+    } catch (e) {}
+  }
+  return audioContext;
+}
+
 // Start the given appID. If another app is running, offer to quit it. Otherwise, if the given app is already running, just resume it.
 function startGame(host, appID) {
   if (!host || !host.paired) {
@@ -2335,35 +2404,9 @@ function startGame(host, appID) {
     return;
   }
 
-  // Create the AudioContext while still inside the user gesture. Creating it
-  // later from a Promise callback can trip Tizen's autoplay policy and stall.
-  try {
-    if (window._mlAudioCtx) {
-      try {
-        window._mlAudioCtx.close();
-      } catch (e) {}
-    }
-    const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
-    if (AudioContextConstructor) {
-      try {
-        window._mlAudioCtx = new AudioContextConstructor({ sampleRate: 48000, latencyHint: 'interactive' });
-      } catch (e) {
-        window._mlAudioCtx = new AudioContextConstructor();
-      }
-    } else {
-      window._mlAudioCtx = null;
-    }
-  } catch (e) {
-    window._mlAudioCtx = null;
-  }
-  if (window._mlAudioCtx && window._mlAudioCtx.state === 'suspended') {
-    try {
-      window._mlAudioCtx.resume();
-    } catch (e) {}
-  }
-  if (typeof startAudioScheduler === 'function') {
-    startAudioScheduler();
-  }
+  // Create/resume the AudioContext while still inside the user gesture. The
+  // scheduler itself starts only once stream setup is actually underway.
+  resumeMoonlightAudioContext();
 
   // Refresh the server info, because the user might have quit the game
   host.refreshServerInfo().then(function(ret) {
@@ -2473,6 +2516,10 @@ function startGame(host, appID) {
 
       // Shows a loading message to launch the application and start stream mode
       $('#loadingSpinnerMessage').text('Starting ' + appToStart.title + '...');
+      resumeMoonlightAudioContext();
+      if (typeof startAudioScheduler === 'function') {
+        startAudioScheduler();
+      }
       showStreamMode();
 
       // Check if user wants to resume the already-running app

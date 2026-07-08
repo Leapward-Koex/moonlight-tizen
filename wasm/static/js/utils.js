@@ -71,6 +71,34 @@ function getConnectedGamepadMask() {
   return mask;
 }
 
+function summarizeOpenUrlResult(ret) {
+  if (ret == null) {
+    return '<null>';
+  }
+
+  try {
+    var text = ret.toString();
+    return 'length=' + text.length + ', prefix=' + text.substring(0, 240).replace(/\s+/g, ' ');
+  } catch (error) {
+    return 'Unable to summarize openUrl result: ' + error;
+  }
+}
+
+function summarizeOpenUrlError(error) {
+  if (error == null) {
+    return '<null>';
+  }
+
+  try {
+    if (error.message) {
+      return error.name ? error.name + ': ' + error.message : error.message;
+    }
+    return error.toString();
+  } catch (summaryError) {
+    return 'Unable to summarize openUrl error: ' + summaryError;
+  }
+}
+
 String.prototype.toHex = function() {
   var hex = '';
   for (var i = 0; i < this.length; i++) {
@@ -179,25 +207,40 @@ NvHTTP.prototype = {
 
   // Refreshes the server info using a given address. This is useful for testing whether we can successfully ping a host at a given address
   refreshServerInfoAtAddress: function(givenAddress) {
+    var httpServerInfoUrl = 'http://' + givenAddress + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr();
+    var httpsServerInfoUrl = 'https://' + givenAddress + ':' + this.httpsPort + '/serverinfo?' + this._buildUidStr();
     if (this.ppkstr == null) {
       // Use HTTP if we have no pinned cert
+      console.log('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Requesting server info over HTTP: ' + httpServerInfoUrl);
       return sendMessage('openUrl', [
-        'http://' + givenAddress + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr, false
+        httpServerInfoUrl, this.ppkstr, false
       ]).then(function(retHttp) {
-        return this._parseServerInfo(retHttp);
+        console.log('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'HTTP openUrl response summary: ' + summarizeOpenUrlResult(retHttp));
+        var parsedHttp = this._parseServerInfo(retHttp);
+        console.log('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'HTTP server info parse result for ' + givenAddress + ':' + this.httpPort + ': ' + parsedHttp);
+        return parsedHttp;
+      }.bind(this), function(error) {
+        console.error('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'HTTP openUrl failed for ' + httpServerInfoUrl + ': ' + summarizeOpenUrlError(error), error);
+        throw error;
       }.bind(this));
     }
     // Try HTTPS first
+    console.log('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Requesting server info over HTTPS: ' + httpsServerInfoUrl);
     return sendMessage('openUrl', [
-      'https://' + givenAddress + ':' + this.httpsPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr, false
+      httpsServerInfoUrl, this.ppkstr, false
     ]).then(function(ret) {
+      console.log('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'HTTPS openUrl response summary: ' + summarizeOpenUrlResult(ret));
       if (!this._parseServerInfo(ret)) { // If that fails
         console.error('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Error: Failed to parse server info from HTTPS, falling back to HTTP...');
         // Try HTTP as a failover. Useful to clients who aren't paired yet
+        console.log('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Requesting server info over HTTP fallback: ' + httpServerInfoUrl);
         return sendMessage('openUrl', [
-          'http://' + givenAddress + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr, false
+          httpServerInfoUrl, this.ppkstr, false
         ]).then(function(retHttp) {
-          return this._parseServerInfo(retHttp);
+          console.log('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'HTTP fallback openUrl response summary: ' + summarizeOpenUrlResult(retHttp));
+          var parsedHttp = this._parseServerInfo(retHttp);
+          console.log('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'HTTP fallback server info parse result for ' + givenAddress + ':' + this.httpPort + ': ' + parsedHttp);
+          return parsedHttp;
         }.bind(this));
       }
     }.bind(this), function(error) {
@@ -205,11 +248,15 @@ NvHTTP.prototype = {
         // Retry over HTTP
         console.warn('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Warning: Certificate mismatch. Retrying over HTTP...', this);
         return sendMessage('openUrl', [
-          'http://' + givenAddress + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr, false
+          httpServerInfoUrl, this.ppkstr, false
         ]).then(function(retHttp) {
-          return this._parseServerInfo(retHttp);
+          console.log('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Certificate-mismatch HTTP retry response summary: ' + summarizeOpenUrlResult(retHttp));
+          var parsedHttp = this._parseServerInfo(retHttp);
+          console.log('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Certificate-mismatch HTTP retry parse result for ' + givenAddress + ':' + this.httpPort + ': ' + parsedHttp);
+          return parsedHttp;
         }.bind(this));
       }
+      console.error('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'HTTPS openUrl failed for ' + httpsServerInfoUrl + ': ' + summarizeOpenUrlError(error), error);
     }.bind(this));
   },
 
@@ -323,15 +370,24 @@ NvHTTP.prototype = {
   },
 
   _parseServerInfo: function(xmlStr) {
-    $xml = this._parseXML(xmlStr);
+    try {
+      $xml = this._parseXML(xmlStr);
+    } catch (error) {
+      console.error('%c[utils.js, _parseServerInfo]', 'color: gray;', 'Error: Failed to parse server info XML. Response summary: ' + summarizeOpenUrlResult(xmlStr), error);
+      throw error;
+    }
     $root = $xml.find('root');
 
-    if ($root.attr('status_code') != 200) {
+    var statusCode = $root.attr('status_code');
+    if (statusCode != 200) {
+      console.warn('%c[utils.js, _parseServerInfo]', 'color: gray;', 'Warning: Rejected server info because status_code was ' + statusCode + '. Response summary: ' + summarizeOpenUrlResult(xmlStr));
       return false;
     }
 
-    if (this.serverUid != $root.find('uniqueid').text().trim() && this.serverUid != '') {
+    var receivedServerUid = $root.find('uniqueid').text().trim();
+    if (this.serverUid != receivedServerUid && this.serverUid != '') {
       // If we received a UUID that isn't the one we expected, fail
+      console.warn('%c[utils.js, _parseServerInfo]', 'color: gray;', 'Warning: Rejected server info because uniqueid changed from ' + this.serverUid + ' to ' + receivedServerUid + '.');
       return false;
     }
 
