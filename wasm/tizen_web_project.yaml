@@ -1,0 +1,119 @@
+# Project type [web_app, test_runner]
+project_type: web_app
+
+# Default profile, Tizen API version
+profile: tv-samsung
+api_version: "5.5"
+
+# Build type [Debug/ Release/ Test]
+build_type: Debug
+
+# Output name for application
+output_name: MoonlightWasm
+
+# Output path for build
+output_path: ""
+
+# Enable size optimization of wgt for web workspace
+opt: false
+
+# Signing profile to be used for Tizen package signing
+# If value is empty: "", active signing profile will be used
+# Else If value is ".", default signing profile will be used
+signing_profile: ""
+
+# list of certs in web project (.trust-anchor)
+trust_anchor: []
+
+# list of files in web project (.html,.css etc) and resources
+files:
+  - icon.png
+  - index.html
+  - moonlight-wasm.js
+  - moonlight-wasm.js.mem
+  - moonlight-wasm.wasm
+  - moonlight-wasm.worker.js
+  - platform.js
+  - platform/audio.js
+  - platform/common.js
+  - platform/debug_bridge_config.js
+  - platform/debug_bridge.js
+  - platform/gamepad.js
+  - platform/index.js
+  - platform/messages.js
+  - platform/navigation.js
+  - platform/remote_controller.js
+  - static/css/material-icons.css
+  - static/css/material.min.css
+  - static/css/roboto.css
+  - static/css/style.css
+  - static/curl/ca-bundle.crt
+  - static/favicon/favicon.png
+  - static/fonts/MaterialIcons-Outlined.woff2
+  - static/fonts/MaterialIcons-Regular.woff2
+  - static/fonts/MaterialIcons-Rounded.woff2
+  - static/fonts/Roboto-Regular_latin-ext.woff2
+  - static/fonts/Roboto-Regular_latin.woff2
+  - static/icons/icon128.png
+  - static/icons/icon16.png
+  - static/icons/icon24.png
+  - static/icons/icon256.png
+  - static/icons/icon32.png
+  - static/icons/icon48.png
+  - static/icons/icon512.png
+  - static/icons/icon64.png
+  - static/js/jquery-2.2.0.min.js
+  - static/js/material.min.js
+  - static/js/mdns-browser/dns.js
+  - static/js/mdns-browser/main.js
+  - static/js/utils.js
+  - static/res/applist_empty.svg
+  - static/res/applist_error.svg
+  - static/res/ic_add_to_queue_white_48px.svg
+  - static/res/ic_arrow_drop_down_48px.svg
+  - static/res/ic_exit_to_app_48px.svg
+  - static/res/ic_menu_white_48px.svg
+  - static/res/ic_moonlight_logo.svg
+  - static/res/ic_remove_circle_outline_white_48px.svg
+  - static/res/ic_remove_from_queue_white_48px.svg
+  - static/res/ic_restart_alt_48px.svg
+  - static/res/ic_system_update_alt_48px.svg
+  - static/res/ic_tv_remote_48px.svg
+  - static/res/ic_tv_white_48px.svg
+  - static/res/ic_videogame_asset_white_48px.svg
+  - static/res/placeholder_error.svg
+  - static/res/placeholder_game.svg
+  - static/res/support_qr_code.svg
+
+# list of files to exclude based on the matched patterns
+excludes:
+  - Build/*
+  - Debug/*
+  - Directory.Build.targets
+  - Release/*
+  - Test/*
+  - \.Build/.*
+  - \.buildResult/.*
+  - \.csproj
+  - \.externalToolBuilders/.*
+  - \.gn
+  - \.obj/.*
+  - \.package/.*
+  - \.project
+  - \.rds_delta
+  - \.sdk_delta.info
+  - \.settings/.*
+  - \.sign/.*
+  - \.tizen-ui-builder-tool.xml
+  - \.tproject
+  - \.wgt
+  - tizen_web_project.yaml
+  - webUnitTest/*
+  - "*.c"
+  - "*.cpp"
+  - "*.hpp"
+  - CPPLINT.cfg
+  - dispatcher/*
+
+# project dependencies
+deps: []

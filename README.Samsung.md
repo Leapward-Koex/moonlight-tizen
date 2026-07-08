@@ -43,3 +43,35 @@ cmake --install . --prefix .
 *Note:* On Linux and macOS you can also use `Makefile` cmake generators.
 
 After that you can pack widget as described in [Sample cURL application built using CLI tools](https://developer.samsung.com/smarttv/develop/extension-libraries/webassembly/tizen-sockets-extension/sample-curl-application-built-using-cli-tools.html) tutorial.
+
+### VS Code Tizen extension
+
+The Tizen web project root is `wasm/`. Use that folder for the extension's Run/Debug actions, not `res/`.
+
+Before running from the extension, copy the generated Emscripten runtime files into the web project:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/sync-tizen-extension-project.ps1
+```
+
+The script copies `moonlight-wasm.js`, `moonlight-wasm.js.mem`, `moonlight-wasm.wasm`, and `moonlight-wasm.worker.js` from `build/widget` or `build/codex-tizen-run/patched-widget` into `wasm/`. Those generated files are intentionally ignored by git.
+
+If the extension says `Library projects without tizen-manifest.xml cannot be launched`, set the Tizen working project to the `wasm/` folder. In VS Code, right-click `wasm/` and choose **Tizen: Set as Working Project**, or set `tizen.v2.working.project` to the absolute path of this repository's `wasm/` folder.
+
+When the extension starts a debug session, it opens a Chrome DevTools window for the running app. The window is backed by a local Chrome DevTools Protocol endpoint, so automation tools can inspect the DOM, read console output, evaluate JavaScript, and drive the app while the debug session is open.
+
+The port changes per session. On Windows, discover the current endpoint from the Chrome process command line:
+
+```powershell
+Get-CimInstance Win32_Process |
+  Where-Object { $_.Name -eq 'chrome.exe' -and $_.CommandLine -like '*devtools/inspector.html?ws=*' } |
+  Select-Object ProcessId,CommandLine
+```
+
+The command line contains a URL like `http://127.0.0.1:<port>/devtools/inspector.html?ws=127.0.0.1:<port>/devtools/page/<target-id>`. Use that port to list attachable targets:
+
+```powershell
+Invoke-RestMethod -Uri 'http://127.0.0.1:<port>/json/list'
+```
+
+The Moonlight target should have title `Moonlight Game Streaming` and a `webSocketDebuggerUrl` value. Attach to that WebSocket URL with any CDP client.

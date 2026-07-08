@@ -85,13 +85,14 @@ RUN --mount=type=cache,target=/home/moonlight/.ccache,uid=1000,gid=1000 \
 	CCACHE_DIR=/home/moonlight/.ccache cmake --build build
 
 # Copy the remaining frontend files required for packaging the application
-COPY --chown=moonlight res/ ./moonlight-tizen/res/
+COPY --chown=moonlight wasm/config.xml ./moonlight-tizen/wasm/
+COPY --chown=moonlight wasm/icon.png ./moonlight-tizen/wasm/
 COPY --chown=moonlight wasm/index.html ./moonlight-tizen/wasm/
+COPY --chown=moonlight wasm/platform.js ./moonlight-tizen/wasm/
 COPY --chown=moonlight wasm/platform/ ./moonlight-tizen/wasm/platform/
 COPY --chown=moonlight wasm/static/ ./moonlight-tizen/wasm/static/
 
 RUN cmake --install build --prefix build
-RUN cp moonlight-tizen/res/icon.png build/widget/
 
 # Sign and package the application into a WGT file using Expect to automate the interactive password prompts
 RUN echo \

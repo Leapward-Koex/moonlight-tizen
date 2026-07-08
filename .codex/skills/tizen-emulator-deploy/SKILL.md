@@ -97,6 +97,31 @@ Invoke-RestMethod -Headers $Headers -Uri "http://127.0.0.1:49321/api/results?tai
 
 Allowed app commands are `nav`, `click`, `setValue`, `addHost`, `getState`, `localStorage`, and `reload`. There is no arbitrary JavaScript eval command. Keep tokens and enabled configs out of committed artifacts.
 
+## VS Code Extension DevTools
+
+When the VS Code Tizen extension starts a web debug session, it opens a Chrome DevTools window for the running app. That Chrome window is backed by a local Chrome DevTools Protocol endpoint, so Codex can attach directly while the session is open. The observed frontend looked like:
+
+```text
+http://127.0.0.1:35276/devtools/inspector.html?ws=127.0.0.1:35276/devtools/page/<target-id>
+```
+
+Do not hard-code the port; it changes per session. Discover it from the Chrome process command line:
+
+```powershell
+Get-CimInstance Win32_Process |
+  Where-Object { $_.Name -eq 'chrome.exe' -and $_.CommandLine -like '*devtools/inspector.html?ws=*' } |
+  Select-Object ProcessId,CommandLine
+```
+
+Then query targets:
+
+```powershell
+Invoke-RestMethod -Uri 'http://127.0.0.1:<port>/json/list'
+Invoke-RestMethod -Uri 'http://127.0.0.1:<port>/json/version'
+```
+
+Use the `webSocketDebuggerUrl` for the `Moonlight Game Streaming` page target. CDP can inspect DOM/state, read console/runtime events, evaluate targeted JavaScript, capture screenshots, and drive interactions. This is separate from `tz run --debug-mode`, which has been unreliable for opening a forwarded inspector port.
+
 ## Package Staging
 
 If no local Emscripten/Docker build is available, stage from an existing WGT under `build/codex-tizen-run/patched-widget` and overlay the patched web files:

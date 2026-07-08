@@ -3,6 +3,11 @@ pnacl/
 build/
 res/Debug/
 res/tizen_web_project.yaml
+wasm/Debug/
+wasm/moonlight-wasm.js
+wasm/moonlight-wasm.js.mem
+wasm/moonlight-wasm.wasm
+wasm/moonlight-wasm.worker.js
 
 # Object files
 *.o
