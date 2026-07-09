@@ -82,6 +82,7 @@ var resFpsWarning = false; // Flag indicating whether the video resolution and f
 var bitrateWarning = false; // Flag indicating whether the video bitrate warning message has shown, initial value is false
 var audioWarning = false; // Flag indicating whether the audio configuration warning message has shown, initial value is false
 var codecWarning = false; // Flag indicating whether the video codec warning message has shown, initial value is false
+var currentUiMode = 'hosts'; // Tracks the active top-level UI screen for async navigation guards
 var repeatAction = null; // Flag indicating whether the repeat action is set, initial value is null
 var lastInvokeTime = 0; // Flag indicating the last invoke time, initial value is 0
 var repeatTimeout = null; // Flag indicating whether the repeat timeout is set, initial value is null
@@ -918,6 +919,7 @@ function logExportDialog() {
 // Handle layout elements when displaying the Hosts view
 function showHostsMode() {
   console.log('%c[index.js, showHostsMode]', 'color: green;', 'Entering "Show Hosts" mode.');
+  currentUiMode = 'hosts';
   $('#header-title').html('Hosts');
   $('#header-logo').show();
   $('#main-header').show();
@@ -2000,6 +2002,7 @@ function appSupportDialog() {
 // Handle layout elements when displaying the Settings view
 function showSettingsMode() {
   console.log('%c[index.js, showSettingsMode]', 'color: green;', 'Entering "Show Settings" mode.');
+  currentUiMode = 'settings';
   $('#header-title').html('Settings');
   $('#header-logo').show();
   $('#main-header').show();
@@ -2699,6 +2702,7 @@ function sortTitles(list, sortOrder) {
 // Handle layout elements when displaying the Apps view
 function showAppsMode() {
   console.log('%c[index.js, showAppsMode]', 'color: green;', 'Entering "Show Apps" mode.');
+  currentUiMode = 'apps';
   $('#header-title').html('Apps');
   $('#header-logo').show();
   $('#main-header').show();
@@ -2774,8 +2778,27 @@ function resetStreamUiState(reason, host, options) {
   }
 }
 
+function shouldContinueShowApps(options, stage, host) {
+  if (!options || typeof options.shouldContinue !== 'function') {
+    return true;
+  }
+
+  if (options.shouldContinue()) {
+    return true;
+  }
+
+  logDebugBridge('info', 'showApps canceled because current screen changed', {
+    stage: stage,
+    currentUiMode: currentUiMode,
+    host: getHostDebugSnapshot(host)
+  });
+  return false;
+}
+
 // Show the Apps grid
-function showApps(host, onReady) {
+function showApps(host, onReady, options) {
+  options = options || {};
+
   // Safety checking should happen before attempting to show the app list
   if (!host || !host.paired) {
     console.error('%c[index.js, showApps]', 'color: green;', 'Error: Unable to initialize the host properly! Host object: ', host);
@@ -2783,6 +2806,10 @@ function showApps(host, onReady) {
     return;
   } else {
     console.log('%c[index.js, showApps]', 'color: green;', 'Current host object: \n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
+  }
+
+  if (!shouldContinueShowApps(options, 'before loading screen', host)) {
+    return;
   }
 
   // Stop navigation before showing the loading screen
@@ -2803,7 +2830,15 @@ function showApps(host, onReady) {
   $('div.game-container').remove();
 
   setTimeout(() => {
+    if (!shouldContinueShowApps(options, 'before app list request', host)) {
+      return;
+    }
+
     host.getAppList().then(function(appList) {
+      if (!shouldContinueShowApps(options, 'after app list success', host)) {
+        return;
+      }
+
       // Hide the spinner after the host has successfully retrieved the app list
       $('#wasmSpinner').hide();
 
@@ -2914,6 +2949,10 @@ function showApps(host, onReady) {
       });
       if (typeof(onReady) === "function") onReady(true);
     }, function(failedAppList) {
+      if (!shouldContinueShowApps(options, 'after app list failure', host)) {
+        return;
+      }
+
       // Hide the spinner if the host has failed to retrieve the app list
       $('#wasmSpinner').hide();
 
@@ -2930,7 +2969,9 @@ function showApps(host, onReady) {
     });
 
     // Navigate to the Apps view
-    showAppsMode();
+    if (shouldContinueShowApps(options, 'before apps mode', host)) {
+      showAppsMode();
+    }
   }, 500);
 }
 
@@ -2973,14 +3014,24 @@ function quitAppDialog() {
       $('#continueQuitApp').off('click');
       $('#continueQuitApp').on('click', function() {
         console.log('%c[index.js, quitAppDialog]', 'color: green;', 'Quitting game, closing app dialog, and returning.');
+        var shouldReturnToAppsAfterQuit = function() {
+          return currentUiMode === 'apps';
+        };
+
         quitAppOverlay.style.display = 'none';
         quitAppDialog.close();
         isDialogOpen = false;
         Navigation.pop();
         stopGame(api, function() {
+          if (!shouldReturnToAppsAfterQuit()) {
+            return;
+          }
+
           // After stopping the game, restore focus to the refreshed Apps grid.
           Navigation.change(Views.Apps);
           Navigation.focusCurrent();
+        }, {
+          shouldRefreshApps: shouldReturnToAppsAfterQuit
         });
       });
     });
@@ -2990,6 +3041,7 @@ function quitAppDialog() {
 // Handle layout elements when displaying the Stream view
 function showStreamMode() {
   console.log('%c[index.js, showStreamMode]', 'color: green;', 'Entering "Show Stream" mode.');
+  currentUiMode = 'stream';
   logDebugBridge('info', 'show stream mode', {
     settings: getStreamSettingsSnapshot(),
     windowSize: {
@@ -3584,7 +3636,12 @@ function startGame(host, appID, options) {
 }
 
 // Stop the running app title, refresh the server info, and then return to Apps grid
-function stopGame(host, callbackFunction) {
+function stopGame(host, callbackFunction, options) {
+  options = options || {};
+  var shouldRefreshApps = typeof options.shouldRefreshApps === 'function' ? options.shouldRefreshApps : function() {
+    return true;
+  };
+
   isInGame = false;
 
   if (!host.paired) {
@@ -3602,9 +3659,19 @@ function stopGame(host, callbackFunction) {
       host.quitApp().then(function(ret2) {
         snackbarLog('Successfully quit ' + appTitle);
         host.refreshServerInfo().then(function(ret3) {
-          // Refresh to show no app is currently running
+          if (!shouldRefreshApps()) {
+            logDebugBridge('info', 'skipped Apps refresh after quit because current screen changed', {
+              currentUiMode: currentUiMode,
+              host: getHostDebugSnapshot(host)
+            });
+            return;
+          }
+
+          // Refresh to show no app is currently running if the user stayed on Apps.
           showApps(host, function() {
             if (typeof(callbackFunction) === "function") callbackFunction();
+          }, {
+            shouldContinue: shouldRefreshApps
           });
         }, function(failedRefreshInfo2) {
           console.error('%c[index.js, stopGame]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo2 + '! Failed server was: ' + '\n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
