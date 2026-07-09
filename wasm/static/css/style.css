@@ -244,6 +244,9 @@ body {
     border-radius: 16px;
     box-shadow: 0 0 12px 6px rgba(0, 163, 198, 1);
 }
+#pairingDialog {
+    width: 620px;
+}
 .mdl-dialog__title {
     margin: 0;
     padding: 24px 24px 14px;
@@ -455,6 +458,40 @@ body {
 #navGuideDialogText {
     list-style-type: none;
     padding: 5px 20px 5px 20px;
+}
+#pairingPinPanel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin: 4px 0 22px 0;
+    padding: 28px 20px;
+    border: 2px solid #00A3C6;
+    border-radius: 8px;
+    background: rgba(0, 163, 198, 0.18);
+}
+#pairingPinLabel {
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 1.35rem;
+    line-height: 1.25;
+    letter-spacing: 0;
+    text-align: center;
+    text-transform: uppercase;
+}
+#pairingPinCode {
+    color: #fff;
+    font-size: 6rem;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-align: center;
+    margin-top: 14px;
+    width: 100%;
+    overflow-wrap: anywhere;
+}
+#pairingDialogText {
+    text-align: center;
+    letter-spacing: 0;
 }
 #continueAddHost, #cancelAddHost, #cancelPairing, #continueDeleteHost,
 #closeHostMenu, #closeHostDetails, #cancelDeleteHost, #closeAppSupport,

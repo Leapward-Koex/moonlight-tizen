@@ -668,7 +668,9 @@ NvHTTP.prototype = {
     // Refresh server info after quitting because it may silently fail if the session belongs to a different client
     return sendMessage('openUrl', [
       this._baseUrlHttps + '/cancel?' + this._buildUidStr(), this.ppkstr, false
-    ]).then(this.refreshServerInfo());
+    ]).then(function() {
+      return this.refreshServerInfo();
+    }.bind(this));
     // TODO: We should probably bubble this up to our caller.
   },
 

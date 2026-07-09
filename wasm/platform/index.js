@@ -95,6 +95,8 @@ const ACTION_THRESHOLD = 0.5; // Threshold for initial navigation set to 0.5
 const NAVIGATION_DELAY = 150; // Navigation delay set to 150ms (milliseconds)
 const UPDATE_TIMESTAMP = 'lastUpdateCheck'; // Use the update check timestamp key to determine the last update check
 const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // Automatic check for updates interval is set to 24 hours
+const SWITCH_GAME_REFRESH_RETRIES = 6; // Maximum refresh attempts while waiting for the previous game to quit
+const SWITCH_GAME_REFRESH_DELAY_MS = 500; // Delay between refresh attempts when switching games
 
 function logDebugBridge(level, eventName, details) {
   if (typeof window.moonlightDebugLog !== 'function') {
@@ -1016,6 +1018,17 @@ function restoreUiAfterWasmLoad() {
   setTimeout(() => checkForAppUpdatesAtStartup(), 10000);
 }
 
+function connectToHostApps(host) {
+  stopPollingHosts();
+
+  api = host;
+  showApps(host, function() {
+    Navigation.change(Views.Apps);
+    Navigation.focusCurrent();
+  });
+  Navigation.push(Views.Apps);
+}
+
 function hostChosen(host) {
   if (isPairingInProgress) {
     snackbarLogLong('A pairing request is currently in progress. Please wait for it to timeout or finish before trying again.');
@@ -1030,32 +1043,20 @@ function hostChosen(host) {
     return;
   }
 
-  // Avoid delay from other polling during pairing
-  stopPollingHosts();
-
-  api = host;
   // If the host is not yet paired or has been removed from the server, go to the pairing flow.
   if (!host.paired) {
     // Continue with the pairing flow
     pairingDialog(host, function() {
-      // After pairing the host, save the host object, show the apps, and navigate to the Apps view
+      // After pairing the host, save the host object and open its Apps view.
       saveHosts();
-      showApps(host, function() {
-        Navigation.change(Views.Apps);
-        Navigation.focusCurrent();
-      });
-      Navigation.push(Views.Apps);
+      connectToHostApps(host);
     }, function() {
       // Start polling the host after pairing flow
       startPollingHosts();
     });
   } else {
     // But if the host is already paired and online, then we show the apps and navigate to the Apps view as usual.
-    showApps(host, function() {
-      Navigation.change(Views.Apps);
-      Navigation.focusCurrent();
-    });
-    Navigation.push(Views.Apps);
+    connectToHostApps(host);
   }
 }
 
@@ -1384,20 +1385,22 @@ function addHostDialog() {
       // Check if we already have record of this host. If so, we'll
       // need the PPK string to ensure our pairing status is accurate.
       if (hosts[_nvhttpHost.serverUid] != null) {
+        var savedHost = hosts[_nvhttpHost.serverUid];
         // Update the addresses
-        hosts[_nvhttpHost.serverUid].address = _nvhttpHost.address;
-        hosts[_nvhttpHost.serverUid].userEnteredAddress = _nvhttpHost.userEnteredAddress;
-        hosts[_nvhttpHost.serverUid].httpPort = _nvhttpHost.httpPort;
+        savedHost.address = _nvhttpHost.address;
+        savedHost.userEnteredAddress = _nvhttpHost.userEnteredAddress;
+        savedHost.httpPort = _nvhttpHost.httpPort;
         // Use the host in the array directly to ensure the PPK propagates after pairing
-        pairingDialog(hosts[_nvhttpHost.serverUid], function() {
+        pairingDialog(savedHost, function() {
           saveHosts();
+          connectToHostApps(savedHost);
         });
       } else {
         pairingDialog(_nvhttpHost, function() {
-          // Host must be in the grid before starting background polling
+          // Host must be in the grid before connecting to its Apps view.
           addHostToGrid(_nvhttpHost);
-          beginBackgroundPollingOfHost(_nvhttpHost);
           saveHosts();
+          connectToHostApps(_nvhttpHost);
         });
       }
       // Re-enable the Continue button after successful processing
@@ -1480,13 +1483,12 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     var pairingDialog = document.querySelector('#pairingDialog');
     var randomNumber = String('0000' + (Math.random() * 10000 | 0)).slice(-4);
 
-    // Change the dialog text element to include the random PIN number
-    $('#pairingDialogText').html(
-      'Please enter the following PIN on the target PC: ' + randomNumber + '<br><br>' +
-      'If your host PC is running Sunshine (all GPUs), navigate to the Sunshine Web UI to enter the PIN.<br><br>' +
-      'Alternatively, if your host PC has NVIDIA GameStream (NVIDIA-only), navigate to the GeForce Experience to enter the PIN.<br><br>' +
-      'This dialog will close once the pairing is complete.'
-    );
+    // Change the dialog content to make the PIN the primary visual target.
+    $('#pairingDialogTitle').text('Pairing');
+    $('#pairingPinPanel').css('display', 'flex');
+    $('#pairingPinLabel').text('Enter this PIN on ' + nvhttpHost.hostname);
+    $('#pairingPinCode').text(randomNumber);
+    $('#pairingDialogText').text('Open Sunshine Web UI or NVIDIA GeForce Experience on the host PC. This dialog will close when pairing completes.');
 
     // Show the dialog and push the view
     pairingOverlay.style.display = 'flex';
@@ -1527,9 +1529,13 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
       // If the host is already in a streaming session or failed during pairing,
       // change the dialog text element to include the hostname and display the returned error message
       if (nvhttpHost.currentGame != 0) {
-        $('#pairingDialogText').html('Error: ' + nvhttpHost.hostname + ' is currently busy!<br><br>You must stop the running app in order to pair with the host.');
+        $('#pairingDialogTitle').text('Pairing Blocked');
+        $('#pairingPinPanel').hide();
+        $('#pairingDialogText').text('Error: ' + nvhttpHost.hostname + ' is currently busy. You must stop the running app in order to pair with the host.');
       } else {
-        $('#pairingDialogText').html('Error: Failed to pair with ' + nvhttpHost.hostname + '.<br><br>Please, try pairing with the host again.');
+        $('#pairingDialogTitle').text('Pairing Failed');
+        $('#pairingPinPanel').hide();
+        $('#pairingDialogText').text('Error: Failed to pair with ' + nvhttpHost.hostname + '. Please try pairing with the host again.');
       }
       onFailure();
     });
@@ -2941,7 +2947,10 @@ function quitAppDialog() {
       var quitAppDialog = document.querySelector('#quitAppDialog');
 
       // Change the dialog text element to include the game title
-      document.getElementById('quitAppDialogText').innerHTML = 'Are you sure you want to quit ' + currentGame.title + '? All unsaved data will be lost.';
+      document.getElementById('quitAppDialogTitle').textContent = 'Quit Running App';
+      document.getElementById('quitAppDialogText').textContent = 'Are you sure you want to quit ' + currentGame.title + '? All unsaved data will be lost.';
+      document.getElementById('cancelQuitApp').textContent = 'No';
+      document.getElementById('continueQuitApp').textContent = 'Yes';
       
       // Show the dialog and push the view
       quitAppOverlay.style.display = 'flex';
@@ -3127,8 +3136,61 @@ function resumeMoonlightAudioContext() {
   return audioContext;
 }
 
+function waitForSwitchGameRefreshDelay() {
+  return new Promise(function(resolve) {
+    setTimeout(resolve, SWITCH_GAME_REFRESH_DELAY_MS);
+  });
+}
+
+function waitForRunningGameToClear(host, requestedAppId, retriesRemaining) {
+  return host.refreshServerInfo().then(function() {
+    if (host.currentGame === 0 || host.currentGame === requestedAppId) {
+      return true;
+    }
+
+    if (retriesRemaining <= 0) {
+      logDebugBridge('warn', 'running game still reported after quit request', {
+        requestedAppID: requestedAppId,
+        currentGame: host.currentGame,
+        host: getHostDebugSnapshot(host)
+      });
+      return false;
+    }
+
+    return waitForSwitchGameRefreshDelay().then(function() {
+      return waitForRunningGameToClear(host, requestedAppId, retriesRemaining - 1);
+    });
+  });
+}
+
+function quitRunningGameBeforeSwitch(host, currentApp, appToStart) {
+  logDebugBridge('info', 'quit running game before switch requested', {
+    currentGame: host.currentGame,
+    currentAppTitle: currentApp ? currentApp.title : '',
+    requestedAppID: appToStart ? appToStart.id : null,
+    requestedAppTitle: appToStart ? appToStart.title : '',
+    host: getHostDebugSnapshot(host)
+  });
+
+  return host.quitApp().then(function() {
+    return waitForRunningGameToClear(host, appToStart ? appToStart.id : null, SWITCH_GAME_REFRESH_RETRIES);
+  }).then(function(cleared) {
+    logDebugBridge(cleared ? 'info' : 'warn', 'quit running game before switch completed', {
+      cleared: cleared,
+      currentGame: host.currentGame,
+      currentAppTitle: currentApp ? currentApp.title : '',
+      requestedAppID: appToStart ? appToStart.id : null,
+      requestedAppTitle: appToStart ? appToStart.title : '',
+      host: getHostDebugSnapshot(host)
+    });
+    return cleared;
+  });
+}
+
 // Start the given appID. If another app is running, offer to quit it. Otherwise, if the given app is already running, just resume it.
-function startGame(host, appID) {
+function startGame(host, appID, options) {
+  options = options || {};
+
   if (!host || !host.paired) {
     console.error('%c[index.js, startGame]', 'color: green;', 'Error: Attempted to start a game, but the host was not initialized properly! Host object: ', host);
     logDebugBridge('error', 'stream start rejected invalid host', {
@@ -3162,7 +3224,7 @@ function startGame(host, appID) {
         currentGame: host.currentGame,
         host: getHostDebugSnapshot(host)
       });
-      if (host.currentGame != 0 && host.currentGame != appID) {
+      if (!options.skipRunningAppPrompt && host.currentGame != 0 && host.currentGame != appID) {
         host.getAppById(host.currentGame).then(function(currentApp) {
           logDebugBridge('warn', 'stream start blocked by running app', {
             requestedAppID: appID,
@@ -3175,8 +3237,11 @@ function startGame(host, appID) {
           var quitAppOverlay = document.querySelector('#quitAppDialogOverlay');
           var quitAppDialog = document.querySelector('#quitAppDialog');
 
-          // Change the dialog text element to include the game title
-          document.getElementById('quitAppDialogText').innerHTML = currentApp.title + ' is already running. Would you like to quit it and start ' + appToStart.title + '?';
+          // Change the dialog content for the game switch warning.
+          document.getElementById('quitAppDialogTitle').textContent = 'Warning';
+          document.getElementById('quitAppDialogText').textContent = currentApp.title + ' is already running. Quitting it may lose unsaved progress. Quit it and start ' + appToStart.title + '?';
+          document.getElementById('cancelQuitApp').textContent = 'Cancel';
+          document.getElementById('continueQuitApp').textContent = 'Quit & Start';
 
           // Show the dialog and push the view
           quitAppOverlay.style.display = 'flex';
@@ -3192,22 +3257,36 @@ function startGame(host, appID) {
             quitAppDialog.close();
             isDialogOpen = false;
             Navigation.pop();
+            Navigation.focusCurrent();
           });
 
-          // Quit the running app if the Continue button is pressed
+          // Quit the running app silently and continue directly into the new stream.
           $('#continueQuitApp').off('click');
           $('#continueQuitApp').on('click', function() {
-            console.log('%c[index.js, startGame]', 'color: green;', 'Quitting game, closing app dialog, and returning.');
-            stopGame(host, function() {
-              Navigation.change(Views.Apps);
-              Navigation.focusCurrent();
-              // Please, don't infinite loop with recursion
-              setTimeout(() => startGame(host, appID), 3000);
-            });
+            console.log('%c[index.js, startGame]', 'color: green;', 'Quitting current game and starting requested game.');
             quitAppOverlay.style.display = 'none';
             quitAppDialog.close();
             isDialogOpen = false;
             Navigation.pop();
+
+            $('#loadingSpinnerMessage').text('Switching to ' + appToStart.title + '...');
+            showStreamMode();
+
+            quitRunningGameBeforeSwitch(host, currentApp, appToStart).then(function() {
+              startGame(host, appID, { skipRunningAppPrompt: true });
+            }, function(failedQuitApp) {
+              console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to quit the current running app before switching! Returned error was: ' + failedQuitApp + '!');
+              logDebugBridge('error', 'quit running game before switch failed', {
+                requestedAppID: appID,
+                requestedAppTitle: appToStart ? appToStart.title : '',
+                currentGame: host.currentGame,
+                currentAppTitle: currentApp ? currentApp.title : '',
+                error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(failedQuitApp) : String(failedQuitApp),
+                host: getHostDebugSnapshot(host)
+              });
+              snackbarLogLong('Unable to switch games because Moonlight could not quit ' + currentApp.title + '.');
+              resetStreamUiState('quit running game before switch failed', host, { navigateToApps: true });
+            });
           });
 
           return;

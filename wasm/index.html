@@ -576,11 +576,12 @@
     <dialog id="pairingDialog" class="mdl-dialog">
       <h3 id="pairingDialogTitle" class="mdl-dialog__title">Pairing</h3>
       <div class="mdl-dialog__content">
+        <div id="pairingPinPanel">
+          <div id="pairingPinLabel">Enter this PIN on your host PC</div>
+          <div id="pairingPinCode">XXXX</div>
+        </div>
         <p id="pairingDialogText">
-          Please enter the following PIN on the target PC: XXXX<br><br>
-          If your host PC is running Sunshine (all GPUs), navigate to the Sunshine Web UI to enter the PIN.<br><br>
-          Alternatively, if your host PC has NVIDIA GameStream (NVIDIA-only), navigate to the GeForce Experience to enter the PIN.<br><br>
-          This dialog will close once the pairing is complete.
+          Open Sunshine Web UI or NVIDIA GeForce Experience on the host PC to complete pairing.
         </p>
       </div>
       <div class="mdl-dialog__actions">
