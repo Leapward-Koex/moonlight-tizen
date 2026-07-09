@@ -103,7 +103,7 @@ class MoonlightInstance {
     std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
     bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
     std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-    bool disableWarnings, bool performanceStats);
+    bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes);
   std::string ProbeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
   MessageResult StopStream();
 
@@ -295,6 +295,7 @@ class MoonlightInstance {
   int m_ProbedVideoFps;
   std::string m_ProbedVideoMimeType;
   std::string m_ProbedVideoProfileLabel;
+  std::string m_DisabledVideoMimeTypes;
 };
 
 extern MoonlightInstance* g_Instance;
@@ -313,7 +314,7 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-  bool disableWarnings, bool performanceStats);
+  bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes);
 std::string probeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
 MessageResult stopStream();
 

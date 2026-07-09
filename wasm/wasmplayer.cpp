@@ -349,6 +349,60 @@ int CountDisabledMimeTypes(const std::string& disabledMimeTypes) {
   return count;
 }
 
+const char* CodecNameForVideoFormat(int videoFormat) {
+  if (videoFormat & (VIDEO_FORMAT_AV1_MAIN8 | VIDEO_FORMAT_AV1_MAIN10)) {
+    return "AV1";
+  }
+  if (videoFormat & (VIDEO_FORMAT_H265 | VIDEO_FORMAT_H265_MAIN10)) {
+    return "HEVC";
+  }
+  if (videoFormat & VIDEO_FORMAT_H264) {
+    return "H264";
+  }
+  return "UNKNOWN";
+}
+
+bool IsHdrVideoFormat(int videoFormat) {
+  return (videoFormat & (VIDEO_FORMAT_H265_MAIN10 | VIDEO_FORMAT_AV1_MAIN10)) != 0;
+}
+
+void PostCodecProfileResult(
+  int videoFormat,
+  int width,
+  int height,
+  int fps,
+  int profileIndex,
+  const VideoProfileSelection& profile,
+  bool supported,
+  bool skipped,
+  const char* skipReason,
+  bool selected) {
+  std::ostringstream message;
+
+  message << "CodecProfileResult: {";
+  message << "\"source\":\"streamSetup\"";
+  message << ",\"codec\":";
+  AppendJsonString(message, CodecNameForVideoFormat(videoFormat));
+  message << ",\"hdr\":" << (IsHdrVideoFormat(videoFormat) ? "true" : "false");
+  message << ",\"videoFormat\":" << videoFormat;
+  message << ",\"profileIndex\":" << profileIndex;
+  message << ",\"profile\":";
+  AppendJsonString(message, profile.label ? profile.label : "");
+  message << ",\"mimeType\":";
+  AppendJsonString(message, profile.mimeType ? profile.mimeType : "");
+  message << ",\"supported\":" << (supported ? "true" : "false");
+  message << ",\"skipped\":" << (skipped ? "true" : "false");
+  message << ",\"skipReason\":";
+  AppendJsonString(message, skipReason ? skipReason : "");
+  message << ",\"selected\":" << (selected ? "true" : "false");
+  message << ",\"width\":" << width;
+  message << ",\"height\":" << height;
+  message << ",\"fps\":" << fps;
+  message << "}";
+
+  PostToJs(message.str());
+}
+
 }
 
 MoonlightInstance::SourceListener::SourceListener(
@@ -432,46 +486,61 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   ClLogMessage("Video: source closed, adding track\n");
 
   {
-    VideoProfileSelection profile = SelectVideoProfile(videoFormat, width, height, redrawRate);
-    const char* mimetype = profile.mimeType;
-    const char* profileLabel = profile.label;
-
-    if (!mimetype) {
-      ClLogMessage("Failed to select video codec profile (videoFormat=0x%x)\n", videoFormat);
+    std::vector<VideoProfileSelection> profiles = GetVideoProfileCandidates(videoFormat, width, height, redrawRate);
+    if (profiles.empty()) {
+      ClLogMessage("Failed to select video codec profile candidates (videoFormat=0x%x)\n", videoFormat);
       return -1;
     }
 
-    if (g_Instance->m_ProbedVideoFormat == videoFormat &&
-        g_Instance->m_ProbedVideoWidth == width &&
-        g_Instance->m_ProbedVideoHeight == height &&
-        g_Instance->m_ProbedVideoFps == redrawRate &&
-        !g_Instance->m_ProbedVideoMimeType.empty()) {
-      mimetype = g_Instance->m_ProbedVideoMimeType.c_str();
-      profileLabel = g_Instance->m_ProbedVideoProfileLabel.c_str();
-      ClLogMessage("Video codec profile selected from probe: %s\n", profileLabel);
-    } else {
-      ClLogMessage("Video codec profile selected: %s\n", profileLabel);
+    PostToJs("ProgressMsg: Checking TV codec profile...");
+    bool selectedProfile = false;
+    int profileIndex = 0;
+
+    for (const VideoProfileSelection& profile : profiles) {
+      const char* mimetype = profile.mimeType;
+      const char* profileLabel = profile.label;
+
+      if (IsMimeTypeDisabled(g_Instance->m_DisabledVideoMimeTypes, mimetype)) {
+        ClLogMessage("Video codec profile skipped by user: index=%d, profile=%s, mimeType=%s\n",
+          profileIndex, profileLabel, mimetype);
+        PostCodecProfileResult(videoFormat, width, height, redrawRate, profileIndex, profile, false, true, "disabledByUser", false);
+        profileIndex++;
+        continue;
+      }
+
+      ClLogMessage("Video codec profile attempt: index=%d, profile=%s, mimeType=%s\n",
+        profileIndex, profileLabel, mimetype);
+
+      auto add_track_result = g_Instance->m_Source->AddTrack(
+        samsung::wasm::ElementaryVideoTrackConfig {
+          mimetype, // MIME-type: Selected Video Format
+          {}, // Extradata: Empty
+          samsung::wasm::DecodingMode::kHardware, // Decoding mode: Hardware
+          static_cast<uint32_t>(width), // Video resolution: Width
+          static_cast<uint32_t>(height), // Video resolution: Height
+          static_cast<uint32_t>(redrawRate), // Framerate: Numerator
+          1, // Framerate: Denominator
+        }
+      );
+      if (add_track_result) {
+        ClLogMessage("Video codec profile selected: index=%d, profile=%s, mimeType=%s\n",
+          profileIndex, profileLabel, mimetype);
+        PostCodecProfileResult(videoFormat, width, height, redrawRate, profileIndex, profile, true, false, "", true);
+        g_Instance->m_VideoTrack = std::move(*add_track_result);
+        g_Instance->m_VideoTrack.SetListener(&g_Instance->m_VideoTrackListener);
+        selectedProfile = true;
+        break;
+      }
+
+      ClLogMessage("Video: AddTrack failed for profile index=%d, profile=%s, mimeType=%s, width=%d, height=%d, fps=%d\n",
+        profileIndex, profileLabel, mimetype, width, height, redrawRate);
+      PostCodecProfileResult(videoFormat, width, height, redrawRate, profileIndex, profile, false, false, "", false);
+      profileIndex++;
     }
 
-    ClLogMessage("Using mimeType %s\n", mimetype);
-    auto add_track_result = g_Instance->m_Source->AddTrack(
-      samsung::wasm::ElementaryVideoTrackConfig {
-        mimetype, // MIME-type: Selected Video Format
-        {}, // Extradata: Empty
-        samsung::wasm::DecodingMode::kHardware, // Decoding mode: Hardware
-        static_cast<uint32_t>(width), // Video resolution: Width
-        static_cast<uint32_t>(height), // Video resolution: Height
-        static_cast<uint32_t>(redrawRate), // Framerate: Numerator
-        1, // Framerate: Denominator
-      }
-    );
-    if (add_track_result) {
-      g_Instance->m_VideoTrack = std::move(*add_track_result);
-      g_Instance->m_VideoTrack.SetListener(&g_Instance->m_VideoTrackListener);
-    }
-    else {
-      ClLogMessage("Video: AddTrack failed for mimeType=%s, width=%d, height=%d, fps=%d\n",
-        mimetype, width, height, redrawRate);
+    if (!selectedProfile) {
+      ClLogMessage("Video: AddTrack failed for every enabled codec profile: videoFormat=0x%x, width=%d, height=%d, fps=%d, disabledMimeTypes=%d\n",
+        videoFormat, width, height, redrawRate, CountDisabledMimeTypes(g_Instance->m_DisabledVideoMimeTypes));
       return -1;
     }
   }

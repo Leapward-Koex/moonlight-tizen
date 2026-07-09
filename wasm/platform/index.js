@@ -99,7 +99,7 @@ const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // Automatic check for updates inte
 const SWITCH_GAME_REFRESH_RETRIES = 6; // Maximum refresh attempts while waiting for the previous game to quit
 const SWITCH_GAME_REFRESH_DELAY_MS = 500; // Delay between refresh attempts when switching games
 const CODEC_CAPABILITY_CACHE_KEY = 'codecCapabilityCache';
-const CODEC_CAPABILITY_CACHE_VERSION = 1;
+const CODEC_CAPABILITY_CACHE_VERSION = 2;
 var codecCapabilityCache = {
   version: CODEC_CAPABILITY_CACHE_VERSION,
   entries: {}
@@ -240,6 +240,9 @@ function normalizeCodecCapabilityCache(savedCache) {
   if (!savedCache || typeof savedCache !== 'object') {
     return normalized;
   }
+  if (savedCache.version !== CODEC_CAPABILITY_CACHE_VERSION) {
+    return normalized;
+  }
 
   var savedEntries = savedCache.entries || {};
   Object.keys(savedEntries).forEach(function(key) {
@@ -272,7 +275,8 @@ function normalizeCodecCapabilityCache(savedCache) {
       lastFps: Number(entry.lastFps) || 0,
       lastRequestedCodec: (entry.lastRequestedCodec || '').toString(),
       lastRequestedHdrMode: !!entry.lastRequestedHdrMode,
-      lastUserChangedAt: Number(entry.lastUserChangedAt) || 0
+      lastUserChangedAt: Number(entry.lastUserChangedAt) || 0,
+      source: (entry.source || '').toString()
     };
   });
 
@@ -311,10 +315,17 @@ function persistCodecCapabilityCache() {
 function loadCodecCapabilityCache() {
   console.log('%c[index.js, loadCodecCapabilityCache]', 'color: green;', 'Load stored codec capability cache.');
   getData(CODEC_CAPABILITY_CACHE_KEY, function(previousValue) {
-    codecCapabilityCache = normalizeCodecCapabilityCache(previousValue[CODEC_CAPABILITY_CACHE_KEY]);
-    renderCodecCapabilityTable();
+    var savedCache = previousValue[CODEC_CAPABILITY_CACHE_KEY];
+    var shouldReplaceCache = !!(savedCache && savedCache.version !== CODEC_CAPABILITY_CACHE_VERSION);
+    codecCapabilityCache = normalizeCodecCapabilityCache(savedCache);
+    if (shouldReplaceCache) {
+      persistCodecCapabilityCache();
+    } else {
+      renderCodecCapabilityTable();
+    }
     logDebugBridge('info', 'codec capability cache loaded', {
       entries: getCodecCapabilityEntries().length,
+      replacedIncompatibleCache: shouldReplaceCache,
       disabledMimeTypes: getDisabledCodecMimeTypesForProbe().split('\n').filter(Boolean).length
     });
   });
@@ -358,7 +369,8 @@ function updateCodecCapabilityCacheFromProbe(probeResult, streamWidth, streamHei
       lastHeight: Number(streamHeight) || Number(probeResult.height) || Number(existing.lastHeight) || 0,
       lastFps: Number(frameRate) || Number(probeResult.fps) || Number(existing.lastFps) || 0,
       lastRequestedCodec: (probeResult.requestedCodec || existing.lastRequestedCodec || '').toString(),
-      lastRequestedHdrMode: !!probeResult.requestedHdrMode
+      lastRequestedHdrMode: !!probeResult.requestedHdrMode,
+      source: (candidate.source || probeResult.source || existing.source || '').toString()
     });
 
     if (candidate.skipped) {
@@ -384,6 +396,39 @@ function updateCodecCapabilityCacheFromProbe(probeResult, streamWidth, streamHei
     codecCapabilityCache.entries = entries;
     persistCodecCapabilityCache();
   }
+}
+
+function updateCodecCapabilityCacheFromProfileResult(profileResult) {
+  if (!profileResult || typeof profileResult !== 'object') {
+    return;
+  }
+
+  updateCodecCapabilityCacheFromProbe({
+    source: 'streamSetup',
+    requestedCodec: profileResult.codec || '',
+    requestedHdrMode: !!profileResult.hdr,
+    width: profileResult.width,
+    height: profileResult.height,
+    fps: profileResult.fps,
+    selectedMimeType: profileResult.selected ? profileResult.mimeType : '',
+    candidates: [profileResult]
+  }, profileResult.width, profileResult.height, profileResult.fps);
+}
+
+function handleCodecProfileResult(payload) {
+  var profileResult = null;
+  try {
+    profileResult = JSON.parse(payload);
+  } catch (e) {
+    logDebugBridge('error', 'codec profile result parse failed', {
+      payloadPrefix: payload ? payload.slice(0, 200) : '',
+      error: e && e.message ? e.message : String(e)
+    });
+    return;
+  }
+
+  updateCodecCapabilityCacheFromProfileResult(profileResult);
+  logDebugBridge(profileResult.supported ? 'info' : (profileResult.skipped ? 'warn' : 'error'), 'codec profile result recorded', profileResult);
 }
 
 function formatCodecCapabilityTime(timestamp) {
@@ -510,80 +555,6 @@ function saveCodecCapabilityToggle(e) {
     return;
   }
   setCodecCapabilityEnabled(input.getAttribute('data-codec-key'), input.checked);
-}
-
-function probeVideoCodecForTv(streamWidth, streamHeight, frameRate, hdrMode, videoCodec, host) {
-  if (typeof Module === 'undefined' || typeof Module.probeVideoCodecSupport !== 'function') {
-    logDebugBridge('warn', 'video codec probe unavailable', {
-      streamWidth: streamWidth,
-      streamHeight: streamHeight,
-      frameRate: frameRate,
-      hdrMode: hdrMode,
-      videoCodec: videoCodec,
-      serverCodecModeSupport: host && host.serverCodecModeSupport ? host.serverCodecModeSupport : 0
-    });
-    return null;
-  }
-
-  var startedAt = Date.now();
-  var rawProbeResult = '';
-  var disabledMimeTypes = getDisabledCodecMimeTypesForProbe();
-  var disabledMimeTypeCount = disabledMimeTypes.split('\n').filter(Boolean).length;
-  logDebugBridge('info', 'video codec probe requested', {
-    streamWidth: streamWidth,
-    streamHeight: streamHeight,
-    frameRate: frameRate,
-    hdrMode: !!hdrMode,
-    videoCodec: videoCodec,
-    serverCodecModeSupport: host && host.serverCodecModeSupport ? host.serverCodecModeSupport : 0,
-    disabledMimeTypeCount: disabledMimeTypeCount,
-    host: getHostDebugSnapshot(host)
-  });
-
-  try {
-    rawProbeResult = Module.probeVideoCodecSupport(
-      streamWidth.toString(),
-      streamHeight.toString(),
-      frameRate.toString(),
-      !!hdrMode,
-      host && host.serverCodecModeSupport ? host.serverCodecModeSupport : 0,
-      videoCodec,
-      disabledMimeTypes
-    );
-    var probeResult = JSON.parse(rawProbeResult);
-    updateCodecCapabilityCacheFromProbe(probeResult, streamWidth, streamHeight, frameRate);
-    logDebugBridge(probeResult && probeResult.selectedCodec ? 'info' : 'warn', 'video codec probe complete', {
-      requestedCodec: videoCodec,
-      requestedHdrMode: !!hdrMode,
-      selectedCodec: probeResult ? probeResult.selectedCodec : '',
-      selectedHdrMode: probeResult ? probeResult.selectedHdrMode : false,
-      selectedProfile: probeResult ? probeResult.selectedProfile : '',
-      selectedMimeType: probeResult ? probeResult.selectedMimeType : '',
-      fallback: probeResult ? probeResult.fallback : false,
-      attemptedProfiles: probeResult ? probeResult.attemptedProfiles : 0,
-      skippedProfiles: probeResult ? probeResult.skippedProfiles : 0,
-      disabledMimeTypeCount: disabledMimeTypeCount,
-      nativeElapsedMs: probeResult ? probeResult.elapsedMs : null,
-      elapsedMs: Date.now() - startedAt,
-      candidates: probeResult ? probeResult.candidates : [],
-      host: getHostDebugSnapshot(host)
-    });
-    return probeResult;
-  } catch (e) {
-    logDebugBridge('error', 'video codec probe failed', {
-      streamWidth: streamWidth,
-      streamHeight: streamHeight,
-      frameRate: frameRate,
-      hdrMode: hdrMode,
-      videoCodec: videoCodec,
-      elapsedMs: Date.now() - startedAt,
-      disabledMimeTypeCount: disabledMimeTypeCount,
-      rawResultLength: rawProbeResult ? rawProbeResult.length : 0,
-      rawResultPrefix: rawProbeResult ? rawProbeResult.slice(0, 200) : '',
-      error: e && e.message ? e.message : String(e)
-    });
-    return null;
-  }
 }
 
 function getHostDisplayModeSupport(host, width, height) {
@@ -3783,80 +3754,21 @@ function startGame(host, appID, options) {
         selectedDisplayModeSupport: getHostDisplayModeSupport(host, streamWidth, streamHeight)
       };
 
-      var codecProbeResult = probeVideoCodecForTv(streamWidth, streamHeight, frameRate, hdrMode, videoCodec, host);
-      if (codecProbeResult && codecProbeResult.selectedCodec) {
-        var requestedVideoCodec = videoCodec;
-        var requestedHdrMode = hdrMode;
-        videoCodec = codecProbeResult.selectedCodec;
-        hdrMode = codecProbeResult.selectedHdrMode ? 1 : 0;
-        streamStartDetails.videoCodec = videoCodec;
-        streamStartDetails.hdrMode = hdrMode;
-        streamStartDetails.codecProbe = {
-          requestedCodec: requestedVideoCodec,
-          requestedHdrMode: !!requestedHdrMode,
-          selectedCodec: codecProbeResult.selectedCodec,
-          selectedHdrMode: !!codecProbeResult.selectedHdrMode,
-          selectedProfile: codecProbeResult.selectedProfile,
-          selectedMimeType: codecProbeResult.selectedMimeType,
-          fallback: !!codecProbeResult.fallback,
-          candidates: codecProbeResult.candidates || []
-        };
-
-        if (requestedVideoCodec !== videoCodec || !!requestedHdrMode !== !!hdrMode) {
-          logDebugBridge('warn', 'video codec probe adjusted stream request', {
-            requestedCodec: requestedVideoCodec,
-            requestedHdrMode: !!requestedHdrMode,
-            selectedCodec: videoCodec,
-            selectedHdrMode: !!hdrMode,
-            selectedProfile: codecProbeResult.selectedProfile,
-            selectedMimeType: codecProbeResult.selectedMimeType,
-            candidates: codecProbeResult.candidates || []
-          });
-          snackbarLogLong('Using ' + videoCodec + (hdrMode ? ' HDR' : ' SDR') + ' for this stream because the TV rejected the requested codec profile.');
-        } else {
-          logDebugBridge('info', 'video codec probe kept stream request', {
-            selectedCodec: videoCodec,
-            selectedHdrMode: !!hdrMode,
-            selectedProfile: codecProbeResult.selectedProfile,
-            selectedMimeType: codecProbeResult.selectedMimeType
-          });
-        }
-      } else if (codecProbeResult) {
-        streamStartDetails.codecProbe = {
-          noUsableSelection: true,
-          requestedCodec: videoCodec,
-          requestedHdrMode: !!hdrMode,
-          attemptedProfiles: codecProbeResult.attemptedProfiles || 0,
-          skippedProfiles: codecProbeResult.skippedProfiles || 0,
-          candidates: codecProbeResult.candidates || []
-        };
-        logDebugBridge('error', 'video codec probe produced no usable selection', {
-          requestedCodec: videoCodec,
-          requestedHdrMode: !!hdrMode,
-          streamWidth: streamWidth,
-          streamHeight: streamHeight,
-          frameRate: frameRate,
-          attemptedProfiles: codecProbeResult.attemptedProfiles || 0,
-          skippedProfiles: codecProbeResult.skippedProfiles || 0,
-          candidates: codecProbeResult.candidates || [],
-          host: getHostDebugSnapshot(host)
-        });
-        snackbarLogLong('No enabled codec profile was accepted by this TV for the selected stream settings.');
-        resetStreamUiState('codec probe produced no usable selection', host, { navigateToApps: true });
-        return;
-      } else {
-        streamStartDetails.codecProbe = {
-          unavailable: true
-        };
-        logDebugBridge('warn', 'video codec probe produced no usable selection', {
-          requestedCodec: videoCodec,
-          requestedHdrMode: !!hdrMode,
-          streamWidth: streamWidth,
-          streamHeight: streamHeight,
-          frameRate: frameRate,
-          host: getHostDebugSnapshot(host)
-        });
-      }
+      var disabledCodecMimeTypes = getDisabledCodecMimeTypesForProbe();
+      var disabledCodecProfileCount = disabledCodecMimeTypes.split('\n').filter(Boolean).length;
+      streamStartDetails.codecProfiles = {
+        selection: 'streamSetup',
+        disabledCodecProfileCount: disabledCodecProfileCount
+      };
+      logDebugBridge('info', 'video codec profile selection deferred to stream setup', {
+        requestedCodec: videoCodec,
+        requestedHdrMode: !!hdrMode,
+        streamWidth: streamWidth,
+        streamHeight: streamHeight,
+        frameRate: frameRate,
+        disabledCodecProfileCount: disabledCodecProfileCount,
+        host: getHostDebugSnapshot(host)
+      });
 
       console.log('%c[index.js, startGame]', 'color: green;', 'startRequest:' + 
       '\n Host address: ' + host.address + ':' + host.httpPort + 
@@ -3956,7 +3868,7 @@ function startGame(host, appID, options) {
             host.appVersion, host.gfeVersion, sessionUrl, host.serverCodecModeSupport,
             framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
             audioConfig, audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
-            performanceStats
+            performanceStats, disabledCodecMimeTypes
           ]);
           return resumeStartRequest.then(function(event) {
             logDebugBridge('info', 'wasm startRequest connected', Object.assign({
@@ -4049,7 +3961,7 @@ function startGame(host, appID, options) {
           host.appVersion, host.gfeVersion, sessionUrl, host.serverCodecModeSupport,
           framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
           audioConfig, audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
-          performanceStats
+          performanceStats, disabledCodecMimeTypes
         ]);
         return launchStartRequest.then(function(event) {
           logDebugBridge('info', 'wasm startRequest connected', Object.assign({

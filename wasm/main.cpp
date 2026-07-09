@@ -84,7 +84,8 @@ MoonlightInstance::MoonlightInstance()
     m_ProbedVideoHeight(0),
     m_ProbedVideoFps(0),
     m_ProbedVideoMimeType(),
-    m_ProbedVideoProfileLabel() {
+    m_ProbedVideoProfileLabel(),
+    m_DisabledVideoMimeTypes() {
       m_Dispatcher.start();
       ClLogMessage("MoonlightInstance initialized\n");
     }
@@ -469,7 +470,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-  bool disableWarnings, bool performanceStats) {
+  bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes) {
   JoinStaleThreadsIfIdle();
 
   StreamLifecycle lifecycle = GetLifecycle();
@@ -486,11 +487,11 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   m_InputThreadCreated = false;
   m_StopThreadCreated = false;
 
-  ClLogMessage("StartStream requested: attemptId=%u, host=%s:%d, mode=%sx%s@%s, bitrate=%s Kbps, codec=%s, audio=%s, audioPacketDuration=%d, audioJitterMs=%d, playHostAudio=%d, gameMode=%d, runningBefore=%d, videoStarted=%d, sourceExisting=%d\n",
+  ClLogMessage("StartStream requested: attemptId=%u, host=%s:%d, mode=%sx%s@%s, bitrate=%s Kbps, codec=%s, audio=%s, audioPacketDuration=%d, audioJitterMs=%d, playHostAudio=%d, gameMode=%d, runningBefore=%d, videoStarted=%d, sourceExisting=%d, disabledVideoMimeTypesLength=%u\n",
     attemptId,
     host.c_str(), httpPort, width.c_str(), height.c_str(), fps.c_str(), bitrate.c_str(),
     videoCodec.c_str(), audioConfig.c_str(), audioPacketDuration, audioJitterMs, playHostAudio,
-    gameMode, m_Running.load(), m_VideoStarted.load(), m_Source ? 1 : 0);
+    gameMode, m_Running.load(), m_VideoStarted.load(), m_Source ? 1 : 0, static_cast<unsigned int>(disabledVideoMimeTypes.size()));
 
   auto failStartSetup = [&](const std::string& reason) {
     ClLogMessage("StartStream setup failed before connection thread: attemptId=%u, reason=%s\n",
@@ -631,6 +632,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   m_GfeVersion = gfeversion;
   m_RtspUrl = rtspurl;
   m_ServerCodecModeSupport = serverCodecModeSupport;
+  m_DisabledVideoMimeTypes = disabledVideoMimeTypes;
   m_FramePacingEnabled = framePacing;
   m_OptimizeGamesEnabled = optimizeGames;
   m_RumbleFeedbackEnabled = rumbleFeedback;
@@ -802,13 +804,13 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-  bool disableWarnings, bool performanceStats) {
+  bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes) {
   MoonlightInstance::ClLogMessage("JS bridge invoked startStream: host=%s:%d, width=%s, height=%s, fps=%s, bitrate=%s\n",
     host.c_str(), httpPort, width.c_str(), height.c_str(), fps.c_str(), bitrate.c_str());
   PostToJs("Starting the streaming session...");
   return g_Instance->StartStream(host, httpPort, width, height, fps, bitrate, rikey, rikeyid, appversion, gfeversion, rtspurl, serverCodecModeSupport,
   framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons, audioConfig,
-  audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats);
+  audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats, disabledVideoMimeTypes);
 }
 
 std::string probeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes) {

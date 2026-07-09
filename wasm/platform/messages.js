@@ -7,7 +7,8 @@ const SyncFunctions = {
   'httpInit': (...args) => Module.httpInit(...args),
   /* host, httpPort, width, height, fps, bitrate, rikey, rikeyid, appversion, gfeversion, rtspurl, serverCodecModeSupport,
   framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons, audioConfig,
-  audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats */
+  audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats,
+  disabledCodecMimeTypes */
   'startRequest': (...args) => Module.startStream(...args),
   // no parameters
   'stopRequest': (...args) => Module.stopStream(...args),
@@ -67,6 +68,9 @@ function classifyWasmMessage(msg) {
   }
   if (msg.indexOf('TransientMsg: ') === 0) {
     return 'TransientMsg';
+  }
+  if (msg.indexOf('CodecProfileResult: ') === 0) {
+    return 'CodecProfileResult';
   }
   if (msg.indexOf('DialogMsg: ') === 0) {
     return 'DialogMsg';
@@ -374,7 +378,8 @@ function summarizeMessageParams(method, params) {
       fullRange: values[24],
       gameMode: values[25],
       disableWarnings: values[26],
-      performanceStats: values[27]
+      performanceStats: values[27],
+      disabledCodecProfileCount: values[28] ? String(values[28]).split('\n').filter(Boolean).length : 0
     };
   }
   if (method === 'openUrl') {
@@ -690,6 +695,14 @@ function handleMessage(msg) {
     });
     // Show transient message as notification
     snackbarLogLong(msg.replace('TransientMsg: ', ''));
+  } else if (msg.indexOf('CodecProfileResult: ') === 0) {
+    var codecProfilePayload = msg.replace('CodecProfileResult: ', '');
+    logWasmMessage('info', 'codec profile result', {
+      payloadLength: codecProfilePayload.length
+    });
+    if (typeof handleCodecProfileResult === 'function') {
+      handleCodecProfileResult(codecProfilePayload);
+    }
   } else if (msg.indexOf('DialogMsg: ') === 0) {
     logWasmMessage('error', 'stream dialog message', {
       message: msg.replace('DialogMsg: ', '')
