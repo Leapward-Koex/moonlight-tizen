@@ -2512,7 +2512,7 @@ function navigationGuideDialog() {
 // Fetch the latest version and release notes from GitHub API
 function fetchLatestRelease() {
   // GitHub API endpoint to get the latest released version
-  const repoOwner = 'brightcraft';
+  const repoOwner = 'Leapward-Koex';
   const repoName = 'moonlight-tizen';
   const apiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;
 

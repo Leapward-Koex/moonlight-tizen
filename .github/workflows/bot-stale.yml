@@ -15,7 +15,7 @@ permissions:
 jobs:
   stale:
     runs-on: ubuntu-latest
-    if: ${{ github.repository == 'brightcraft/moonlight-tizen' }}
+    if: ${{ github.repository == 'Leapward-Koex/moonlight-tizen' }}
     steps:
       - name: Mark and close stale issue
         uses: actions/stale@v10.1.0
