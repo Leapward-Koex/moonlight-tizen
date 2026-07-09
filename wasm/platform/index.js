@@ -73,6 +73,8 @@ var isInGame = false; // Flag indicating whether the game has started, initial v
 var isDialogOpen = false; // Flag indicating whether the dialog is open, initial value is false
 var isPairingInProgress = false; // Flag indicating whether a pairing process is in progress, initial value is false
 var wasPairingCanceled = false; // Flag indicating whether the current pairing process was canceled by the user, initial value is false
+var isAddHostConnectionInProgress = false; // Flag indicating whether an Add Host connection request is in progress, initial value is false
+var addHostRequestId = 0; // Monotonic ID used to ignore stale Add Host responses after retry/cancel
 var isGamepadActive = false; // Flag indicating whether the gamepad input is active, initial value is false
 var isHostClickPrevented = false; // Flag indicating whether the host click event should be prevented, initial value is false
 var isGameClickPrevented = false; // Flag indicating whether the game click event should be prevented, initial value is false
@@ -1304,6 +1306,8 @@ function addHostDialog() {
   $('#cancelAddHost').off('click');
   $('#cancelAddHost').on('click', function() {
     console.log('%c[index.js, addHostDialog]', 'color: green;', 'Closing app dialog and returning.');
+    addHostRequestId++;
+    isAddHostConnectionInProgress = false;
     addHostOverlay.style.display = 'none';
     addHostDialog.close();
     isDialogOpen = false;
@@ -1319,6 +1323,14 @@ function addHostDialog() {
   // Send a connection request if the Continue button is pressed
   $('#continueAddHost').off('click');
   $('#continueAddHost').on('click', function() {
+    if (isAddHostConnectionInProgress || $('#continueAddHost').prop('disabled')) {
+      logDebugBridge('warn', 'ignored duplicate Add Host submit while connection request is active', {
+        requestId: addHostRequestId,
+        buttonDisabled: $('#continueAddHost').prop('disabled')
+      });
+      return;
+    }
+
     console.log('%c[index.js, addHostDialog]', 'color: green;', 'Adding host, closing app dialog, and returning.');
     // Get the IP address value from the input field or select fields
     var inputHost;
@@ -1344,23 +1356,32 @@ function addHostDialog() {
       snackbarLog(parsedHostInput.error);
       return;
     }
-    // Disable the Continue button to prevent multiple connection requests
+
+    // Disable the Continue button immediately to prevent duplicate remote/controller events from starting parallel pairing flows.
+    isAddHostConnectionInProgress = true;
+    var currentAddHostRequestId = ++addHostRequestId;
     var hostConnectionLabel = parsedHostInput.addr + ':' + parsedHostInput.port;
-    setTimeout(() => {
-      // Add disabled state after 2 seconds
-      $('#continueAddHost').addClass('mdl-button--disabled').prop('disabled', true);
-      Navigation.switch();
-      // Re-enable the Continue button after 12 seconds
-      setTimeout(() => {
-        $('#continueAddHost').removeClass('mdl-button--disabled').prop('disabled', false);
-        Navigation.switch();
-      }, 12000);
-    }, 2000);
+    $('#continueAddHost').addClass('mdl-button--disabled').prop('disabled', true);
+    Navigation.switch();
+    logDebugBridge('info', 'Add Host connection request started', {
+      requestId: currentAddHostRequestId,
+      host: hostConnectionLabel
+    });
+
     // Send a connection request to the Host object based on the given IP address
     var _nvhttpHost = new NvHTTP(parsedHostInput.addr, myUniqueid, parsedHostInput.addr);
     _nvhttpHost.httpPort = parsedHostInput.port;
     console.log('%c[index.js, addHostDialog]', 'color: green;', 'Sending connection request to host address ' + hostConnectionLabel);
     _nvhttpHost.refreshServerInfoAtAddress(parsedHostInput.addr).then(function(success) {
+      if (currentAddHostRequestId !== addHostRequestId) {
+        logDebugBridge('warn', 'ignored stale Add Host success response', {
+          requestId: currentAddHostRequestId,
+          activeRequestId: addHostRequestId,
+          host: hostConnectionLabel
+        });
+        return;
+      }
+
       snackbarLog('Connecting to ' + _nvhttpHost.hostname + '...');
       // Close the dialog if the user has provided the IP address
       console.log('%c[index.js, addHostDialog]', 'color: green;', 'Closing app dialog and returning.');
@@ -1388,15 +1409,26 @@ function addHostDialog() {
         });
       }
       // Re-enable the Continue button after successful processing
+      isAddHostConnectionInProgress = false;
       $('#continueAddHost').removeClass('mdl-button--disabled').prop('disabled', false);
       // Clear the input field after successful processing
       $('#ipAddressTextInput').val('');
       updateIpAddressInputValidationState();
       initIpAddressFields();
     }.bind(this), function(failure) {
+      if (currentAddHostRequestId !== addHostRequestId) {
+        logDebugBridge('warn', 'ignored stale Add Host failure response', {
+          requestId: currentAddHostRequestId,
+          activeRequestId: addHostRequestId,
+          host: hostConnectionLabel
+        });
+        return;
+      }
+
       console.error('%c[index.js, addHostDialog]', 'color: green;', 'Error: Failed API object:\n', _nvhttpHost, '\n' + _nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
       snackbarLogLong('Failed to connect to ' + hostConnectionLabel + '. Ensure Sunshine is running on your PC or GameStream is enabled in GeForce Experience SHIELD settings.');
       // Re-enable the Continue button after failure processing
+      isAddHostConnectionInProgress = false;
       $('#continueAddHost').removeClass('mdl-button--disabled').prop('disabled', false);
       // Keep the input field intact so the user can correct or retry it.
       updateIpAddressInputValidationState();
@@ -1417,8 +1449,21 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     return;
   }
 
+  if (isPairingInProgress) {
+    logDebugBridge('warn', 'ignored duplicate pairing request while pairing is active', {
+      host: getHostDebugSnapshot(nvhttpHost)
+    });
+    snackbarLogLong('A pairing request is already in progress. Please wait for it to finish before trying again.');
+    onFailure();
+    return;
+  }
+
+  isPairingInProgress = true;
+  wasPairingCanceled = false;
+
   nvhttpHost.pollServer(function(returnedNvHTTPHost) {
     if (!returnedNvHTTPHost.online) {
+      isPairingInProgress = false;
       console.error('%c[index.js, pairingDialog]', 'color: green;', 'Error: Failed to connect to ' + nvhttpHost.hostname + '. Ensure your host PC is online!', nvhttpHost, '\n' + nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
       snackbarLogLong('Failed to connect to ' + nvhttpHost.hostname + '. Ensure Sunshine is running on your host PC or GameStream is enabled in the GeForce Experience SHIELD settings.');
       onFailure();
@@ -1426,11 +1471,13 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     }
 
     if (nvhttpHost.paired) {
+      isPairingInProgress = false;
       onSuccess();
       return;
     }
 
     if (nvhttpHost.currentGame != 0) {
+      isPairingInProgress = false;
       snackbarLogLong(nvhttpHost.hostname + ' is currently in a game session. Please quit the running app or restart the computer, then try again.');
       onFailure();
       return;
@@ -1454,9 +1501,6 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     pairingDialog.showModal();
     isDialogOpen = true;
     Navigation.push(Views.PairingDialog);
-
-    isPairingInProgress = true;
-    wasPairingCanceled = false;
 
     // Cancel the operation if the Cancel button is pressed
     $('#cancelPairing').off('click');
