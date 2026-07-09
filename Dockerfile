@@ -94,36 +94,24 @@ COPY --chown=moonlight wasm/static/ ./moonlight-tizen/wasm/static/
 
 RUN cmake --install build --prefix build
 
-# Prepare separate widget directories so each variant is signed from a clean tree
-RUN cp -a build/widget build/widget-forcegm \
-	&& cp -a build/widget build/widget-standard
+ARG FORCE_GAME_MODE=true
 
-# Remove the Samsung Game Mode metadata from the standard variant
-RUN sed -i '/http:\/\/samsung.com\/tv\/metadata\/use.game.mode/d' build/widget-standard/config.xml
+# Remove the Samsung Game Mode metadata for standard builds
+RUN if [ "$FORCE_GAME_MODE" != "true" ]; then \
+	sed -i '/http:\/\/samsung.com\/tv\/metadata\/use.game.mode/d' build/widget/config.xml; \
+	fi
 
-# Sign and package the Force Game Mode variant using Expect to automate the interactive password prompts
+# Sign and package the application into a WGT file using Expect to automate the interactive password prompts
 RUN echo \
 	'set timeout -1\n' \
-	'spawn tizen package -t wgt -- build/widget-forcegm\n' \
+	'spawn tizen package -t wgt -- build/widget\n' \
 	'expect "Author password:"\n' \
 	'send -- "123456\\r"\n' \
 	'expect "Yes: (Y), No: (N) ?"\n' \
 	'send -- "N\\r"\n' \
 	'expect eof\n' \
 | expect
-RUN mv build/widget-forcegm/Moonlight.wgt ./Moonlight-ForceGM.wgt
-
-# Sign and package the standard variant using Expect to automate the interactive password prompts
-RUN echo \
-	'set timeout -1\n' \
-	'spawn tizen package -t wgt -- build/widget-standard\n' \
-	'expect "Author password:"\n' \
-	'send -- "123456\\r"\n' \
-	'expect "Yes: (Y), No: (N) ?"\n' \
-	'send -- "N\\r"\n' \
-	'expect eof\n' \
-| expect
-RUN mv build/widget-standard/Moonlight.wgt .
+RUN mv build/widget/Moonlight.wgt .
 
 # Clean up unnecessary files to reduce image size
 RUN rm -rf \
