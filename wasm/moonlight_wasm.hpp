@@ -1,5 +1,9 @@
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <queue>
 
 #include <emscripten/bind.h>
@@ -82,6 +86,13 @@ enum class LoadResult {
   Success, CertErr, PrivateKeyErr
 };
 
+enum class StreamLifecycle {
+  Idle,
+  Starting,
+  Connected,
+  Stopping
+};
+
 constexpr const char* kCanvasName = "#wasm_module";
 
 class MoonlightInstance {
@@ -91,8 +102,9 @@ class MoonlightInstance {
   MessageResult StartStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
     std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
     bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-    std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-    bool disableWarnings, bool performanceStats);
+    std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+    bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes);
+  std::string ProbeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
   MessageResult StopStream();
 
   void STUN(int callbackId);
@@ -120,7 +132,7 @@ class MoonlightInstance {
 
   void OnConnectionStopped(uint32_t unused);
   void OnConnectionStarted(uint32_t error);
-  void StopConnection();
+  MessageResult StopConnection();
 
   static uint32_t ProfilerGetPackedMillis();
   static uint64_t ProfilerGetMillis();
@@ -180,16 +192,6 @@ class MoonlightInstance {
   private:
     MoonlightInstance* m_Instance;
   };
-  class AudioTrackListener
-    : public samsung::wasm::ElementaryMediaTrackListener {
-  public:
-    AudioTrackListener(MoonlightInstance* instance);
-    void OnTrackOpen() override;
-    void OnTrackClosed(EmssTrackCloseReason) override;
-    void OnSessionIdChanged(samsung::wasm::SessionId new_session_id) override;
-  private:
-    MoonlightInstance* m_Instance;
-  };
   class VideoTrackListener
     : public samsung::wasm::ElementaryMediaTrackListener {
   public:
@@ -201,7 +203,19 @@ class MoonlightInstance {
     MoonlightInstance* m_Instance;
   };
 
-  void WaitFor(std::condition_variable* variable, std::function<bool()> condition);
+  bool WaitFor(std::condition_variable* variable, const char* waitName, uint32_t timeoutMs, std::function<bool()> condition);
+  bool ProbeVideoTrack(const char* mimeType, int width, int height, int redrawRate);
+  bool TrySetLifecycle(StreamLifecycle expected, StreamLifecycle desired, const char* reason);
+  void SetLifecycle(StreamLifecycle lifecycle, const char* reason);
+  StreamLifecycle GetLifecycle() const;
+  const char* GetLifecycleName() const;
+  uint32_t GetStreamAttemptId() const;
+  void CompleteStartFailure(uint32_t attemptId, int errorCode, const std::string& reason);
+  void ResetMediaStateForStart(uint32_t attemptId);
+  void JoinStaleThreadsIfIdle();
+  void CompleteStop(uint32_t attemptId, int errorCode, uint64_t stopStartMs);
+  static const char* StreamLifecycleName(StreamLifecycle lifecycle);
+  static const char* EmssReadyStateName(EmssReadyState state);
 
   void OpenUrl_private(int callbackId, std::string url, std::string ppk, bool binaryResponse);
   void STUN_private(int callbackId);
@@ -228,7 +242,8 @@ class MoonlightInstance {
   bool m_FlipABfaceButtonsEnabled;
   bool m_FlipXYfaceButtonsEnabled;
   int m_AudioConfig;
-  bool m_AudioSyncEnabled;
+  int m_AudioPacketDuration;
+  int m_AudioJitterMs;
   bool m_PlayHostAudioEnabled;
   bool m_HdrModeEnabled;
   bool m_FullRangeEnabled;
@@ -237,10 +252,16 @@ class MoonlightInstance {
   bool m_PerformanceStatsEnabled;
 
   STREAM_CONFIGURATION m_StreamConfig;
-  bool m_Running;
+  std::atomic<bool> m_Running;
+  std::atomic<StreamLifecycle> m_StreamLifecycle;
+  std::atomic<uint32_t> m_StreamAttemptId;
 
   pthread_t m_ConnectionThread;
   pthread_t m_InputThread;
+  pthread_t m_StopThread;
+  std::atomic<bool> m_ConnectionThreadCreated;
+  std::atomic<bool> m_InputThreadCreated;
+  std::atomic<bool> m_StopThreadCreated;
 
   OpusMSDecoder* m_OpusDecoder;
 
@@ -259,20 +280,22 @@ class MoonlightInstance {
 
   std::mutex m_Mutex;
   std::condition_variable m_EmssStateChanged;
-  std::condition_variable m_EmssAudioStateChanged;
   std::condition_variable m_EmssVideoStateChanged;
   EmssReadyState m_EmssReadyState;
-  std::atomic<bool> m_AudioStarted;
   std::atomic<bool> m_VideoStarted;
-  std::atomic<samsung::wasm::SessionId> m_AudioSessionId;
   std::atomic<samsung::wasm::SessionId> m_VideoSessionId;
   samsung::html::HTMLMediaElement m_MediaElement;
   std::unique_ptr<samsung::wasm::ElementaryMediaStreamSource> m_Source;
   SourceListener m_SourceListener;
-  AudioTrackListener m_AudioTrackListener;
   VideoTrackListener m_VideoTrackListener;
-  samsung::wasm::ElementaryMediaTrack m_AudioTrack;
   samsung::wasm::ElementaryMediaTrack m_VideoTrack;
+  int m_ProbedVideoFormat;
+  int m_ProbedVideoWidth;
+  int m_ProbedVideoHeight;
+  int m_ProbedVideoFps;
+  std::string m_ProbedVideoMimeType;
+  std::string m_ProbedVideoProfileLabel;
+  std::string m_DisabledVideoMimeTypes;
 };
 
 extern MoonlightInstance* g_Instance;
@@ -290,8 +313,9 @@ void openUrl(int callbackId, std::string url, emscripten::val ppk, bool binaryRe
 MessageResult startStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-  bool disableWarnings, bool performanceStats);
+  std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+  bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes);
+std::string probeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
 MessageResult stopStream();
 
 void toggleStats();

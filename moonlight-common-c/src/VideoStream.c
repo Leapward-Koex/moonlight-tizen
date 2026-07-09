@@ -19,6 +19,10 @@ static PLT_THREAD decoderThread;
 static bool receivedDataFromPeer;
 static uint64_t firstDataTimeMs;
 static bool receivedFullFrame;
+static uint64_t videoStreamStartTimeMs;
+static uint32_t videoPacketsReceived;
+static uint32_t videoRuntPackets;
+static uint32_t videoDecryptFailures;
 
 // We can't request an IDR frame until the depacketizer knows
 // that a packet was lost. This timeout bounds the time that
@@ -42,13 +46,23 @@ void initializeVideoStream(void) {
     receivedDataFromPeer = false;
     firstDataTimeMs = 0;
     receivedFullFrame = false;
+    videoStreamStartTimeMs = PltGetMillis();
+    videoPacketsReceived = 0;
+    videoRuntPackets = 0;
+    videoDecryptFailures = 0;
+    Limelog("Video stream initialized: packetSize=%d, fps=%d, supportedFormats=0x%x, encryptionFlags=0x%x\n",
+            StreamConfig.packetSize, StreamConfig.fps, StreamConfig.supportedVideoFormats,
+            StreamConfig.encryptionFlags);
 }
 
 // Clean up the video stream
 void destroyVideoStream(void) {
+    Limelog("Destroying video stream: received=%u, runts=%u, decryptFailures=%u, receivedFullFrame=%d\n",
+            videoPacketsReceived, videoRuntPackets, videoDecryptFailures, receivedFullFrame);
     PltDestroyCryptoContext(decryptionCtx);
     destroyVideoDepacketizer();
     RtpvCleanupQueue(&rtpQueue);
+    Limelog("Video stream destroyed\n");
 }
 
 // UDP Ping proc
@@ -90,6 +104,7 @@ static void VideoReceiveThreadProc(void* context) {
     int queueStatus;
     bool useSelect;
     int waitingForVideoMs;
+    int nextVideoWaitLogMs;
     bool encrypted;
 
     encrypted = !!(EncryptionFeaturesEnabled & SS_ENC_VIDEO);
@@ -108,6 +123,9 @@ static void VideoReceiveThreadProc(void* context) {
         useSelect = false;
     }
 
+    Limelog("Video receive thread started: encrypted=%d, packetSize=%d, receiveSize=%d, minSize=%d, useSelect=%d, videoPort=%u\n",
+            encrypted, StreamConfig.packetSize, receiveSize, minSize, useSelect, VideoPortNumber);
+
     // Allocate a staging buffer to use for each received packet
     if (encrypted) {
         encryptedBuffer = (char*)malloc(receiveSize);
@@ -122,6 +140,7 @@ static void VideoReceiveThreadProc(void* context) {
     }
 
     waitingForVideoMs = 0;
+    nextVideoWaitLogMs = 1000;
     while (!PltIsThreadInterrupted(&receiveThread)) {
         PRTP_PACKET packet;
 
@@ -148,6 +167,11 @@ static void VideoReceiveThreadProc(void* context) {
                 // If we wait many seconds without ever receiving a video packet,
                 // assume something is broken and terminate the connection.
                 waitingForVideoMs += UDP_RECV_POLL_TIMEOUT_MS;
+                if (waitingForVideoMs >= nextVideoWaitLogMs) {
+                    Limelog("Still waiting for first video packet after %d ms (videoPort=%u)\n",
+                            waitingForVideoMs, VideoPortNumber);
+                    nextVideoWaitLogMs += 1000;
+                }
                 if (waitingForVideoMs >= FIRST_FRAME_TIMEOUT_SEC * 1000) {
                     Limelog("Terminating connection due to lack of video traffic\n");
                     ListenerCallbacks.connectionTerminated(ML_ERROR_NO_VIDEO_TRAFFIC);
@@ -161,7 +185,8 @@ static void VideoReceiveThreadProc(void* context) {
 
         if (!receivedDataFromPeer) {
             receivedDataFromPeer = true;
-            Limelog("Received first video packet after %d ms\n", waitingForVideoMs);
+            Limelog("Received first video packet after %d ms (size=%d, encrypted=%d)\n",
+                    waitingForVideoMs, err, encrypted);
 
             firstDataTimeMs = PltGetMillis();
         }
@@ -180,6 +205,11 @@ static void VideoReceiveThreadProc(void* context) {
 
         if (err < minSize) {
             // Runt packet
+            videoRuntPackets++;
+            if (videoRuntPackets <= 3 || (videoRuntPackets % 100) == 0) {
+                Limelog("Discarding runt video packet: size=%d, minSize=%d, runts=%u\n",
+                        err, minSize, videoRuntPackets);
+            }
             continue;
         }
 
@@ -218,7 +248,8 @@ static void VideoReceiveThreadProc(void* context) {
                                    encHeader->tag, sizeof(encHeader->tag),
                                    ((unsigned char*)(encHeader + 1)), err - sizeof(ENC_VIDEO_HEADER), // The ciphertext is after the header
                                    (unsigned char*)buffer, &err)) {
-                Limelog("Failed to decrypt video packet!\n");
+                videoDecryptFailures++;
+                Limelog("Failed to decrypt video packet: failures=%u\n", videoDecryptFailures);
                 continue;
             }
         }
@@ -228,6 +259,11 @@ static void VideoReceiveThreadProc(void* context) {
         packet->sequenceNumber = BE16(packet->sequenceNumber);
         packet->timestamp = BE32(packet->timestamp);
         packet->ssrc = BE32(packet->ssrc);
+        videoPacketsReceived++;
+        if (videoPacketsReceived == 1) {
+            Limelog("First parsed video RTP packet: seq=%u, timestamp=%u, ssrc=%u\n",
+                    packet->sequenceNumber, packet->timestamp, packet->ssrc);
+        }
 
         queueStatus = RtpvAddPacket(&rtpQueue, packet, err, (PRTPV_QUEUE_ENTRY)&buffer[decryptedSize]);
 
@@ -244,9 +280,18 @@ static void VideoReceiveThreadProc(void* context) {
     if (encryptedBuffer != NULL) {
         free(encryptedBuffer);
     }
+
+    Limelog("Video receive thread exiting: received=%u, runts=%u, decryptFailures=%u, receivedFullFrame=%d\n",
+            videoPacketsReceived, videoRuntPackets, videoDecryptFailures, receivedFullFrame);
 }
 
 void notifyKeyFrameReceived(void) {
+    if (!receivedFullFrame) {
+        Limelog("Received first complete video key frame after %llu ms from first packet (streamLifetimeMs=%llu)\n",
+                (unsigned long long)(firstDataTimeMs ? PltGetMillis() - firstDataTimeMs : 0),
+                (unsigned long long)(PltGetMillis() - videoStreamStartTimeMs));
+    }
+
     // Remember that we got a full frame successfully
     receivedFullFrame = true;
 }
@@ -278,6 +323,9 @@ int readFirstFrame(void) {
 
 // Terminate the video stream
 void stopVideoStream(void) {
+    Limelog("Stopping video stream: received=%u, runts=%u, decryptFailures=%u, receivedFullFrame=%d\n",
+            videoPacketsReceived, videoRuntPackets, videoDecryptFailures, receivedFullFrame);
+
     if (!receivedDataFromPeer) {
         Limelog("No video traffic was ever received from the host!\n");
     }
@@ -313,6 +361,9 @@ void stopVideoStream(void) {
     }
 
     VideoCallbacks.cleanup();
+    Limelog("Video stream stopped: lifetimeMs=%llu, received=%u, runts=%u, decryptFailures=%u, receivedFullFrame=%d\n",
+            (unsigned long long)(PltGetMillis() - videoStreamStartTimeMs),
+            videoPacketsReceived, videoRuntPackets, videoDecryptFailures, receivedFullFrame);
 }
 
 // Start the video stream
@@ -320,6 +371,9 @@ int startVideoStream(void* rendererContext, int drFlags) {
     int err;
 
     firstFrameSocket = INVALID_SOCKET;
+    Limelog("Starting video stream: negotiatedFormat=0x%x, width=%d, height=%d, fps=%d, packetSize=%d, drFlags=0x%x, drCaps=0x%x, appMajor=%d\n",
+            NegotiatedVideoFormat, StreamConfig.width, StreamConfig.height, StreamConfig.fps,
+            StreamConfig.packetSize, drFlags, VideoCallbacks.capabilities, AppVersionQuad[0]);
 
     // This must be called before the decoder thread starts submitting
     // decode units
@@ -327,30 +381,40 @@ int startVideoStream(void* rendererContext, int drFlags) {
     err = VideoCallbacks.setup(NegotiatedVideoFormat, StreamConfig.width,
         StreamConfig.height, StreamConfig.fps, rendererContext, drFlags);
     if (err != 0) {
+        Limelog("Video renderer setup failed: %d\n", err);
         return err;
     }
+    Limelog("Video renderer setup complete\n");
 
     rtpSocket = bindUdpSocket(RemoteAddr.ss_family, &LocalAddr, AddrLen,
                               RTP_RECV_PACKETS_BUFFERED * (StreamConfig.packetSize + MAX_RTP_HEADER_SIZE),
                               SOCK_QOS_TYPE_VIDEO);
     if (rtpSocket == INVALID_SOCKET) {
+        Limelog("Video UDP socket bind failed: error=%d\n", (int)LastSocketError());
         VideoCallbacks.cleanup();
         return LastSocketError();
     }
+    Limelog("Video UDP socket bound: receiveBufferBytes=%d, videoPort=%u\n",
+            RTP_RECV_PACKETS_BUFFERED * (StreamConfig.packetSize + MAX_RTP_HEADER_SIZE),
+            VideoPortNumber);
 
     VideoCallbacks.start();
+    Limelog("Video renderer start callback complete\n");
 
     err = PltCreateThread("VideoRecv", VideoReceiveThreadProc, NULL, &receiveThread);
     if (err != 0) {
+        Limelog("Video receive thread creation failed: %d\n", err);
         VideoCallbacks.stop();
         closeSocket(rtpSocket);
         VideoCallbacks.cleanup();
         return err;
     }
+    Limelog("Video receive thread created\n");
 
     if ((VideoCallbacks.capabilities & (CAPABILITY_DIRECT_SUBMIT | CAPABILITY_PULL_RENDERER)) == 0) {
         err = PltCreateThread("VideoDec", VideoDecoderThreadProc, NULL, &decoderThread);
         if (err != 0) {
+            Limelog("Video decoder thread creation failed: %d\n", err);
             VideoCallbacks.stop();
             PltInterruptThread(&receiveThread);
             PltJoinThread(&receiveThread);
@@ -358,6 +422,7 @@ int startVideoStream(void* rendererContext, int drFlags) {
             VideoCallbacks.cleanup();
             return err;
         }
+        Limelog("Video decoder thread created\n");
     }
 
     if (AppVersionQuad[0] == 3) {
@@ -365,6 +430,8 @@ int startVideoStream(void* rendererContext, int drFlags) {
         firstFrameSocket = connectTcpSocket(&RemoteAddr, AddrLen,
                                             FIRST_FRAME_PORT, FIRST_FRAME_TIMEOUT_SEC);
         if (firstFrameSocket == INVALID_SOCKET) {
+            Limelog("Video first-frame TCP socket connection failed: port=%u, error=%d\n",
+                    FIRST_FRAME_PORT, (int)LastSocketError());
             VideoCallbacks.stop();
             stopVideoDepacketizer();
             PltInterruptThread(&receiveThread);
@@ -379,12 +446,14 @@ int startVideoStream(void* rendererContext, int drFlags) {
             VideoCallbacks.cleanup();
             return LastSocketError();
         }
+        Limelog("Video first-frame TCP socket connected: port=%u\n", FIRST_FRAME_PORT);
     }
 
     // Start pinging before reading the first frame so GFE knows where
     // to send UDP data
     err = PltCreateThread("VideoPing", VideoPingThreadProc, NULL, &udpPingThread);
     if (err != 0) {
+        Limelog("Video ping thread creation failed: %d\n", err);
         VideoCallbacks.stop();
         stopVideoDepacketizer();
         PltInterruptThread(&receiveThread);
@@ -403,15 +472,19 @@ int startVideoStream(void* rendererContext, int drFlags) {
         VideoCallbacks.cleanup();
         return err;
     }
+    Limelog("Video ping thread created\n");
 
     if (AppVersionQuad[0] == 3) {
         // Read the first frame to start the flow of video
         err = readFirstFrame();
         if (err != 0) {
+            Limelog("Video readFirstFrame failed: %d\n", err);
             stopVideoStream();
             return err;
         }
+        Limelog("Video readFirstFrame complete\n");
     }
 
+    Limelog("Video stream started\n");
     return 0;
 }

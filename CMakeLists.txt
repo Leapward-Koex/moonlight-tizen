@@ -54,7 +54,8 @@ add_library(moonlight-common-c STATIC
     moonlight-common-c/src/VideoStream.c
 )
 target_compile_definitions(moonlight-common-c PUBLIC
-    LC_CHROME)
+    LC_CHROME
+    LC_LOG)
 target_include_directories(moonlight-common-c PUBLIC
     moonlight-common-c/src
     moonlight-common-c/enet/include
@@ -236,6 +237,7 @@ add_executable(moonlight-wasm
     wasm/gamepad.cpp
     wasm/http.cpp
     wasm/input.cpp
+    wasm/log_export_server.cpp
     wasm/main.cpp
     wasm/profiling.cpp
     wasm/wasmplayer.cpp
@@ -296,5 +298,6 @@ install(FILES ${EMSCRIPTEN_OUTPUT_FILES} DESTINATION widget OPTIONAL)
 install(DIRECTORY wasm/static DESTINATION widget)
 install(DIRECTORY wasm/platform DESTINATION widget)
 install(FILES wasm/index.html DESTINATION widget)
-install(FILES res/config.xml DESTINATION widget)
-install(FILES res/platform.js DESTINATION widget)
+install(FILES wasm/config.xml DESTINATION widget)
+install(FILES wasm/icon.png DESTINATION widget)
+install(FILES wasm/platform.js DESTINATION widget)

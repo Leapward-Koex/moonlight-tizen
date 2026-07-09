@@ -1,11 +1,48 @@
 // Initialize global variables and constants
-var appInfo = tizen.application.getAppInfo(); // Retrieve the application information
-var platformVer = tizen.systeminfo.getCapability("http://tizen.org/feature/platform.version"); // Retrieve the device platform version
-var modelSeries = webapis.productinfo.getModel(); // Retrieve the device model series
-var modelName = webapis.productinfo.getRealModel(); // Retrieve the device model name
-var modelGroup = webapis.productinfo.getModelCode(); // Retrieve the device model group
-var is4kPanel = typeof webapis.productinfo.isUdPanelSupported === 'function' && webapis.productinfo.isUdPanelSupported(); // Check if the device supports 4K panel
-var is8kPanel = typeof webapis.productinfo.is8KPanelSupported === 'function' && webapis.productinfo.is8KPanelSupported(); // Check if the device supports 8K panel
+function getPlatformValue(label, reader, fallback) {
+  try {
+    var value = reader();
+    return value == null ? fallback : value;
+  } catch (e) {
+    console.warn('Warning: Failed to read ' + label + ': ' + (e && e.message ? e.message : e));
+    return fallback;
+  }
+}
+
+function callPlatformMethod(object, method, fallback, label) {
+  return getPlatformValue(label || method, function() {
+    if (!object || typeof object[method] !== 'function') {
+      return fallback;
+    }
+    return object[method]();
+  }, fallback);
+}
+
+var productInfo = getPlatformValue('product info API', function() {
+  return typeof webapis !== 'undefined' ? webapis.productinfo : null;
+}, null);
+var avInfo = getPlatformValue('AV info API', function() {
+  return typeof webapis !== 'undefined' ? webapis.avinfo : null;
+}, null);
+var appInfo = getPlatformValue('application information', function() {
+  if (typeof tizen === 'undefined' || !tizen.application || typeof tizen.application.getAppInfo !== 'function') {
+    return { name: 'Moonlight', version: '0.0.0' };
+  }
+  return tizen.application.getAppInfo();
+}, { name: 'Moonlight', version: '0.0.0' }); // Retrieve the application information
+appInfo.name = appInfo.name || 'Moonlight';
+appInfo.version = appInfo.version || '0.0.0';
+var platformVer = getPlatformValue('platform version', function() {
+  if (typeof tizen === 'undefined' || !tizen.systeminfo || typeof tizen.systeminfo.getCapability !== 'function') {
+    return '';
+  }
+  return tizen.systeminfo.getCapability("http://tizen.org/feature/platform.version");
+}, ''); // Retrieve the device platform version
+var modelSeries = callPlatformMethod(productInfo, 'getModel', '', 'device model series'); // Retrieve the device model series
+var modelName = callPlatformMethod(productInfo, 'getRealModel', '', 'device model name'); // Retrieve the device model name
+var modelGroup = callPlatformMethod(productInfo, 'getModelCode', '', 'device model group'); // Retrieve the device model group
+var is4kPanel = !!callPlatformMethod(productInfo, 'isUdPanelSupported', false, '4K panel support'); // Check if the device supports 4K panel
+var is8kPanel = !!callPlatformMethod(productInfo, 'is8KPanelSupported', false, '8K panel support'); // Check if the device supports 8K panel
 
 var maxSupportedWidth = 1920;
 var maxSupportedHeight = 1080;
@@ -26,7 +63,7 @@ try {
 } catch (e) {
   console.error("Error fetching panel capabilities: " + e.message);
 }
-var isHdrCapable = webapis.avinfo.isHdrTvSupport(); // Check if the device supports HDR
+var isHdrCapable = !!callPlatformMethod(avInfo, 'isHdrTvSupport', false, 'HDR support'); // Check if the device supports HDR
 var hosts = {}; // Hosts is an associative array of NvHTTP objects, keyed by server UID
 var activePolls = {}; // Hosts currently being polled. An associated array of polling IDs, keyed by server UID
 var pairingCert; // Loads the generated certificate
@@ -36,16 +73,21 @@ var isInGame = false; // Flag indicating whether the game has started, initial v
 var isDialogOpen = false; // Flag indicating whether the dialog is open, initial value is false
 var isPairingInProgress = false; // Flag indicating whether a pairing process is in progress, initial value is false
 var wasPairingCanceled = false; // Flag indicating whether the current pairing process was canceled by the user, initial value is false
+var isAddHostConnectionInProgress = false; // Flag indicating whether an Add Host connection request is in progress, initial value is false
+var addHostRequestId = 0; // Monotonic ID used to ignore stale Add Host responses after retry/cancel
 var isGamepadActive = false; // Flag indicating whether the gamepad input is active, initial value is false
-var isClickPrevented = false; // Flag indicating whether the click event should be prevented, initial value is false
+var isHostClickPrevented = false; // Flag indicating whether the host click event should be prevented, initial value is false
+var isGameClickPrevented = false; // Flag indicating whether the game click event should be prevented, initial value is false
 var resFpsWarning = false; // Flag indicating whether the video resolution and frame rate warning message has shown, initial value is false
 var bitrateWarning = false; // Flag indicating whether the video bitrate warning message has shown, initial value is false
 var audioWarning = false; // Flag indicating whether the audio configuration warning message has shown, initial value is false
 var codecWarning = false; // Flag indicating whether the video codec warning message has shown, initial value is false
+var currentUiMode = 'hosts'; // Tracks the active top-level UI screen for async navigation guards
 var repeatAction = null; // Flag indicating whether the repeat action is set, initial value is null
 var lastInvokeTime = 0; // Flag indicating the last invoke time, initial value is 0
 var repeatTimeout = null; // Flag indicating whether the repeat timeout is set, initial value is null
 var navigationTimeout = null; // Flag indicating whether the navigation timeout is set, initial value is null
+var activeLogExport = null; // Tracks the current temporary diagnostic log export server
 const BUILD_TYPE = '__BUILD_TYPE__'; // Placeholder for build type, which should be replaced during the build process
 const BUILD_COMMIT = '__BUILD_COMMIT__'; // Placeholder for build commit, which should be replaced during the build process
 const REPEAT_DELAY = 350; // Repeat delay set to 350ms (milliseconds)
@@ -54,6 +96,488 @@ const ACTION_THRESHOLD = 0.5; // Threshold for initial navigation set to 0.5
 const NAVIGATION_DELAY = 150; // Navigation delay set to 150ms (milliseconds)
 const UPDATE_TIMESTAMP = 'lastUpdateCheck'; // Use the update check timestamp key to determine the last update check
 const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // Automatic check for updates interval is set to 24 hours
+const SWITCH_GAME_REFRESH_RETRIES = 6; // Maximum refresh attempts while waiting for the previous game to quit
+const SWITCH_GAME_REFRESH_DELAY_MS = 500; // Delay between refresh attempts when switching games
+const CODEC_CAPABILITY_CACHE_KEY = 'codecCapabilityCache';
+const CODEC_CAPABILITY_CACHE_VERSION = 2;
+var codecCapabilityCache = {
+  version: CODEC_CAPABILITY_CACHE_VERSION,
+  entries: {}
+};
+
+function logDebugBridge(level, eventName, details) {
+  if (typeof window.moonlightDebugLog !== 'function') {
+    return;
+  }
+  window.moonlightDebugLog(level, eventName, Object.assign({
+    source: 'index.js'
+  }, details || {}));
+}
+
+function getAudioContextDebugSnapshot(audioContext) {
+  if (!audioContext) {
+    return null;
+  }
+  return {
+    state: audioContext.state,
+    sampleRate: audioContext.sampleRate,
+    currentTime: audioContext.currentTime,
+    baseLatency: typeof audioContext.baseLatency === 'number' ? audioContext.baseLatency : null,
+    outputLatency: typeof audioContext.outputLatency === 'number' ? audioContext.outputLatency : null
+  };
+}
+
+function getElementDataValue(selector) {
+  try {
+    var value = $(selector).data('value');
+    return value == null ? '' : value;
+  } catch (e) {
+    return '';
+  }
+}
+
+function getElementInputValue(selector) {
+  try {
+    return $(selector).val();
+  } catch (e) {
+    return '';
+  }
+}
+
+function getSwitchState(selector) {
+  try {
+    return $(selector).parent().hasClass('is-checked') ? 1 : 0;
+  } catch (e) {
+    return null;
+  }
+}
+
+function getStreamSettingsSnapshot() {
+  var resolution = getElementDataValue('#selectResolution').toString();
+  var resolutionParts = resolution.split(':');
+  return {
+    resolution: resolution,
+    width: resolutionParts[0] || '',
+    height: resolutionParts[1] || '',
+    frameRate: getElementDataValue('#selectFramerate').toString(),
+    bitrateMbps: getElementInputValue('#bitrateSlider'),
+    optimizeBitrate: getSwitchState('#optimizeBitrateSwitch'),
+    framePacing: getSwitchState('#framePacingSwitch'),
+    optimizeGames: getSwitchState('#optimizeGamesSwitch'),
+    audioConfig: getElementDataValue('#selectAudio').toString(),
+    audioPacketDuration: getElementDataValue('#selectAudioPacketDuration').toString(),
+    audioJitterMs: getElementInputValue('#jitterSlider'),
+    playHostAudio: getSwitchState('#playHostAudioSwitch'),
+    videoCodec: getElementDataValue('#selectCodec').toString(),
+    hdrMode: getSwitchState('#hdrModeSwitch'),
+    fullRange: getSwitchState('#fullRangeSwitch'),
+    gameMode: getSwitchState('#gameModeSwitch'),
+    disableWarnings: getSwitchState('#disableWarningsSwitch'),
+    performanceStats: getSwitchState('#performanceStatsSwitch')
+  };
+}
+
+function getDisplayModeSummary(displayModes) {
+  try {
+    var keys = Object.keys(displayModes || {});
+    return {
+      count: keys.length,
+      sample: keys.slice(0, 20).map(function(key) {
+        return key + '=' + displayModes[key];
+      })
+    };
+  } catch (e) {
+    return {
+      count: 0,
+      sample: []
+    };
+  }
+}
+
+function getHostDebugSnapshot(host) {
+  if (!host) {
+    return null;
+  }
+  return {
+    hostname: host.hostname,
+    address: host.address,
+    httpPort: host.httpPort,
+    httpsPort: host.httpsPort,
+    paired: host.paired,
+    online: host.online,
+    currentGame: host.currentGame,
+    appVersion: host.appVersion,
+    gfeVersion: host.gfeVersion,
+    serverMajorVersion: host.serverMajorVersion,
+    serverState: host.serverState,
+    serverCodecModeSupport: host.serverCodecModeSupport,
+    isNvidiaServerSoftware: host.isNvidiaServerSoftware,
+    gpuType: host.gputype,
+    displayModes: getDisplayModeSummary(host.supportedDisplayModes)
+  };
+}
+
+function getCodecCapabilityEntryKey(candidate) {
+  if (!candidate) {
+    return '';
+  }
+  if (candidate.mimeType) {
+    return candidate.mimeType.toString();
+  }
+  return [
+    candidate.codec || '',
+    candidate.hdr ? 'HDR' : 'SDR',
+    candidate.videoFormat || '',
+    candidate.profile || ''
+  ].join('|');
+}
+
+function normalizeCodecCapabilityCache(savedCache) {
+  var normalized = {
+    version: CODEC_CAPABILITY_CACHE_VERSION,
+    entries: {}
+  };
+  if (!savedCache || typeof savedCache !== 'object') {
+    return normalized;
+  }
+  if (savedCache.version !== CODEC_CAPABILITY_CACHE_VERSION) {
+    return normalized;
+  }
+
+  var savedEntries = savedCache.entries || {};
+  Object.keys(savedEntries).forEach(function(key) {
+    var entry = savedEntries[key];
+    if (!entry || typeof entry !== 'object') {
+      return;
+    }
+
+    var normalizedKey = (entry.key || key || entry.mimeType || '').toString();
+    if (!normalizedKey) {
+      return;
+    }
+
+    normalized.entries[normalizedKey] = {
+      key: normalizedKey,
+      enabled: entry.enabled !== false,
+      codec: (entry.codec || '').toString(),
+      hdr: !!entry.hdr,
+      videoFormat: Number(entry.videoFormat) || 0,
+      profile: (entry.profile || '').toString(),
+      mimeType: (entry.mimeType || normalizedKey).toString(),
+      supported: typeof entry.supported === 'boolean' ? entry.supported : null,
+      attempts: Number(entry.attempts) || 0,
+      lastTriedAt: Number(entry.lastTriedAt) || 0,
+      lastSkippedAt: Number(entry.lastSkippedAt) || 0,
+      lastSkipReason: (entry.lastSkipReason || '').toString(),
+      lastSelected: !!entry.lastSelected,
+      lastWidth: Number(entry.lastWidth) || 0,
+      lastHeight: Number(entry.lastHeight) || 0,
+      lastFps: Number(entry.lastFps) || 0,
+      lastRequestedCodec: (entry.lastRequestedCodec || '').toString(),
+      lastRequestedHdrMode: !!entry.lastRequestedHdrMode,
+      lastUserChangedAt: Number(entry.lastUserChangedAt) || 0,
+      source: (entry.source || '').toString()
+    };
+  });
+
+  return normalized;
+}
+
+function getCodecCapabilityEntries() {
+  var entries = codecCapabilityCache && codecCapabilityCache.entries ? codecCapabilityCache.entries : {};
+  return Object.keys(entries).map(function(key) {
+    return entries[key];
+  }).sort(function(a, b) {
+    var aTime = Math.max(a.lastTriedAt || 0, a.lastSkippedAt || 0, a.lastUserChangedAt || 0);
+    var bTime = Math.max(b.lastTriedAt || 0, b.lastSkippedAt || 0, b.lastUserChangedAt || 0);
+    if (aTime !== bTime) {
+      return bTime - aTime;
+    }
+    return (a.mimeType || a.key || '').localeCompare(b.mimeType || b.key || '');
+  });
+}
+
+function getDisabledCodecMimeTypesForProbe() {
+  var disabledMimeTypes = [];
+  getCodecCapabilityEntries().forEach(function(entry) {
+    if (entry.enabled === false && entry.mimeType) {
+      disabledMimeTypes.push(entry.mimeType);
+    }
+  });
+  return disabledMimeTypes.join('\n');
+}
+
+function persistCodecCapabilityCache() {
+  storeData(CODEC_CAPABILITY_CACHE_KEY, codecCapabilityCache, null);
+  renderCodecCapabilityTable();
+}
+
+function loadCodecCapabilityCache() {
+  console.log('%c[index.js, loadCodecCapabilityCache]', 'color: green;', 'Load stored codec capability cache.');
+  getData(CODEC_CAPABILITY_CACHE_KEY, function(previousValue) {
+    var savedCache = previousValue[CODEC_CAPABILITY_CACHE_KEY];
+    var shouldReplaceCache = !!(savedCache && savedCache.version !== CODEC_CAPABILITY_CACHE_VERSION);
+    codecCapabilityCache = normalizeCodecCapabilityCache(savedCache);
+    if (shouldReplaceCache) {
+      persistCodecCapabilityCache();
+    } else {
+      renderCodecCapabilityTable();
+    }
+    logDebugBridge('info', 'codec capability cache loaded', {
+      entries: getCodecCapabilityEntries().length,
+      replacedIncompatibleCache: shouldReplaceCache,
+      disabledMimeTypes: getDisabledCodecMimeTypesForProbe().split('\n').filter(Boolean).length
+    });
+  });
+}
+
+function resetCodecCapabilityCache() {
+  codecCapabilityCache = {
+    version: CODEC_CAPABILITY_CACHE_VERSION,
+    entries: {}
+  };
+  persistCodecCapabilityCache();
+}
+
+function updateCodecCapabilityCacheFromProbe(probeResult, streamWidth, streamHeight, frameRate) {
+  if (!probeResult || !Array.isArray(probeResult.candidates)) {
+    return;
+  }
+
+  codecCapabilityCache = normalizeCodecCapabilityCache(codecCapabilityCache);
+  var entries = codecCapabilityCache.entries;
+  var now = Date.now();
+  var changed = false;
+
+  probeResult.candidates.forEach(function(candidate) {
+    var key = getCodecCapabilityEntryKey(candidate);
+    if (!key) {
+      return;
+    }
+
+    var existing = entries[key] || {};
+    var entry = Object.assign({}, existing, {
+      key: key,
+      enabled: existing.enabled !== false,
+      codec: (candidate.codec || existing.codec || '').toString(),
+      hdr: !!candidate.hdr,
+      videoFormat: Number(candidate.videoFormat) || Number(existing.videoFormat) || 0,
+      profile: (candidate.profile || existing.profile || '').toString(),
+      mimeType: (candidate.mimeType || existing.mimeType || key).toString(),
+      lastSelected: !!(probeResult.selectedMimeType && candidate.mimeType === probeResult.selectedMimeType),
+      lastWidth: Number(streamWidth) || Number(probeResult.width) || Number(existing.lastWidth) || 0,
+      lastHeight: Number(streamHeight) || Number(probeResult.height) || Number(existing.lastHeight) || 0,
+      lastFps: Number(frameRate) || Number(probeResult.fps) || Number(existing.lastFps) || 0,
+      lastRequestedCodec: (probeResult.requestedCodec || existing.lastRequestedCodec || '').toString(),
+      lastRequestedHdrMode: !!probeResult.requestedHdrMode,
+      source: (candidate.source || probeResult.source || existing.source || '').toString()
+    });
+
+    if (candidate.skipped) {
+      entry.lastSkippedAt = now;
+      entry.lastSkipReason = (candidate.skipReason || 'skipped').toString();
+      if (typeof entry.supported !== 'boolean') {
+        entry.supported = null;
+      }
+      entry.attempts = Number(existing.attempts) || 0;
+    } else {
+      entry.supported = !!candidate.supported;
+      entry.attempts = (Number(existing.attempts) || 0) + 1;
+      entry.lastTriedAt = now;
+      entry.lastSkippedAt = Number(existing.lastSkippedAt) || 0;
+      entry.lastSkipReason = '';
+    }
+
+    entries[key] = entry;
+    changed = true;
+  });
+
+  if (changed) {
+    codecCapabilityCache.entries = entries;
+    persistCodecCapabilityCache();
+  }
+}
+
+function updateCodecCapabilityCacheFromProfileResult(profileResult) {
+  if (!profileResult || typeof profileResult !== 'object') {
+    return;
+  }
+
+  updateCodecCapabilityCacheFromProbe({
+    source: 'streamSetup',
+    requestedCodec: profileResult.codec || '',
+    requestedHdrMode: !!profileResult.hdr,
+    width: profileResult.width,
+    height: profileResult.height,
+    fps: profileResult.fps,
+    selectedMimeType: profileResult.selected ? profileResult.mimeType : '',
+    candidates: [profileResult]
+  }, profileResult.width, profileResult.height, profileResult.fps);
+}
+
+function handleCodecProfileResult(payload) {
+  var profileResult = null;
+  try {
+    profileResult = JSON.parse(payload);
+  } catch (e) {
+    logDebugBridge('error', 'codec profile result parse failed', {
+      payloadPrefix: payload ? payload.slice(0, 200) : '',
+      error: e && e.message ? e.message : String(e)
+    });
+    return;
+  }
+
+  updateCodecCapabilityCacheFromProfileResult(profileResult);
+  logDebugBridge(profileResult.supported ? 'info' : (profileResult.skipped ? 'warn' : 'error'), 'codec profile result recorded', profileResult);
+}
+
+function formatCodecCapabilityTime(timestamp) {
+  if (!timestamp) {
+    return 'Never';
+  }
+  try {
+    return new Date(timestamp).toLocaleString();
+  } catch (e) {
+    return timestamp.toString();
+  }
+}
+
+function getCodecCapabilityStatus(entry) {
+  if (entry.supported === true) {
+    return 'Supported';
+  }
+  if (entry.supported === false) {
+    return 'Unsupported';
+  }
+  return 'Unknown';
+}
+
+function addCodecCapabilityTextCell(row, className, text) {
+  var cell = document.createElement('td');
+  cell.className = className;
+  cell.textContent = text;
+  row.appendChild(cell);
+  return cell;
+}
+
+function renderCodecCapabilityTable() {
+  var container = document.getElementById('codecCapabilityTable');
+  if (!container) {
+    return;
+  }
+
+  while (container.firstChild) {
+    container.removeChild(container.firstChild);
+  }
+
+  var entries = getCodecCapabilityEntries();
+  if (!entries.length) {
+    var empty = document.createElement('div');
+    empty.className = 'codec-capability-empty';
+    empty.textContent = 'No codec profiles tested yet';
+    container.appendChild(empty);
+    return;
+  }
+
+  var table = document.createElement('table');
+  var thead = document.createElement('thead');
+  var headerRow = document.createElement('tr');
+  ['Use', 'Codec', 'Profile', 'Status', 'Last mode'].forEach(function(label) {
+    var header = document.createElement('th');
+    header.textContent = label;
+    headerRow.appendChild(header);
+  });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  entries.forEach(function(entry, index) {
+    var row = document.createElement('tr');
+    if (entry.enabled === false) {
+      row.className = 'codec-capability-disabled';
+    }
+
+    var useCell = document.createElement('td');
+    useCell.className = 'codec-capability-use-cell';
+    var checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = 'codecCapabilityToggle' + index;
+    checkbox.className = 'codec-capability-toggle';
+    checkbox.checked = entry.enabled !== false;
+    checkbox.setAttribute('data-codec-key', entry.key);
+    checkbox.setAttribute('aria-label', 'Use codec profile ' + (entry.profile || entry.mimeType || entry.codec || entry.key));
+    useCell.appendChild(checkbox);
+    row.appendChild(useCell);
+
+    addCodecCapabilityTextCell(row, 'codec-capability-codec-cell', (entry.codec || 'Unknown') + (entry.hdr ? ' HDR' : ' SDR'));
+    var profileCell = addCodecCapabilityTextCell(row, 'codec-capability-profile-cell', entry.profile || entry.mimeType || entry.key);
+    profileCell.title = entry.mimeType || entry.key;
+
+    var statusCell = addCodecCapabilityTextCell(row, 'codec-capability-status-cell', getCodecCapabilityStatus(entry));
+    statusCell.className += ' codec-capability-status-' + getCodecCapabilityStatus(entry).toLowerCase();
+
+    var modeText = entry.lastWidth && entry.lastHeight && entry.lastFps
+      ? entry.lastWidth + 'x' + entry.lastHeight + ' @ ' + entry.lastFps + ' FPS'
+      : '-';
+    var modeCell = addCodecCapabilityTextCell(row, 'codec-capability-mode-cell', modeText);
+    modeCell.title = 'Last tried: ' + formatCodecCapabilityTime(entry.lastTriedAt || entry.lastSkippedAt);
+
+    tbody.appendChild(row);
+  });
+
+  table.appendChild(tbody);
+  container.appendChild(table);
+}
+
+function setCodecCapabilityEnabled(key, enabled) {
+  codecCapabilityCache = normalizeCodecCapabilityCache(codecCapabilityCache);
+  var entry = codecCapabilityCache.entries[key];
+  if (!entry) {
+    return;
+  }
+
+  entry.enabled = !!enabled;
+  entry.lastUserChangedAt = Date.now();
+  persistCodecCapabilityCache();
+  logDebugBridge('info', 'codec capability preference changed', {
+    mimeType: entry.mimeType,
+    profile: entry.profile,
+    codec: entry.codec,
+    hdr: entry.hdr,
+    enabled: entry.enabled
+  });
+  snackbarLog((entry.enabled ? 'Enabled ' : 'Disabled ') + (entry.profile || entry.mimeType || 'codec profile') + '.');
+}
+
+function saveCodecCapabilityToggle(e) {
+  var input = e && e.currentTarget ? e.currentTarget : this;
+  if (!input) {
+    return;
+  }
+  setCodecCapabilityEnabled(input.getAttribute('data-codec-key'), input.checked);
+}
+
+function getHostDisplayModeSupport(host, width, height) {
+  if (!host || !host.supportedDisplayModes) {
+    return null;
+  }
+  var key = height + ':' + width;
+  return {
+    key: key,
+    refreshRates: host.supportedDisplayModes[key] || []
+  };
+}
+
+function getResponseTextLength(response) {
+  if (response == null) {
+    return 0;
+  }
+  try {
+    return response.toString().length;
+  } catch (e) {
+    return null;
+  }
+}
 
 // Called by the common.js module
 function attachListeners() {
@@ -81,7 +605,8 @@ function attachListeners() {
   $('#flipABfaceButtonsSwitch').on('click', saveFlipABfaceButtons);
   $('#flipXYfaceButtonsSwitch').on('click', saveFlipXYfaceButtons);
   $('.audioConfigMenu li').on('click', saveAudioConfiguration);
-  $('#audioSyncSwitch').on('click', saveAudioSync);
+  $('.audioPacketDurationMenu li').on('click', saveAudioPacketDuration);
+  $('#jitterSlider').on('input', saveAudioJitter);
   $('#playHostAudioSwitch').on('click', savePlayHostAudio);
   $('.videoCodecMenu li').on('click', saveVideoCodec);
   $('#hdrModeSwitch').on('click', saveHdrMode);
@@ -91,6 +616,11 @@ function attachListeners() {
   $('#optimizeBitrateSwitch').on('click', saveOptimizeBitrate);
   $('#disableWarningsSwitch').on('click', saveDisableWarnings);
   $('#performanceStatsSwitch').on('click', savePerformanceStats);
+  $('.logLevelMenu li').on('click', saveLogLevel);
+  $('#codecCapabilityTable').on('change', '.codec-capability-toggle', saveCodecCapabilityToggle);
+  $('#logStatusBtn').on('click', refreshLogStatus);
+  $('#exportLogsBtn').on('click', logExportDialog);
+  $('#clearLogsBtn').on('click', clearDiagnosticLogs);
   $('#navigationGuideBtn').on('click', navigationGuideDialog);
   $('#checkUpdatesBtn').on('click', checkForAppUpdates);
   $('#restartAppBtn').on('click', restartAppDialog);
@@ -109,7 +639,10 @@ function attachListeners() {
   registerMenu('selectFramerate', Views.SelectFramerateMenu);
   registerMenu('selectBitrate', Views.SelectBitrateMenu);
   registerMenu('selectAudio', Views.SelectAudioMenu);
+  registerMenu('selectAudioPacketDuration', Views.SelectAudioPacketDurationMenu);
+  registerMenu('selectAudioJitter', Views.SelectAudioJitterMenu);
   registerMenu('selectCodec', Views.SelectCodecMenu);
+  registerMenu('selectLogLevel', Views.SelectLogLevelMenu);
 
   $(window).resize(fullscreenWasmModule);
 
@@ -174,6 +707,7 @@ function attachListeners() {
 }
 
 function changeUiModeForWasmLoad() {
+  $('body').addClass('startup-loading');
   $('#main-header').hide();
   $('#main-header').children().hide();
   $('#main-content').children().not('#listener, #wasmSpinner').hide();
@@ -310,9 +844,430 @@ function snackbarLogLong(givenMessage) {
   document.querySelector('#snackbar').MaterialSnackbar.showSnackbar(data);
 }
 
+function getMoonlightLogger() {
+  return window.MoonlightLogger || null;
+}
+
+function formatBytes(bytes) {
+  var value = Number(bytes) || 0;
+  if (value < 1024) {
+    return value + ' B';
+  }
+  if (value < 1024 * 1024) {
+    return (value / 1024).toFixed(1) + ' KB';
+  }
+  return (value / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function setButtonDisabled(buttonId, disabled) {
+  var button = $('#' + buttonId);
+  button.prop('disabled', disabled);
+  button.attr('aria-disabled', disabled ? 'true' : 'false');
+  button.toggleClass('mdl-button--disabled', !!disabled);
+}
+
+function setLogLevelSelection(level) {
+  var logger = getMoonlightLogger();
+  var normalizedLevel = logger ? logger.setLevel(level) : (level || 'off');
+  var label = logger ? logger.getLevelLabel(normalizedLevel) : String(normalizedLevel).toUpperCase();
+  $('#selectLogLevel').text(label).data('value', normalizedLevel);
+}
+
+function refreshLogStatus() {
+  var logger = getMoonlightLogger();
+  if (!logger || typeof logger.getStatus !== 'function') {
+    $('#logStatusBtn').html('Log file support unavailable<i class="settings-action-icon material-icons">refresh</i>');
+    return;
+  }
+
+  logger.getStatus().then(function(status) {
+    var label = 'Level: ' + status.levelLabel + ' | Size: ' + formatBytes(status.sizeBytes);
+    if (!status.available) {
+      label = 'Filesystem unavailable | Level: ' + status.levelLabel;
+    } else if (status.pendingEntries > 0) {
+      label += ' | Pending: ' + status.pendingEntries;
+    }
+    $('#logStatusBtn').html(label + '<i class="settings-action-icon material-icons">refresh</i>');
+  });
+}
+
+function saveLogLevel() {
+  var chosenLevel = $(this).data('value') || 'off';
+  setLogLevelSelection(chosenLevel);
+  storeData('logLevel', chosenLevel, null);
+  refreshLogStatus();
+  snackbarLog('Diagnostic log level set to ' + $('#selectLogLevel').text() + '.');
+}
+
+function clearDiagnosticLogs() {
+  var logger = getMoonlightLogger();
+  if (!logger || typeof logger.clear !== 'function') {
+    snackbarLog('Diagnostic log storage is unavailable.');
+    return;
+  }
+
+  logger.clear().then(function() {
+    refreshLogStatus();
+    snackbarLog('Diagnostic logs cleared.');
+  });
+}
+
+function textToBytesForFile(text) {
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(text);
+  }
+  var bytes = [];
+  var value = String(text || '');
+  for (var i = 0; i < value.length; i += 1) {
+    bytes.push(value.charCodeAt(i) & 0xff);
+  }
+  return bytes;
+}
+
+function writeTextToFile(path, text) {
+  if (typeof tizen === 'undefined' || !tizen.filesystem || typeof tizen.filesystem.openFile !== 'function') {
+    throw new Error('Tizen filesystem is unavailable.');
+  }
+
+  var fileHandle = null;
+  try {
+    fileHandle = tizen.filesystem.openFile(path, 'w');
+    if (typeof fileHandle.writeString === 'function') {
+      fileHandle.writeString(text);
+    } else {
+      fileHandle.writeData(textToBytesForFile(text));
+    }
+  } finally {
+    if (fileHandle && typeof fileHandle.close === 'function') {
+      fileHandle.close();
+    }
+  }
+
+  if (tizen.filesystem.toURI) {
+    return tizen.filesystem.toURI(path);
+  }
+  return path;
+}
+
+function makeLogExportToken() {
+  var bytes = new Uint8Array(12);
+  if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    for (var i = 0; i < bytes.length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  var token = '';
+  for (var j = 0; j < bytes.length; j += 1) {
+    token += bytes[j].toString(36).padStart(2, '0');
+  }
+  return token;
+}
+
+function makeLogExportPortCandidates() {
+  var ports = [];
+  var minPort = 49152;
+  var portRange = 12000;
+
+  for (var i = 0; i < 8; i += 1) {
+    var randomValue = Math.floor(Math.random() * portRange);
+    var port = minPort + randomValue;
+    if (ports.indexOf(port) === -1) {
+      ports.push(port);
+    }
+  }
+
+  return ports;
+}
+
+function isLogExportBindError(error) {
+  var message = error && error.message ? error.message : String(error || '');
+  return /bind|address|port/i.test(message);
+}
+
+function makeLogExportFilename() {
+  var buildVer = getBuildVersion(appInfo.version);
+  var timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return 'moonlight-tizen-' + buildVer + '-' + timestamp + '.ndjson';
+}
+
+function getTvIpAddress() {
+  try {
+    if (typeof webapis !== 'undefined' && webapis.network && typeof webapis.network.getIp === 'function') {
+      var ip = webapis.network.getIp();
+      if (ip && String(ip) !== '0.0.0.0') {
+        return String(ip);
+      }
+    }
+  } catch (error) {
+    console.warn('%c[index.js, getTvIpAddress]', 'color: green;', 'Warning: Failed to read TV IP address: ', error);
+  }
+
+  try {
+    var hostname = window.location && window.location.hostname;
+    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      return hostname;
+    }
+  } catch (error) {
+    // Ignore location fallback failures.
+  }
+  return '';
+}
+
+function stopActiveLogExport() {
+  if (typeof sendMessage !== 'function' || !window.Module || typeof Module.stopLogExportServer !== 'function') {
+    activeLogExport = null;
+    return Promise.resolve();
+  }
+
+  return sendMessage('stopLogExportServer', []).then(function() {
+    activeLogExport = null;
+  }, function(error) {
+    console.warn('%c[index.js, stopActiveLogExport]', 'color: green;', 'Warning: Failed to stop log export server: ', error);
+    activeLogExport = null;
+  });
+}
+
+function updateLogExportDialog(statusText, url) {
+  $('#logExportStatus').text(statusText || '');
+  $('#logExportUrl').text(url || '');
+  var qrElement = document.getElementById('logExportQr');
+  if (qrElement) {
+    qrElement.innerHTML = '';
+    if (url && window.MoonlightLogger && typeof window.MoonlightLogger.renderQrCode === 'function') {
+      window.MoonlightLogger.renderQrCode(url, qrElement);
+    }
+  }
+}
+
+function createLogAppControl(operation, uri, mime, filename, url) {
+  var data = [];
+  if (typeof tizen !== 'undefined' && tizen.ApplicationControlData) {
+    data.push(new tizen.ApplicationControlData('http://tizen.org/appcontrol/data/subject', ['Moonlight diagnostic logs']));
+    data.push(new tizen.ApplicationControlData('http://tizen.org/appcontrol/data/text', [
+      'Moonlight diagnostic logs' + (url ? '\n' + url : '')
+    ]));
+    if (uri) {
+      data.push(new tizen.ApplicationControlData('http://tizen.org/appcontrol/data/path', [uri]));
+      data.push(new tizen.ApplicationControlData('http://tizen.org/appcontrol/data/name', [filename || 'moonlight-log.ndjson']));
+    }
+  }
+  return new tizen.ApplicationControl(operation, uri || null, mime || null, null, data);
+}
+
+function findLogAppControl(appControl) {
+  return new Promise(function(resolve, reject) {
+    if (typeof tizen === 'undefined' || !tizen.application || typeof tizen.application.findAppControl !== 'function') {
+      reject(new Error('Tizen application controls are unavailable.'));
+      return;
+    }
+    tizen.application.findAppControl(appControl, function(appInfos) {
+      resolve(appInfos || []);
+    }, function(error) {
+      reject(error);
+    });
+  });
+}
+
+function launchLogAppControl(appControl) {
+  return findLogAppControl(appControl).then(function(appInfos) {
+    if (!appInfos.length) {
+      throw new Error('No compatible share or email provider is installed.');
+    }
+    return new Promise(function(resolve, reject) {
+      tizen.application.launchAppControl(appControl, null, resolve, reject);
+    });
+  });
+}
+
+function probeLogShareProvider() {
+  setButtonDisabled('shareLogExport', true);
+  if (typeof tizen === 'undefined' || !tizen.application || !tizen.ApplicationControl) {
+    return;
+  }
+
+  var controls = [
+    createLogAppControl('http://tizen.org/appcontrol/operation/share', activeLogExport && activeLogExport.url, 'text/plain', activeLogExport && activeLogExport.filename, activeLogExport && activeLogExport.url),
+    createLogAppControl('http://tizen.org/appcontrol/operation/send', activeLogExport && activeLogExport.url, 'text/plain', activeLogExport && activeLogExport.filename, activeLogExport && activeLogExport.url),
+    createLogAppControl('http://tizen.org/appcontrol/operation/compose', null, 'message/rfc822', activeLogExport && activeLogExport.filename, activeLogExport && activeLogExport.url)
+  ];
+  var probe = Promise.resolve(false);
+  controls.forEach(function(appControl) {
+    probe = probe.then(function(found) {
+      if (found) {
+        return true;
+      }
+      return findLogAppControl(appControl).then(function(appInfos) {
+        return !!appInfos.length;
+      }, function() {
+        return false;
+      });
+    });
+  });
+  probe.then(function(found) {
+    setButtonDisabled('shareLogExport', !found);
+  });
+}
+
+function shareLogExport() {
+  if (!activeLogExport || !activeLogExport.text) {
+    snackbarLog('No log export is ready to share.');
+    return;
+  }
+  if (typeof tizen === 'undefined' || !tizen.application || !tizen.ApplicationControl) {
+    snackbarLog('Share and email are unavailable on this platform.');
+    return;
+  }
+
+  var filename = activeLogExport.filename || makeLogExportFilename();
+  var fileUri = null;
+  try {
+    fileUri = writeTextToFile('documents/Moonlight/' + filename, activeLogExport.text);
+  } catch (error) {
+    console.warn('%c[index.js, shareLogExport]', 'color: green;', 'Warning: Failed to prepare public log copy: ', error);
+  }
+
+  var controls = [];
+  if (fileUri) {
+    controls.push(createLogAppControl('http://tizen.org/appcontrol/operation/share', fileUri, 'application/x-ndjson', filename, activeLogExport.url));
+    controls.push(createLogAppControl('http://tizen.org/appcontrol/operation/send', fileUri, 'application/x-ndjson', filename, activeLogExport.url));
+  }
+  controls.push(createLogAppControl('http://tizen.org/appcontrol/operation/share', activeLogExport.url, 'text/plain', filename, activeLogExport.url));
+  controls.push(createLogAppControl('http://tizen.org/appcontrol/operation/send', activeLogExport.url, 'text/plain', filename, activeLogExport.url));
+  controls.push(createLogAppControl('http://tizen.org/appcontrol/operation/compose', null, 'message/rfc822', filename, activeLogExport.url));
+
+  var chain = Promise.reject(new Error('No compatible share or email provider is installed.'));
+  controls.forEach(function(appControl) {
+    chain = chain.catch(function() {
+      return launchLogAppControl(appControl);
+    });
+  });
+
+  chain.then(function() {
+    snackbarLog('Log export sent to a share provider.');
+  }, function(error) {
+    snackbarLogLong(error && error.message ? error.message : 'No compatible share or email provider is installed.');
+    setButtonDisabled('shareLogExport', true);
+  });
+}
+
+function startLogExportServer(text, filename) {
+  if (typeof sendMessage !== 'function' || !window.Module || typeof Module.startLogExportServer !== 'function') {
+    updateLogExportDialog('Log export server is not available until the Moonlight runtime is loaded.', '');
+    setButtonDisabled('stopLogExport', true);
+    setButtonDisabled('shareLogExport', true);
+    return;
+  }
+
+  var ipAddress = getTvIpAddress();
+  if (!ipAddress) {
+    updateLogExportDialog('Unable to read this TV IP address. Share may still work if a provider is available.', '');
+  }
+
+  var token = makeLogExportToken();
+  var candidatePorts = makeLogExportPortCandidates();
+  function tryStartExport(index, lastError) {
+    if (index >= candidatePorts.length) {
+      return Promise.reject(lastError || new Error('Unable to bind export socket.'));
+    }
+    return sendMessage('startLogExportServer', [text, filename, token, candidatePorts[index]]).then(null, function(error) {
+      if (isLogExportBindError(error)) {
+        return tryStartExport(index + 1, error);
+      }
+      return Promise.reject(error);
+    });
+  }
+
+  tryStartExport(0, null).then(function(ret) {
+    var url = ipAddress ? 'http://' + ipAddress + ':' + ret.port + ret.path : '';
+    activeLogExport = {
+      text: text,
+      filename: ret.filename || filename,
+      url: url,
+      port: ret.port,
+      token: token
+    };
+
+    updateLogExportDialog(
+      url ? 'Temporary download is ready. The link expires after one download or 10 minutes.' : 'Temporary export is ready, but the TV IP address is unavailable.',
+      url
+    );
+    setButtonDisabled('stopLogExport', false);
+    probeLogShareProvider();
+  }, function(error) {
+    updateLogExportDialog(error && error.message ? error.message : String(error), '');
+    setButtonDisabled('stopLogExport', true);
+    setButtonDisabled('shareLogExport', true);
+  });
+}
+
+function prepareLogExport() {
+  var logger = getMoonlightLogger();
+  if (!logger || typeof logger.getExportText !== 'function') {
+    updateLogExportDialog('Diagnostic log storage is unavailable.', '');
+    setButtonDisabled('stopLogExport', true);
+    setButtonDisabled('shareLogExport', true);
+    return;
+  }
+
+  updateLogExportDialog('Preparing log export...', '');
+  setButtonDisabled('stopLogExport', true);
+  setButtonDisabled('shareLogExport', true);
+  logger.getExportText().then(function(text) {
+    if (!text || text.trim().length === 0) {
+      updateLogExportDialog('No diagnostic logs are available. Increase the log level and reproduce the issue first.', '');
+      return;
+    }
+    startLogExportServer(text, makeLogExportFilename());
+  });
+}
+
+function closeLogExportDialog() {
+  var logExportDialogOverlay = document.querySelector('#logExportDialogOverlay');
+  var logExportDialog = document.querySelector('#logExportDialog');
+
+  stopActiveLogExport().then(function() {
+    logExportDialogOverlay.style.display = 'none';
+    logExportDialog.close();
+    isDialogOpen = false;
+    Navigation.pop();
+    Navigation.focusCurrent();
+    refreshLogStatus();
+  });
+}
+
+function logExportDialog() {
+  var logExportDialogOverlay = document.querySelector('#logExportDialogOverlay');
+  var logExportDialog = document.querySelector('#logExportDialog');
+
+  logExportDialogOverlay.style.display = 'flex';
+  logExportDialog.showModal();
+  isDialogOpen = true;
+  Navigation.push(Views.LogExportDialog);
+
+  $('#closeLogExport').off('click');
+  $('#closeLogExport').on('click', closeLogExportDialog);
+
+  $('#stopLogExport').off('click');
+  $('#stopLogExport').on('click', function() {
+    stopActiveLogExport().then(function() {
+      updateLogExportDialog('Temporary download stopped.', '');
+      setButtonDisabled('stopLogExport', true);
+      setButtonDisabled('shareLogExport', true);
+    });
+  });
+
+  $('#shareLogExport').off('click');
+  $('#shareLogExport').on('click', shareLogExport);
+
+  prepareLogExport();
+}
+
 // Handle layout elements when displaying the Hosts view
 function showHostsMode() {
   console.log('%c[index.js, showHostsMode]', 'color: green;', 'Entering "Show Hosts" mode.');
+  currentUiMode = 'hosts';
   $('#header-title').html('Hosts');
   $('#header-logo').show();
   $('#main-header').show();
@@ -361,16 +1316,15 @@ function showHosts() {
 
     // Navigate to the Hosts view
     showHostsMode();
+    Navigation.focusCurrent();
   }, 500);
-
-  // Set focus to current item and/or scroll to the current host row
-  setTimeout(() => Navigation.switch(), 500);
 }
 
 function restoreUiAfterWasmLoad() {
   // Stop navigation before showing the loading screen
   Navigation.stop();
 
+  $('body').removeClass('startup-loading');
   $('#main-header').children().not('#goBackBtn, #restoreDefaultsBtn, #quitRunningAppBtn').show();
   $('#main-content').children().not('#listener, #wasmSpinner, #settings-list, #game-grid').show();
   $('#wasmSpinner').hide();
@@ -380,7 +1334,7 @@ function restoreUiAfterWasmLoad() {
   Navigation.push(Views.Hosts);
   showHostsMode();
   // Set focus to current item and/or scroll to the current host row
-  setTimeout(() => Navigation.switch(), 100);
+  setTimeout(() => Navigation.focusCurrent(), 100);
 
   // Find mDNS host discovered using ServiceFinder (network service discovery)
   // findNvService(function(finder, opt_error) {
@@ -415,6 +1369,17 @@ function restoreUiAfterWasmLoad() {
   setTimeout(() => checkForAppUpdatesAtStartup(), 10000);
 }
 
+function connectToHostApps(host) {
+  stopPollingHosts();
+
+  api = host;
+  showApps(host, function() {
+    Navigation.change(Views.Apps);
+    Navigation.focusCurrent();
+  });
+  Navigation.push(Views.Apps);
+}
+
 function hostChosen(host) {
   if (isPairingInProgress) {
     snackbarLogLong('A pairing request is currently in progress. Please wait for it to timeout or finish before trying again.');
@@ -429,38 +1394,20 @@ function hostChosen(host) {
     return;
   }
 
-  // Avoid delay from other polling during pairing
-  stopPollingHosts();
-
-  api = host;
   // If the host is not yet paired or has been removed from the server, go to the pairing flow.
   if (!host.paired) {
     // Continue with the pairing flow
     pairingDialog(host, function() {
-      // After pairing the host, save the host object, show the apps, and navigate to the Apps view
+      // After pairing the host, save the host object and open its Apps view.
       saveHosts();
-      showApps(host);
-      Navigation.push(Views.Apps);
-      setTimeout(() => {
-        // Scroll to the current game row
-        Navigation.switch();
-        // Switch to Apps view
-        Navigation.change(Views.Apps);
-      }, 1500);
+      connectToHostApps(host);
     }, function() {
       // Start polling the host after pairing flow
       startPollingHosts();
     });
   } else {
     // But if the host is already paired and online, then we show the apps and navigate to the Apps view as usual.
-    showApps(host);
-    Navigation.push(Views.Apps);
-    setTimeout(() => {
-      // Scroll to the current game row
-      Navigation.switch();
-      // Switch to Apps view
-      Navigation.change(Views.Apps);
-    }, 1500);
+    connectToHostApps(host);
   }
 }
 
@@ -703,6 +1650,8 @@ function addHostDialog() {
   $('#cancelAddHost').off('click');
   $('#cancelAddHost').on('click', function() {
     console.log('%c[index.js, addHostDialog]', 'color: green;', 'Closing app dialog and returning.');
+    addHostRequestId++;
+    isAddHostConnectionInProgress = false;
     addHostOverlay.style.display = 'none';
     addHostDialog.close();
     isDialogOpen = false;
@@ -718,6 +1667,14 @@ function addHostDialog() {
   // Send a connection request if the Continue button is pressed
   $('#continueAddHost').off('click');
   $('#continueAddHost').on('click', function() {
+    if (isAddHostConnectionInProgress || $('#continueAddHost').prop('disabled')) {
+      logDebugBridge('warn', 'ignored duplicate Add Host submit while connection request is active', {
+        requestId: addHostRequestId,
+        buttonDisabled: $('#continueAddHost').prop('disabled')
+      });
+      return;
+    }
+
     console.log('%c[index.js, addHostDialog]', 'color: green;', 'Adding host, closing app dialog, and returning.');
     // Get the IP address value from the input field or select fields
     var inputHost;
@@ -743,22 +1700,32 @@ function addHostDialog() {
       snackbarLog(parsedHostInput.error);
       return;
     }
-    // Disable the Continue button to prevent multiple connection requests
-    setTimeout(() => {
-      // Add disabled state after 2 seconds
-      $('#continueAddHost').addClass('mdl-button--disabled').prop('disabled', true);
-      Navigation.switch();
-      // Re-enable the Continue button after 12 seconds
-      setTimeout(() => {
-        $('#continueAddHost').removeClass('mdl-button--disabled').prop('disabled', false);
-        Navigation.switch();
-      }, 12000);
-    }, 2000);
+
+    // Disable the Continue button immediately to prevent duplicate remote/controller events from starting parallel pairing flows.
+    isAddHostConnectionInProgress = true;
+    var currentAddHostRequestId = ++addHostRequestId;
+    var hostConnectionLabel = parsedHostInput.addr + ':' + parsedHostInput.port;
+    $('#continueAddHost').addClass('mdl-button--disabled').prop('disabled', true);
+    Navigation.focusCurrent();
+    logDebugBridge('info', 'Add Host connection request started', {
+      requestId: currentAddHostRequestId,
+      host: hostConnectionLabel
+    });
+
     // Send a connection request to the Host object based on the given IP address
     var _nvhttpHost = new NvHTTP(parsedHostInput.addr, myUniqueid, parsedHostInput.addr);
     _nvhttpHost.httpPort = parsedHostInput.port;
-    console.log('%c[index.js, addHostDialog]', 'color: green;', 'Sending connection request to host address ' + _nvhttpHost.hostname);
+    console.log('%c[index.js, addHostDialog]', 'color: green;', 'Sending connection request to host address ' + hostConnectionLabel);
     _nvhttpHost.refreshServerInfoAtAddress(parsedHostInput.addr).then(function(success) {
+      if (currentAddHostRequestId !== addHostRequestId) {
+        logDebugBridge('warn', 'ignored stale Add Host success response', {
+          requestId: currentAddHostRequestId,
+          activeRequestId: addHostRequestId,
+          host: hostConnectionLabel
+        });
+        return;
+      }
+
       snackbarLog('Connecting to ' + _nvhttpHost.hostname + '...');
       // Close the dialog if the user has provided the IP address
       console.log('%c[index.js, addHostDialog]', 'color: green;', 'Closing app dialog and returning.');
@@ -769,37 +1736,48 @@ function addHostDialog() {
       // Check if we already have record of this host. If so, we'll
       // need the PPK string to ensure our pairing status is accurate.
       if (hosts[_nvhttpHost.serverUid] != null) {
+        var savedHost = hosts[_nvhttpHost.serverUid];
         // Update the addresses
-        hosts[_nvhttpHost.serverUid].address = _nvhttpHost.address;
-        hosts[_nvhttpHost.serverUid].userEnteredAddress = _nvhttpHost.userEnteredAddress;
-        hosts[_nvhttpHost.serverUid].httpPort = _nvhttpHost.httpPort;
+        savedHost.address = _nvhttpHost.address;
+        savedHost.userEnteredAddress = _nvhttpHost.userEnteredAddress;
+        savedHost.httpPort = _nvhttpHost.httpPort;
         // Use the host in the array directly to ensure the PPK propagates after pairing
-        pairingDialog(hosts[_nvhttpHost.serverUid], function() {
+        pairingDialog(savedHost, function() {
           saveHosts();
+          connectToHostApps(savedHost);
         });
       } else {
         pairingDialog(_nvhttpHost, function() {
-          // Host must be in the grid before starting background polling
+          // Host must be in the grid before connecting to its Apps view.
           addHostToGrid(_nvhttpHost);
-          beginBackgroundPollingOfHost(_nvhttpHost);
           saveHosts();
+          connectToHostApps(_nvhttpHost);
         });
       }
       // Re-enable the Continue button after successful processing
+      isAddHostConnectionInProgress = false;
       $('#continueAddHost').removeClass('mdl-button--disabled').prop('disabled', false);
       // Clear the input field after successful processing
       $('#ipAddressTextInput').val('');
       updateIpAddressInputValidationState();
       initIpAddressFields();
     }.bind(this), function(failure) {
+      if (currentAddHostRequestId !== addHostRequestId) {
+        logDebugBridge('warn', 'ignored stale Add Host failure response', {
+          requestId: currentAddHostRequestId,
+          activeRequestId: addHostRequestId,
+          host: hostConnectionLabel
+        });
+        return;
+      }
+
       console.error('%c[index.js, addHostDialog]', 'color: green;', 'Error: Failed API object:\n', _nvhttpHost, '\n' + _nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-      snackbarLogLong('Failed to connect to ' + (_nvhttpHost.hostname || 'the host') + '. Ensure Sunshine is running on your PC or GameStream is enabled in GeForce Experience SHIELD settings.');
+      snackbarLogLong('Failed to connect to ' + hostConnectionLabel + '. Ensure Sunshine is running on your PC or GameStream is enabled in GeForce Experience SHIELD settings.');
       // Re-enable the Continue button after failure processing
+      isAddHostConnectionInProgress = false;
       $('#continueAddHost').removeClass('mdl-button--disabled').prop('disabled', false);
-      // Clear the input field after failure processing
-      $('#ipAddressTextInput').val('');
+      // Keep the input field intact so the user can correct or retry it.
       updateIpAddressInputValidationState();
-      initIpAddressFields();
     }.bind(this));
   });
 }
@@ -817,8 +1795,21 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     return;
   }
 
+  if (isPairingInProgress) {
+    logDebugBridge('warn', 'ignored duplicate pairing request while pairing is active', {
+      host: getHostDebugSnapshot(nvhttpHost)
+    });
+    snackbarLogLong('A pairing request is already in progress. Please wait for it to finish before trying again.');
+    onFailure();
+    return;
+  }
+
+  isPairingInProgress = true;
+  wasPairingCanceled = false;
+
   nvhttpHost.pollServer(function(returnedNvHTTPHost) {
     if (!returnedNvHTTPHost.online) {
+      isPairingInProgress = false;
       console.error('%c[index.js, pairingDialog]', 'color: green;', 'Error: Failed to connect to ' + nvhttpHost.hostname + '. Ensure your host PC is online!', nvhttpHost, '\n' + nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
       snackbarLogLong('Failed to connect to ' + nvhttpHost.hostname + '. Ensure Sunshine is running on your host PC or GameStream is enabled in the GeForce Experience SHIELD settings.');
       onFailure();
@@ -826,11 +1817,13 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     }
 
     if (nvhttpHost.paired) {
+      isPairingInProgress = false;
       onSuccess();
       return;
     }
 
     if (nvhttpHost.currentGame != 0) {
+      isPairingInProgress = false;
       snackbarLogLong(nvhttpHost.hostname + ' is currently in a game session. Please quit the running app or restart the computer, then try again.');
       onFailure();
       return;
@@ -841,22 +1834,18 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     var pairingDialog = document.querySelector('#pairingDialog');
     var randomNumber = String('0000' + (Math.random() * 10000 | 0)).slice(-4);
 
-    // Change the dialog text element to include the random PIN number
-    $('#pairingDialogText').html(
-      'Please enter the following PIN on the target PC: ' + randomNumber + '<br><br>' +
-      'If your host PC is running Sunshine (all GPUs), navigate to the Sunshine Web UI to enter the PIN.<br><br>' +
-      'Alternatively, if your host PC has NVIDIA GameStream (NVIDIA-only), navigate to the GeForce Experience to enter the PIN.<br><br>' +
-      'This dialog will close once the pairing is complete.'
-    );
+    // Change the dialog content to make the PIN the primary visual target.
+    $('#pairingDialogTitle').text('Pairing');
+    $('#pairingPinPanel').css('display', 'flex');
+    $('#pairingPinLabel').text('Enter this PIN on ' + nvhttpHost.hostname);
+    $('#pairingPinCode').text(randomNumber);
+    $('#pairingDialogText').text('Open Sunshine Web UI or NVIDIA GeForce Experience on the host PC. This dialog will close when pairing completes.');
 
     // Show the dialog and push the view
     pairingOverlay.style.display = 'flex';
     pairingDialog.showModal();
     isDialogOpen = true;
     Navigation.push(Views.PairingDialog);
-
-    isPairingInProgress = true;
-    wasPairingCanceled = false;
 
     // Cancel the operation if the Cancel button is pressed
     $('#cancelPairing').off('click');
@@ -891,9 +1880,13 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
       // If the host is already in a streaming session or failed during pairing,
       // change the dialog text element to include the hostname and display the returned error message
       if (nvhttpHost.currentGame != 0) {
-        $('#pairingDialogText').html('Error: ' + nvhttpHost.hostname + ' is currently busy!<br><br>You must stop the running app in order to pair with the host.');
+        $('#pairingDialogTitle').text('Pairing Blocked');
+        $('#pairingPinPanel').hide();
+        $('#pairingDialogText').text('Error: ' + nvhttpHost.hostname + ' is currently busy. You must stop the running app in order to pair with the host.');
       } else {
-        $('#pairingDialogText').html('Error: Failed to pair with ' + nvhttpHost.hostname + '.<br><br>Please, try pairing with the host again.');
+        $('#pairingDialogTitle').text('Pairing Failed');
+        $('#pairingPinPanel').hide();
+        $('#pairingDialogText').text('Error: Failed to pair with ' + nvhttpHost.hostname + '. Please try pairing with the host again.');
       }
       onFailure();
     });
@@ -962,15 +1955,15 @@ function addHostToGrid(host, ismDNSDiscovered) {
   hostContainer.off('click');
   hostContainer.on('click', function() {
     // Prevent further clicks
-    if (isClickPrevented) {
+    if (isHostClickPrevented) {
       return;
     }
     // Block subsequent clicks immediately
-    isClickPrevented = true;
+    isHostClickPrevented = true;
     // Select the host when the Click key is pressed
     hostChosen(host);
     // Reset the click flag after 2 second delay
-    setTimeout(() => isClickPrevented = false, 2000);
+    setTimeout(() => isHostClickPrevented = false, 2000);
   });
 
   // Attach the click event listener to the host menu button
@@ -1133,7 +2126,7 @@ function hostMenuDialog(host) {
   hostMenuDialog[0].showModal();
   isDialogOpen = true;
   Navigation.push(Views.HostMenuDialog, host.hostname);
-  setTimeout(() => Navigation.switch(), 5);
+  setTimeout(() => Navigation.focusCurrent(), 5);
 }
 
 // Show a confirmation with the Delete Host dialog before removing the host object
@@ -1185,7 +2178,7 @@ function deleteHostDialog(host) {
     Navigation.pop();
     // Reset the Hosts view navigation index to prevent possible out-of-bounds errors
     Views.Hosts.view.reset();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 }
 
@@ -1218,7 +2211,7 @@ function deleteAllHostsDialog() {
       deleteHostDialog.close();
       isDialogOpen = false;
       Navigation.pop();
-      Navigation.switch();
+      Navigation.focusCurrent();
     });
   
     // Remove all existing hosts if the Continue button is pressed
@@ -1247,7 +2240,7 @@ function deleteAllHostsDialog() {
       Navigation.pop();
       // Reset the Hosts view navigation index to prevent possible out-of-bounds errors
       Views.Hosts.view.reset();
-      Navigation.switch();
+      Navigation.focusCurrent();
     });
   }
 }
@@ -1328,7 +2321,7 @@ function hostDetailsDialog(host) {
   hostDetailsDialog[0].showModal();
   isDialogOpen = true;
   Navigation.push(Views.HostDetailsDialog);
-  setTimeout(() => Navigation.switch(), 5);
+  setTimeout(() => Navigation.focusCurrent(), 5);
 }
 
 // Show the Moonlight Support dialog
@@ -1351,13 +2344,14 @@ function appSupportDialog() {
     appSupportDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 }
 
 // Handle layout elements when displaying the Settings view
 function showSettingsMode() {
   console.log('%c[index.js, showSettingsMode]', 'color: green;', 'Entering "Show Settings" mode.');
+  currentUiMode = 'settings';
   $('#header-title').html('Settings');
   $('#header-logo').show();
   $('#main-header').show();
@@ -1411,6 +2405,7 @@ function showSettings() {
     // Navigate to the Settings view
     Navigation.push(Views.Settings);
     showSettingsMode();
+    Navigation.focusCurrent();
   }, 500);
 }
 
@@ -1431,7 +2426,7 @@ function resetSettingsView() {
 function navigateSettingsView(view) {
   Navigation.pop();
   Navigation.push(view);
-  setTimeout(() => Navigation.switch(), 250);
+  setTimeout(() => Navigation.focusCurrent(), 250);
 }
 
 // Handle category selection, display appropriate options, and navigate to the provided settings pane
@@ -1482,6 +2477,7 @@ function handleSettingsView(category) {
       navigateSettingsView(Views.AdvancedSettings);
       break;
     case 'aboutSettings': // Navigate to the AboutSettings view
+      refreshLogStatus();
       navigateSettingsView(Views.AboutSettings);
       break;
     default:
@@ -1509,7 +2505,7 @@ function navigationGuideDialog() {
     navGuideDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 }
 
@@ -1710,7 +2706,7 @@ function updateAppDialog(latestVersion, releaseNotes) {
     updateAppDialogOverlay.remove();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   }).appendTo(updateAppDialogActions);
 
   // If the dialog element doesn't support the showModal method, register it with dialogPolyfill
@@ -1723,7 +2719,7 @@ function updateAppDialog(latestVersion, releaseNotes) {
   updateAppDialog[0].showModal();
   isDialogOpen = true;
   Navigation.push(Views.UpdateMoonlightDialog);
-  setTimeout(() => Navigation.switch(), 5);
+  setTimeout(() => Navigation.focusCurrent(), 5);
 }
 
 // Check for updates when the Check for Updates button is pressed
@@ -1814,7 +2810,7 @@ function restoreDefaultsDialog() {
     restoreDefaultsDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 
   // Restore all default settings if the Continue button is pressed
@@ -1829,7 +2825,7 @@ function restoreDefaultsDialog() {
     restoreDefaultsDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
     // Show the required Restart Moonlight dialog and push the view
     setTimeout(() => requiredRestartAppDialog(), 2000);
   });
@@ -1849,7 +2845,15 @@ function warningDialog(title, message) {
   warningDialogOverlay.style.display = 'flex';
   warningDialog.showModal();
   isDialogOpen = true;
+  Navigation.start();
   Navigation.push(Views.WarningDialog);
+  setTimeout(function() {
+    Navigation.focusCurrent();
+    var closeWarning = document.getElementById('closeWarning');
+    if (closeWarning && typeof closeWarning.focus === 'function') {
+      closeWarning.focus();
+    }
+  }, 5);
 
   // Cancel the operation if the Close button is pressed
   $('#closeWarning').off('click');
@@ -1859,7 +2863,7 @@ function warningDialog(title, message) {
     warningDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 }
 
@@ -1892,7 +2896,7 @@ function restartAppDialog() {
     restartAppDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 
   // Restart the application if the Restart button is pressed
@@ -1931,7 +2935,7 @@ function requiredRestartAppDialog() {
     restartAppDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 
   // Restart the application if the Restart button is pressed
@@ -1973,6 +2977,7 @@ function exitAppDialog() {
     isDialogOpen = false;
     Navigation.pop();
     Navigation.change(Views.Hosts);
+    Navigation.focusCurrent();
   });
 
   // Exit the application if the Exit button is pressed
@@ -2046,6 +3051,7 @@ function sortTitles(list, sortOrder) {
 // Handle layout elements when displaying the Apps view
 function showAppsMode() {
   console.log('%c[index.js, showAppsMode]', 'color: green;', 'Entering "Show Apps" mode.');
+  currentUiMode = 'apps';
   $('#header-title').html('Apps');
   $('#header-logo').show();
   $('#main-header').show();
@@ -2074,14 +3080,85 @@ function showAppsMode() {
   Navigation.start();
 }
 
+function resetStreamUiState(reason, host, options) {
+  options = options || {};
+  var canShowApps = !!(host && host.paired);
+
+  logDebugBridge('warn', 'resetting stream UI state', {
+    reason: reason,
+    canShowApps: canShowApps,
+    navigateToApps: !!options.navigateToApps,
+    host: getHostDebugSnapshot(host)
+  });
+
+  if (typeof stopAudioScheduler === 'function') {
+    stopAudioScheduler();
+  }
+
+  $('#loadingSpinnerMessage').text('');
+  $('#connection-warnings, #performance-stats').css({
+    display: 'none',
+    background: 'transparent'
+  }).text('');
+  $('#listener').removeClass('fullscreen');
+  $('#main-content').removeClass('fullscreen');
+  $('#loadingSpinner').css('display', 'none');
+  $('#wasmSpinner').css('display', 'none');
+  $('body').css('backgroundColor', '#282C38');
+  $('#wasm_module').css('display', 'none');
+  isInGame = false;
+
+  if (canShowApps && options.navigateToApps) {
+    showApps(host, function() {
+      if (isDialogOpen) {
+        logDebugBridge('info', 'preserving dialog focus after stream UI reset', {
+          reason: reason
+        });
+        Navigation.start();
+        Navigation.focusCurrent();
+        return;
+      }
+      Navigation.change(Views.Apps);
+      Navigation.focusCurrent();
+    });
+  } else {
+    showAppsMode();
+    Navigation.focusCurrent();
+  }
+}
+
+function shouldContinueShowApps(options, stage, host) {
+  if (!options || typeof options.shouldContinue !== 'function') {
+    return true;
+  }
+
+  if (options.shouldContinue()) {
+    return true;
+  }
+
+  logDebugBridge('info', 'showApps canceled because current screen changed', {
+    stage: stage,
+    currentUiMode: currentUiMode,
+    host: getHostDebugSnapshot(host)
+  });
+  return false;
+}
+
 // Show the Apps grid
-function showApps(host) {
+function showApps(host, onReady, options) {
+  options = options || {};
+
   // Safety checking should happen before attempting to show the app list
   if (!host || !host.paired) {
     console.error('%c[index.js, showApps]', 'color: green;', 'Error: Unable to initialize the host properly! Host object: ', host);
+    resetStreamUiState('showApps rejected invalid host', null, { navigateToApps: false });
     return;
   } else {
     console.log('%c[index.js, showApps]', 'color: green;', 'Current host object: \n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
+  }
+
+  if (!shouldContinueShowApps(options, 'before loading screen', host)) {
+    return;
   }
 
   // Stop navigation before showing the loading screen
@@ -2102,7 +3179,15 @@ function showApps(host) {
   $('div.game-container').remove();
 
   setTimeout(() => {
+    if (!shouldContinueShowApps(options, 'before app list request', host)) {
+      return;
+    }
+
     host.getAppList().then(function(appList) {
+      if (!shouldContinueShowApps(options, 'after app list success', host)) {
+        return;
+      }
+
       // Hide the spinner after the host has successfully retrieved the app list
       $('#wasmSpinner').hide();
 
@@ -2119,6 +3204,7 @@ function showApps(host) {
         emptyAppListImg.src = 'static/res/applist_empty.svg';
         $('#game-grid').html(emptyAppListImg);
         snackbarLogLong('Your list is currently empty. Please add your favorite apps to the list.');
+        if (typeof(onReady) === "function") onReady(false);
         return;
       }
 
@@ -2182,15 +3268,15 @@ function showApps(host) {
           gameContainer.off('click');
           gameContainer.on('click', function() {
             // Prevent further clicks
-            if (isClickPrevented) {
+            if (isGameClickPrevented) {
               return;
             }
             // Block subsequent clicks immediately
-            isClickPrevented = true;
+            isGameClickPrevented = true;
             // Start the game when the Click key is pressed
             startGame(host, app.id);
             // Reset the click flag after 2 second delay
-            setTimeout(() => isClickPrevented = false, 2000);
+            setTimeout(() => isGameClickPrevented = false, 2000);
           });
 
           // Append the game container to the game grid
@@ -2210,7 +3296,12 @@ function showApps(host) {
         boxArtPlaceholderImg.onload = e => boxArtPlaceholderImg.classList.add('fade-in');
         $(gameContainer).append(boxArtPlaceholderImg);
       });
+      if (typeof(onReady) === "function") onReady(true);
     }, function(failedAppList) {
+      if (!shouldContinueShowApps(options, 'after app list failure', host)) {
+        return;
+      }
+
       // Hide the spinner if the host has failed to retrieve the app list
       $('#wasmSpinner').hide();
 
@@ -2223,10 +3314,13 @@ function showApps(host) {
       errorAppListImg.src = 'static/res/applist_error.svg';
       $('#game-grid').html(errorAppListImg);
       snackbarLogLong('Unable to retrieve your list of apps at this time. Please refresh the list of apps or try again later!');
+      if (typeof(onReady) === "function") onReady(false);
     });
 
     // Navigate to the Apps view
-    showAppsMode();
+    if (shouldContinueShowApps(options, 'before apps mode', host)) {
+      showAppsMode();
+    }
   }, 500);
 }
 
@@ -2243,7 +3337,10 @@ function quitAppDialog() {
       var quitAppDialog = document.querySelector('#quitAppDialog');
 
       // Change the dialog text element to include the game title
-      document.getElementById('quitAppDialogText').innerHTML = 'Are you sure you want to quit ' + currentGame.title + '? All unsaved data will be lost.';
+      document.getElementById('quitAppDialogTitle').textContent = 'Quit Running App';
+      document.getElementById('quitAppDialogText').textContent = 'Are you sure you want to quit ' + currentGame.title + '? All unsaved data will be lost.';
+      document.getElementById('cancelQuitApp').textContent = 'No';
+      document.getElementById('continueQuitApp').textContent = 'Yes';
       
       // Show the dialog and push the view
       quitAppOverlay.style.display = 'flex';
@@ -2259,20 +3356,31 @@ function quitAppDialog() {
         quitAppDialog.close();
         isDialogOpen = false;
         Navigation.pop();
-        Navigation.switch();
+        Navigation.focusCurrent();
       });
 
       // Quit the running app if the Continue button is pressed
       $('#continueQuitApp').off('click');
       $('#continueQuitApp').on('click', function() {
         console.log('%c[index.js, quitAppDialog]', 'color: green;', 'Quitting game, closing app dialog, and returning.');
+        var shouldReturnToAppsAfterQuit = function() {
+          return currentUiMode === 'apps';
+        };
+
         quitAppOverlay.style.display = 'none';
         quitAppDialog.close();
         isDialogOpen = false;
         Navigation.pop();
         stopGame(api, function() {
-          // After stopping the game, set focus back to the 'Quit Running App' button
-          setTimeout(() => Navigation.switch(), 3000);
+          if (!shouldReturnToAppsAfterQuit()) {
+            return;
+          }
+
+          // After stopping the game, restore focus to the refreshed Apps grid.
+          Navigation.change(Views.Apps);
+          Navigation.focusCurrent();
+        }, {
+          shouldRefreshApps: shouldReturnToAppsAfterQuit
         });
       });
     });
@@ -2282,6 +3390,14 @@ function quitAppDialog() {
 // Handle layout elements when displaying the Stream view
 function showStreamMode() {
   console.log('%c[index.js, showStreamMode]', 'color: green;', 'Entering "Show Stream" mode.');
+  currentUiMode = 'stream';
+  logDebugBridge('info', 'show stream mode', {
+    settings: getStreamSettingsSnapshot(),
+    windowSize: {
+      width: window.innerWidth,
+      height: window.innerHeight
+    }
+  });
   $('#main-header').hide();
   $('#main-content').children().not('#listener, #loadingSpinner').hide();
   $('#main-content').addClass('fullscreen');
@@ -2310,6 +3426,16 @@ function fullscreenWasmModule() {
   module.width = zoom * streamWidth;
   module.height = zoom * streamHeight;
   module.style.marginTop = ((screenHeight - module.height) / 2) + 'px';
+  logDebugBridge('debug', 'fullscreen wasm module calculated', {
+    streamWidth: streamWidth,
+    streamHeight: streamHeight,
+    screenWidth: screenWidth,
+    screenHeight: screenHeight,
+    zoom: zoom,
+    moduleWidth: module.width,
+    moduleHeight: module.height,
+    marginTop: module.style.marginTop
+  });
 }
 
 // Handle on-screen overlays when the streaming session starts
@@ -2325,24 +3451,198 @@ function handleOnScreenOverlays() {
   performanceStatsSwitch.checked ? $('#performance-stats').css('display', 'inline-block') : $('#performance-stats').css('display', 'none');
 }
 
+function ensureMoonlightAudioContext() {
+  if (window._mlAudioCtx && window._mlAudioCtx.state !== 'closed') {
+    logDebugBridge('debug', 'audio context reused', {
+      context: getAudioContextDebugSnapshot(window._mlAudioCtx)
+    });
+    return window._mlAudioCtx;
+  }
+
+  const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextConstructor) {
+    window._mlAudioCtx = null;
+    logDebugBridge('error', 'audio context unavailable', {
+      hasAudioContext: !!window.AudioContext,
+      hasWebkitAudioContext: !!window.webkitAudioContext
+    });
+    return null;
+  }
+
+  try {
+    try {
+      logDebugBridge('info', 'audio context create requested', {
+        latencyHint: 'interactive',
+        requestedSampleRate: 48000
+      });
+      window._mlAudioCtx = new AudioContextConstructor({
+        latencyHint: 'interactive',
+        sampleRate: 48000
+      });
+    } catch (e) {
+      logDebugBridge('warn', 'audio context create with requested sample rate failed; retrying default constructor', {
+        error: e && e.message ? e.message : String(e)
+      });
+      window._mlAudioCtx = new AudioContextConstructor();
+    }
+  } catch (e) {
+    window._mlAudioCtx = null;
+    logDebugBridge('error', 'audio context create failed', {
+      error: e && e.message ? e.message : String(e)
+    });
+  }
+
+  logDebugBridge(window._mlAudioCtx ? 'info' : 'error', 'audio context create complete', {
+    context: getAudioContextDebugSnapshot(window._mlAudioCtx)
+  });
+  return window._mlAudioCtx;
+}
+
+function resumeMoonlightAudioContext() {
+  const audioContext = ensureMoonlightAudioContext();
+  if (!audioContext) {
+    logDebugBridge('error', 'audio context resume skipped because context is unavailable');
+    return audioContext;
+  }
+
+  if (audioContext && audioContext.state === 'suspended') {
+    try {
+      logDebugBridge('warn', 'audio context resume requested', {
+        context: getAudioContextDebugSnapshot(audioContext)
+      });
+      const resumePromise = audioContext.resume();
+      if (resumePromise && typeof resumePromise.catch === 'function') {
+        resumePromise.then(function() {
+          logDebugBridge('info', 'audio context resume resolved', {
+            context: getAudioContextDebugSnapshot(audioContext)
+          });
+        }).catch(function(error) {
+          logDebugBridge('error', 'audio context resume rejected', {
+            error: error && error.message ? error.message : String(error),
+            context: getAudioContextDebugSnapshot(audioContext)
+          });
+        });
+      }
+    } catch (e) {
+      logDebugBridge('error', 'audio context resume threw', {
+        error: e && e.message ? e.message : String(e),
+        context: getAudioContextDebugSnapshot(audioContext)
+      });
+    }
+  } else {
+    logDebugBridge('debug', 'audio context resume not needed', {
+      context: getAudioContextDebugSnapshot(audioContext)
+    });
+  }
+  return audioContext;
+}
+
+function waitForSwitchGameRefreshDelay() {
+  return new Promise(function(resolve) {
+    setTimeout(resolve, SWITCH_GAME_REFRESH_DELAY_MS);
+  });
+}
+
+function waitForRunningGameToClear(host, requestedAppId, retriesRemaining) {
+  return host.refreshServerInfo().then(function() {
+    if (host.currentGame === 0 || host.currentGame === requestedAppId) {
+      return true;
+    }
+
+    if (retriesRemaining <= 0) {
+      logDebugBridge('warn', 'running game still reported after quit request', {
+        requestedAppID: requestedAppId,
+        currentGame: host.currentGame,
+        host: getHostDebugSnapshot(host)
+      });
+      return false;
+    }
+
+    return waitForSwitchGameRefreshDelay().then(function() {
+      return waitForRunningGameToClear(host, requestedAppId, retriesRemaining - 1);
+    });
+  });
+}
+
+function quitRunningGameBeforeSwitch(host, currentApp, appToStart) {
+  logDebugBridge('info', 'quit running game before switch requested', {
+    currentGame: host.currentGame,
+    currentAppTitle: currentApp ? currentApp.title : '',
+    requestedAppID: appToStart ? appToStart.id : null,
+    requestedAppTitle: appToStart ? appToStart.title : '',
+    host: getHostDebugSnapshot(host)
+  });
+
+  return host.quitApp().then(function() {
+    return waitForRunningGameToClear(host, appToStart ? appToStart.id : null, SWITCH_GAME_REFRESH_RETRIES);
+  }).then(function(cleared) {
+    logDebugBridge(cleared ? 'info' : 'warn', 'quit running game before switch completed', {
+      cleared: cleared,
+      currentGame: host.currentGame,
+      currentAppTitle: currentApp ? currentApp.title : '',
+      requestedAppID: appToStart ? appToStart.id : null,
+      requestedAppTitle: appToStart ? appToStart.title : '',
+      host: getHostDebugSnapshot(host)
+    });
+    return cleared;
+  });
+}
+
 // Start the given appID. If another app is running, offer to quit it. Otherwise, if the given app is already running, just resume it.
-function startGame(host, appID) {
+function startGame(host, appID, options) {
+  options = options || {};
+
   if (!host || !host.paired) {
     console.error('%c[index.js, startGame]', 'color: green;', 'Error: Attempted to start a game, but the host was not initialized properly! Host object: ', host);
+    logDebugBridge('error', 'stream start rejected invalid host', {
+      appID: appID,
+      hasHost: !!host,
+      host: getHostDebugSnapshot(host)
+    });
     return;
   }
 
+  logDebugBridge('info', 'stream start requested', {
+    appID: appID,
+    host: getHostDebugSnapshot(host),
+    settings: getStreamSettingsSnapshot()
+  });
+
+  // Create/resume the AudioContext while still inside the user gesture. The
+  // scheduler itself starts only once stream setup is actually underway.
+  resumeMoonlightAudioContext();
+
   // Refresh the server info, because the user might have quit the game
   host.refreshServerInfo().then(function(ret) {
+    logDebugBridge('info', 'stream host refresh complete', {
+      appID: appID,
+      host: getHostDebugSnapshot(host)
+    });
     host.getAppById(appID).then(function(appToStart) {
-      if (host.currentGame != 0 && host.currentGame != appID) {
+      logDebugBridge('info', 'stream app resolved', {
+        appID: appID,
+        appTitle: appToStart ? appToStart.title : '',
+        currentGame: host.currentGame,
+        host: getHostDebugSnapshot(host)
+      });
+      if (!options.skipRunningAppPrompt && host.currentGame != 0 && host.currentGame != appID) {
         host.getAppById(host.currentGame).then(function(currentApp) {
+          logDebugBridge('warn', 'stream start blocked by running app', {
+            requestedAppID: appID,
+            requestedAppTitle: appToStart ? appToStart.title : '',
+            currentGame: host.currentGame,
+            currentAppTitle: currentApp ? currentApp.title : '',
+            host: getHostDebugSnapshot(host)
+          });
           // Find the existing overlay and dialog elements
           var quitAppOverlay = document.querySelector('#quitAppDialogOverlay');
           var quitAppDialog = document.querySelector('#quitAppDialog');
 
-          // Change the dialog text element to include the game title
-          document.getElementById('quitAppDialogText').innerHTML = currentApp.title + ' is already running. Would you like to quit it and start ' + appToStart.title + '?';
+          // Change the dialog content for the game switch warning.
+          document.getElementById('quitAppDialogTitle').textContent = 'Warning';
+          document.getElementById('quitAppDialogText').textContent = currentApp.title + ' is already running. Quitting it may lose unsaved progress. Quit it and start ' + appToStart.title + '?';
+          document.getElementById('cancelQuitApp').textContent = 'Cancel';
+          document.getElementById('continueQuitApp').textContent = 'Quit & Start';
 
           // Show the dialog and push the view
           quitAppOverlay.style.display = 'flex';
@@ -2358,26 +3658,36 @@ function startGame(host, appID) {
             quitAppDialog.close();
             isDialogOpen = false;
             Navigation.pop();
+            Navigation.focusCurrent();
           });
 
-          // Quit the running app if the Continue button is pressed
+          // Quit the running app silently and continue directly into the new stream.
           $('#continueQuitApp').off('click');
           $('#continueQuitApp').on('click', function() {
-            console.log('%c[index.js, startGame]', 'color: green;', 'Quitting game, closing app dialog, and returning.');
-            stopGame(host, function() {
-              setTimeout(() => {
-                // Scroll to the current game row
-                Navigation.switch();
-                // Switch to Apps view
-                Navigation.change(Views.Apps);
-              }, 1500);
-              // Please, don't infinite loop with recursion
-              setTimeout(() => startGame(host, appID), 3000);
-            });
+            console.log('%c[index.js, startGame]', 'color: green;', 'Quitting current game and starting requested game.');
             quitAppOverlay.style.display = 'none';
             quitAppDialog.close();
             isDialogOpen = false;
             Navigation.pop();
+
+            $('#loadingSpinnerMessage').text('Switching to ' + appToStart.title + '...');
+            showStreamMode();
+
+            quitRunningGameBeforeSwitch(host, currentApp, appToStart).then(function() {
+              startGame(host, appID, { skipRunningAppPrompt: true });
+            }, function(failedQuitApp) {
+              console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to quit the current running app before switching! Returned error was: ' + failedQuitApp + '!');
+              logDebugBridge('error', 'quit running game before switch failed', {
+                requestedAppID: appID,
+                requestedAppTitle: appToStart ? appToStart.title : '',
+                currentGame: host.currentGame,
+                currentAppTitle: currentApp ? currentApp.title : '',
+                error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(failedQuitApp) : String(failedQuitApp),
+                host: getHostDebugSnapshot(host)
+              });
+              snackbarLogLong('Unable to switch games because Moonlight could not quit ' + currentApp.title + '.');
+              resetStreamUiState('quit running game before switch failed', host, { navigateToApps: true });
+            });
           });
 
           return;
@@ -2403,14 +3713,62 @@ function startGame(host, appID) {
       const flipABfaceButtons = $('#flipABfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const flipXYfaceButtons = $('#flipXYfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var audioConfig = $('#selectAudio').data('value').toString();
-      const audioSync = $('#audioSyncSwitch').parent().hasClass('is-checked') ? 1 : 0;
+      const audioPacketDuration = parseInt($('#selectAudioPacketDuration').data('value'), 10) || 0;
+      const audioJitterMs = parseInt($('#jitterSlider').val(), 10);
       const playHostAudio = $('#playHostAudioSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var videoCodec = $('#selectCodec').data('value').toString();
-      const hdrMode = $('#hdrModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
+      var hdrMode = $('#hdrModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const fullRange = $('#fullRangeSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const gameMode = $('#gameModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const disableWarnings = $('#disableWarningsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const performanceStats = $('#performanceStatsSwitch').parent().hasClass('is-checked') ? 1 : 0;
+      var streamMode = streamWidth + 'x' + streamHeight + 'x' + frameRate;
+      var streamStartDetails = {
+        appID: appID,
+        appTitle: appToStart ? appToStart.title : '',
+        host: getHostDebugSnapshot(host),
+        streamMode: streamMode,
+        streamWidth: streamWidth,
+        streamHeight: streamHeight,
+        frameRate: frameRate,
+        bitrateKbps: bitrate,
+        framePacing: framePacing,
+        optimizeGames: optimizeGames,
+        rumbleFeedback: rumbleFeedback,
+        mouseEmulation: mouseEmulation,
+        flipABfaceButtons: flipABfaceButtons,
+        flipXYfaceButtons: flipXYfaceButtons,
+        audioConfig: audioConfig,
+        audioPacketDuration: audioPacketDuration,
+        audioJitterMs: audioJitterMs,
+        playHostAudio: playHostAudio,
+        videoCodec: videoCodec,
+        hdrMode: hdrMode,
+        fullRange: fullRange,
+        gameMode: gameMode,
+        disableWarnings: disableWarnings,
+        performanceStats: performanceStats,
+        gamepadMask: gamepadMask,
+        remoteInputKeyGenerated: rikey.length > 0,
+        remoteInputKeyIdGenerated: rikeyid !== null && typeof rikeyid !== 'undefined',
+        selectedDisplayModeSupport: getHostDisplayModeSupport(host, streamWidth, streamHeight)
+      };
+
+      var disabledCodecMimeTypes = getDisabledCodecMimeTypesForProbe();
+      var disabledCodecProfileCount = disabledCodecMimeTypes.split('\n').filter(Boolean).length;
+      streamStartDetails.codecProfiles = {
+        selection: 'streamSetup',
+        disabledCodecProfileCount: disabledCodecProfileCount
+      };
+      logDebugBridge('info', 'video codec profile selection deferred to stream setup', {
+        requestedCodec: videoCodec,
+        requestedHdrMode: !!hdrMode,
+        streamWidth: streamWidth,
+        streamHeight: streamHeight,
+        frameRate: frameRate,
+        disabledCodecProfileCount: disabledCodecProfileCount,
+        host: getHostDebugSnapshot(host)
+      });
 
       console.log('%c[index.js, startGame]', 'color: green;', 'startRequest:' + 
       '\n Host address: ' + host.address + ':' + host.httpPort + 
@@ -2424,7 +3782,8 @@ function startGame(host, appID) {
       '\n Flip A/B face buttons: ' + flipABfaceButtons + 
       '\n Flip X/Y face buttons: ' + flipXYfaceButtons + 
       '\n Audio configuration: ' + audioConfig + 
-      '\n Audio synchronization: ' + audioSync + 
+      '\n Audio packet duration: ' + audioPacketDuration +
+      '\n Audio jitter buffer: ' + audioJitterMs +
       '\n Play host audio: ' + playHostAudio + 
       '\n Video codec: ' + videoCodec + 
       '\n Video HDR mode: ' + hdrMode + 
@@ -2432,19 +3791,31 @@ function startGame(host, appID) {
       '\n Game Mode: ' + gameMode + 
       '\n Disable connection warnings: ' + disableWarnings + 
       '\n Performance statistics: ' + performanceStats);
+      logDebugBridge('info', 'stream request parameters prepared', streamStartDetails);
 
       // Hide on-screen overlays until the streaming session begins
       $('#connection-warnings, #performance-stats').css('background', 'transparent').text('');
 
       // Shows a loading message to launch the application and start stream mode
       $('#loadingSpinnerMessage').text('Starting ' + appToStart.title + '...');
+      resumeMoonlightAudioContext();
+      if (typeof startAudioScheduler === 'function') {
+        startAudioScheduler();
+      } else {
+        logDebugBridge('error', 'audio scheduler start function missing before stream request', {
+          hasAudioJsStats: !!window._mlAudioStats
+        });
+      }
       showStreamMode();
 
       // Check if user wants to resume the already-running app
       if (host.currentGame == appID) {
+        logDebugBridge('info', 'host resume request sending', Object.assign({
+          operation: 'resume'
+        }, streamStartDetails));
         // If the app is already running, we can just resume it
         return host.resumeApp(
-          streamWidth + 'x' + streamHeight + 'x' + frameRate, // Resolution and frame rate
+          streamMode, // Resolution and frame rate
           optimizeGames, // Optimize game settings (SOPS)
           rikey, rikeyid, // Remote input key and key ID
           hdrMode, // Auto HDR video streaming
@@ -2456,44 +3827,83 @@ function startGame(host, appID) {
           $root = $xml.find('root');
           var status_code = $root.attr('status_code');
           var status_message = $root.attr('status_message');
+          var sessionUrl = $root.find('sessionUrl0').text().trim();
+          logDebugBridge(status_code != 200 ? 'warn' : 'info', 'host resume response', {
+            operation: 'resume',
+            appID: appID,
+            appTitle: appToStart ? appToStart.title : '',
+            statusCode: status_code,
+            statusMessage: status_message,
+            hasSessionUrl: !!sessionUrl,
+            sessionUrlLength: sessionUrl.length,
+            responseLength: getResponseTextLength(launchResult)
+          });
           if (status_code != 200) {
-            $('#loadingSpinnerMessage').text('');
             snackbarLogLong('Error ' + status_code + ': ' + status_message);
-            showApps(host);
-            setTimeout(() => {
-              // Scroll to the current game row
-              Navigation.switch();
-              // Switch to Apps view
-              Navigation.change(Views.Apps);
-            }, 1500);
+            resetStreamUiState('host resume returned status ' + status_code + ': ' + status_message, host, { navigateToApps: true });
+            return;
+          }
+          if (!sessionUrl) {
+            logDebugBridge('error', 'host resume response missing session URL', {
+              operation: 'resume',
+              appID: appID,
+              appTitle: appToStart ? appToStart.title : '',
+              statusCode: status_code,
+              statusMessage: status_message,
+              responseLength: getResponseTextLength(launchResult)
+            });
+            snackbarLogLong('Unable to resume stream: host did not return a session URL.');
+            resetStreamUiState('host resume missing session URL', host, { navigateToApps: true });
             return;
           }
           // Start stream request
-          sendMessage('startRequest', [
+          var resumeStartRequestDetails = Object.assign({
+            operation: 'resume',
+            hasSessionUrl: !!sessionUrl,
+            sessionUrlLength: sessionUrl.length
+          }, streamStartDetails);
+          logDebugBridge('info', 'wasm startRequest sending', resumeStartRequestDetails);
+          var resumeStartRequest = sendMessage('startRequest', [
             host.address, host.httpPort, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
-            host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
+            host.appVersion, host.gfeVersion, sessionUrl, host.serverCodecModeSupport,
             framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
-            audioConfig, audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
-            performanceStats
+            audioConfig, audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
+            performanceStats, disabledCodecMimeTypes
           ]);
+          return resumeStartRequest.then(function(event) {
+            logDebugBridge('info', 'wasm startRequest connected', Object.assign({
+              attemptId: event && event.attemptId
+            }, resumeStartRequestDetails));
+          }, function(error) {
+            logDebugBridge('error', 'wasm startRequest rejected', {
+              operation: 'resume',
+              appID: appID,
+              error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(error) : String(error)
+            });
+            resetStreamUiState('wasm resume startRequest rejected', host, { navigateToApps: true });
+          });
         }, function(failedResumeApp) {
           console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to resume app with id: ' + appID + '\n Returned error was: ' + failedResumeApp + '!');
+          logDebugBridge('error', 'host resume request failed', {
+            operation: 'resume',
+            appID: appID,
+            appTitle: appToStart ? appToStart.title : '',
+            error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(failedResumeApp) : String(failedResumeApp),
+            host: getHostDebugSnapshot(host)
+          });
           snackbarLog('Failed to resume ' + appToStart.title);
-          showApps(host);
-          setTimeout(() => {
-            // Scroll to the current game row
-            Navigation.switch();
-            // Switch to Apps view
-            Navigation.change(Views.Apps);
-          }, 1500);
+          resetStreamUiState('host resume request failed', host, { navigateToApps: true });
           return;
         });
       }
 
       // If the user wants to launch the app, then we start launching it
+      logDebugBridge('info', 'host launch request sending', Object.assign({
+        operation: 'launch'
+      }, streamStartDetails));
       host.launchApp(
         appID, // App ID
-        streamWidth + 'x' + streamHeight + 'x' + frameRate, // Resolution and frame rate
+        streamMode, // Resolution and frame rate
         optimizeGames, // Optimize game settings (SOPS)
         rikey, rikeyid, // Remote input key and key ID
         hdrMode, // Auto HDR video streaming
@@ -2505,51 +3915,98 @@ function startGame(host, appID) {
         $root = $xml.find('root');
         var status_code = $root.attr('status_code');
         var status_message = $root.attr('status_message');
+        var sessionUrl = $root.find('sessionUrl0').text().trim();
+        logDebugBridge(status_code != 200 ? 'warn' : 'info', 'host launch response', {
+          operation: 'launch',
+          appID: appID,
+          appTitle: appToStart ? appToStart.title : '',
+          statusCode: status_code,
+          statusMessage: status_message,
+          hasSessionUrl: !!sessionUrl,
+          sessionUrlLength: sessionUrl.length,
+          responseLength: getResponseTextLength(launchResult)
+        });
         if (status_code != 200) {
           if (status_code == 4294967295 && status_message == 'Invalid') {
             // Special case handling an audio capture error which GFE doesn't provide any useful status message
             status_code = 418;
             status_message = 'Audio capture device is missing. Please reinstall the audio drivers.';
           }
-          $('#loadingSpinnerMessage').text('');
           snackbarLogLong('Error ' + status_code + ': ' + status_message);
-          showApps(host);
-          setTimeout(() => {
-            // Scroll to the current game row
-            Navigation.switch();
-            // Switch to Apps view
-            Navigation.change(Views.Apps);
-          }, 1500);
+          resetStreamUiState('host launch returned status ' + status_code + ': ' + status_message, host, { navigateToApps: true });
+          return;
+        }
+        if (!sessionUrl) {
+          logDebugBridge('error', 'host launch response missing session URL', {
+            operation: 'launch',
+            appID: appID,
+            appTitle: appToStart ? appToStart.title : '',
+            statusCode: status_code,
+            statusMessage: status_message,
+            responseLength: getResponseTextLength(launchResult)
+          });
+          snackbarLogLong('Unable to launch stream: host did not return a session URL.');
+          resetStreamUiState('host launch missing session URL', host, { navigateToApps: true });
           return;
         }
         // Start stream request
-        sendMessage('startRequest', [
+        var launchStartRequestDetails = Object.assign({
+          operation: 'launch',
+          hasSessionUrl: !!sessionUrl,
+          sessionUrlLength: sessionUrl.length
+        }, streamStartDetails);
+        logDebugBridge('info', 'wasm startRequest sending', launchStartRequestDetails);
+        var launchStartRequest = sendMessage('startRequest', [
           host.address, host.httpPort, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
-          host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
+          host.appVersion, host.gfeVersion, sessionUrl, host.serverCodecModeSupport,
           framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
-          audioConfig, audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
-          performanceStats
+          audioConfig, audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
+          performanceStats, disabledCodecMimeTypes
         ]);
+        return launchStartRequest.then(function(event) {
+          logDebugBridge('info', 'wasm startRequest connected', Object.assign({
+            attemptId: event && event.attemptId
+          }, launchStartRequestDetails));
+        }, function(error) {
+          logDebugBridge('error', 'wasm startRequest rejected', {
+            operation: 'launch',
+            appID: appID,
+            error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(error) : String(error)
+          });
+          resetStreamUiState('wasm launch startRequest rejected', host, { navigateToApps: true });
+        });
       }, function(failedLaunchApp) {
         console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to launch app with id: ' + appID + '\n Returned error was: ' + failedLaunchApp + '!');
+        logDebugBridge('error', 'host launch request failed', {
+          operation: 'launch',
+          appID: appID,
+          appTitle: appToStart ? appToStart.title : '',
+          error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(failedLaunchApp) : String(failedLaunchApp),
+          host: getHostDebugSnapshot(host)
+        });
         snackbarLog('Failed to launch ' + appToStart.title + '.');
-        showApps(host);
-        setTimeout(() => {
-          // Scroll to the current game row
-          Navigation.switch();
-          // Switch to Apps view
-          Navigation.change(Views.Apps);
-        }, 1500);
+        resetStreamUiState('host launch request failed', host, { navigateToApps: true });
         return;
       });
     });
   }, function(failedRefreshInfo) {
     console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo + ' and failed server was: ' + '\n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
+    logDebugBridge('error', 'stream host refresh failed', {
+      appID: appID,
+      error: typeof summarizeOpenUrlError === 'function' ? summarizeOpenUrlError(failedRefreshInfo) : String(failedRefreshInfo),
+      host: getHostDebugSnapshot(host),
+      settings: getStreamSettingsSnapshot()
+    });
   });
 }
 
 // Stop the running app title, refresh the server info, and then return to Apps grid
-function stopGame(host, callbackFunction) {
+function stopGame(host, callbackFunction, options) {
+  options = options || {};
+  var shouldRefreshApps = typeof options.shouldRefreshApps === 'function' ? options.shouldRefreshApps : function() {
+    return true;
+  };
+
   isInGame = false;
 
   if (!host.paired) {
@@ -2567,9 +4024,20 @@ function stopGame(host, callbackFunction) {
       host.quitApp().then(function(ret2) {
         snackbarLog('Successfully quit ' + appTitle);
         host.refreshServerInfo().then(function(ret3) {
-          // Refresh to show no app is currently running
-          showApps(host);
-          if (typeof(callbackFunction) === "function") callbackFunction();
+          if (!shouldRefreshApps()) {
+            logDebugBridge('info', 'skipped Apps refresh after quit because current screen changed', {
+              currentUiMode: currentUiMode,
+              host: getHostDebugSnapshot(host)
+            });
+            return;
+          }
+
+          // Refresh to show no app is currently running if the user stayed on Apps.
+          showApps(host, function() {
+            if (typeof(callbackFunction) === "function") callbackFunction();
+          }, {
+            shouldContinue: shouldRefreshApps
+          });
         }, function(failedRefreshInfo2) {
           console.error('%c[index.js, stopGame]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo2 + '! Failed server was: ' + '\n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
         });
@@ -2737,25 +4205,55 @@ function saveHosts() {
 }
 
 function saveResolution() {
+  var previousResolution = $('#selectResolution').data('value');
   var chosenResolution = $(this).data('value');
   $('#selectResolution').text($(this).text()).data('value', chosenResolution);
   console.log('%c[index.js, saveResolution]', 'color: green;', 'Saving resolution value: ' + chosenResolution);
+  logDebugBridge('info', 'resolution selected', {
+    previousResolution: previousResolution,
+    chosenResolution: chosenResolution,
+    label: $(this).text(),
+    maxSupportedWidth: maxSupportedWidth,
+    maxSupportedHeight: maxSupportedHeight,
+    settingsBeforePreset: getStreamSettingsSnapshot()
+  });
   storeData('resolution', chosenResolution, null);
 
   // Update the bitrate value based on the selected resolution
-  $('#optimizeBitrateSwitch').prop('checked') ? optimizeBitratePresets() : standardBitratePresets();
+  var presetMode = $('#optimizeBitrateSwitch').prop('checked') ? 'optimized' : 'standard';
+  presetMode === 'optimized' ? optimizeBitratePresets() : standardBitratePresets();
+  logDebugBridge('info', 'resolution applied', {
+    previousResolution: previousResolution,
+    chosenResolution: chosenResolution,
+    bitratePresetMode: presetMode,
+    settingsAfterPreset: getStreamSettingsSnapshot()
+  });
   // Trigger warning check after changing video resolution
   warnResolutionFramerate();
 }
 
 function saveFramerate() {
+  var previousFramerate = $('#selectFramerate').data('value');
   var chosenFramerate = $(this).data('value');
   $('#selectFramerate').text($(this).text()).data('value', chosenFramerate);
   console.log('%c[index.js, saveFramerate]', 'color: green;', 'Saving framerate value: ' + chosenFramerate);
+  logDebugBridge('info', 'framerate selected', {
+    previousFramerate: previousFramerate,
+    chosenFramerate: chosenFramerate,
+    label: $(this).text(),
+    settingsBeforePreset: getStreamSettingsSnapshot()
+  });
   storeData('frameRate', chosenFramerate, null);
 
   // Update the bitrate value based on the selected frame rate
-  $('#optimizeBitrateSwitch').prop('checked') ? optimizeBitratePresets() : standardBitratePresets();
+  var presetMode = $('#optimizeBitrateSwitch').prop('checked') ? 'optimized' : 'standard';
+  presetMode === 'optimized' ? optimizeBitratePresets() : standardBitratePresets();
+  logDebugBridge('info', 'framerate applied', {
+    previousFramerate: previousFramerate,
+    chosenFramerate: chosenFramerate,
+    bitratePresetMode: presetMode,
+    settingsAfterPreset: getStreamSettingsSnapshot()
+  });
   // Trigger warning check after changing video frame rate
   warnResolutionFramerate();
 }
@@ -2769,10 +4267,22 @@ function warnResolutionFramerate() {
   if (!resFpsWarning && chosenResolutionWidth > '1920' && chosenResolutionHeight > '1080' && chosenFramerate > '60') {
     // Warn only if video resolution is greater than 1080p and frame rate is greater than 60 FPS
     snackbarLogLong('Warning: This resolution and frame rate may not perform well on lower-end devices or slower connections!');
+    logDebugBridge('warn', 'resolution framerate warning shown', {
+      width: chosenResolutionWidth,
+      height: chosenResolutionHeight,
+      frameRate: chosenFramerate,
+      settings: getStreamSettingsSnapshot()
+    });
     // Set flag for video resolution and frame rate warning
     resFpsWarning = true;
   } else if (resFpsWarning && (chosenResolutionWidth <= '1920' || chosenResolutionHeight <= '1080' || chosenFramerate <= '60')) {
     // Reset the flag for video resolution and frame rate warning if the condition goes back to normal (1080p and 60 FPS)
+    logDebugBridge('info', 'resolution framerate warning cleared', {
+      width: chosenResolutionWidth,
+      height: chosenResolutionHeight,
+      frameRate: chosenFramerate,
+      settings: getStreamSettingsSnapshot()
+    });
     resFpsWarning = false;
   }
 }
@@ -2781,6 +4291,11 @@ function saveBitrate() {
   var chosenBitrate = $('#bitrateSlider').val();
   $('#selectBitrate').html(chosenBitrate + ' Mbps');
   console.log('%c[index.js, saveBitrate]', 'color: green;', 'Saving bitrate value: ' + chosenBitrate);
+  logDebugBridge('debug', 'bitrate saved', {
+    bitrateMbps: chosenBitrate,
+    bitrateKbps: parseFloat(chosenBitrate) * 1000,
+    settings: getStreamSettingsSnapshot()
+  });
   storeData('bitrate', chosenBitrate, null);
 
   // Trigger warning check after changing video bitrate
@@ -2875,6 +4390,12 @@ function standardBitratePresets() {
 
   // Update the bitrate value
   saveBitrate();
+  logDebugBridge('info', 'standard bitrate preset applied', {
+    resolution: res,
+    frameRate: frameRate,
+    bitrateMbps: $('#bitrateSlider').val(),
+    settings: getStreamSettingsSnapshot()
+  });
 }
 
 function optimizeBitratePresets() {
@@ -2910,6 +4431,19 @@ function optimizeBitratePresets() {
 
   // Update the bitrate value
   saveBitrate();
+  logDebugBridge('info', 'optimized bitrate preset applied', {
+    width: width,
+    height: height,
+    frameRate: frameRate,
+    videoCodec: videoCodec,
+    hdrMode: hdrMode,
+    codecMultiplier: codecMultiplier,
+    bitrateFactor: bitrateFactor,
+    baseBitrate: baseBitrate,
+    finalBitrateKbps: finalBitrate,
+    bitrateMbps: $('#bitrateSlider').val(),
+    settings: getStreamSettingsSnapshot()
+  });
 }
 
 function saveFramePacing() {
@@ -3001,12 +4535,19 @@ function warnAudioConfiguration() {
   }
 }
 
-function saveAudioSync() {
-  setTimeout(() => {
-    const chosenAudioSync = $('#audioSyncSwitch').parent().hasClass('is-checked');
-    console.log('%c[index.js, saveAudioSync]', 'color: green;', 'Saving audio sync state: ' + chosenAudioSync);
-    storeData('audioSync', chosenAudioSync, null);
-  }, 100);
+function saveAudioPacketDuration() {
+  const chosenValue = parseInt($(this).data('value'), 10) || 0;
+  const chosenLabel = $(this).text();
+  $('#selectAudioPacketDuration').text(chosenLabel).data('value', chosenValue);
+  console.log('%c[index.js, saveAudioPacketDuration]', 'color: green;', 'Saving audio packet duration value: ' + chosenValue);
+  storeData('audioPacketDuration', chosenValue, null);
+}
+
+function saveAudioJitter() {
+  const chosenValue = parseInt($('#jitterSlider').val(), 10);
+  $('#selectAudioJitter').html(chosenValue + ' ms');
+  console.log('%c[index.js, saveAudioJitter]', 'color: green;', 'Saving audio jitter buffer value: ' + chosenValue);
+  storeData('audioJitterMs', chosenValue, null);
 }
 
 function savePlayHostAudio() {
@@ -3259,9 +4800,14 @@ function restoreDefaultsSettingsValues() {
   $('#selectAudio').text('Stereo').data('value', defaultAudioConfig);
   storeData('audioConfig', defaultAudioConfig, null);
 
-  const defaultAudioSync = false;
-  document.querySelector('#audioSyncBtn').MaterialSwitch.off();
-  storeData('audioSync', defaultAudioSync, null);
+  const defaultAudioPacketDuration = 0;
+  $('#selectAudioPacketDuration').text('Auto').data('value', defaultAudioPacketDuration);
+  storeData('audioPacketDuration', defaultAudioPacketDuration, null);
+
+  const defaultAudioJitterMs = 100;
+  $('#jitterSlider')[0].MaterialSlider.change(defaultAudioJitterMs);
+  $('#selectAudioJitter').html(defaultAudioJitterMs + ' ms');
+  storeData('audioJitterMs', defaultAudioJitterMs, null);
 
   const defaultPlayHostAudio = false;
   document.querySelector('#playHostAudioBtn').MaterialSwitch.off();
@@ -3309,6 +4855,13 @@ function restoreDefaultsSettingsValues() {
   const defaultPerformanceStats = false;
   document.querySelector('#performanceStatsBtn').MaterialSwitch.off();
   storeData('performanceStats', defaultPerformanceStats, null);
+
+  const defaultLogLevel = 'off';
+  setLogLevelSelection(defaultLogLevel);
+  storeData('logLevel', defaultLogLevel, null);
+  refreshLogStatus();
+
+  resetCodecCapabilityCache();
 }
 
 function initSamsungKeys() {
@@ -3362,6 +4915,7 @@ function loadSystemInfo() {
   console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'Loading system information...');
   const systemInfoPlaceholder = document.getElementById('systemInfoBtn');
   const buildVer = getBuildVersion(appInfo.version);
+  refreshLogStatus();
 
   // Get the system information from the TV
   if (systemInfoPlaceholder) {
@@ -3391,18 +4945,41 @@ function loadUserData() {
 }
 
 function loadUserDataCb() {
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored diagnostic log preferences.');
+  getData('logLevel', function(previousValue) {
+    var logger = getMoonlightLogger();
+    var storedLogLevel = previousValue.logLevel != null ? previousValue.logLevel : (logger ? logger.getLevel() : 'off');
+    setLogLevelSelection(storedLogLevel);
+    refreshLogStatus();
+  });
+
+  loadCodecCapabilityCache();
+
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored resolution preferences.');
   getData('resolution', function(previousValue) {
     if (previousValue.resolution != null) {
+      var storedResolution = previousValue.resolution;
       var resWidth = parseInt(previousValue.resolution.split(':')[0], 10);
       if (resWidth > maxSupportedWidth) {
         previousValue.resolution = maxSupportedWidth >= 3840 ? '3840:2160' : '1920:1080';
         storeData('resolution', previousValue.resolution, null);
+        logDebugBridge('warn', 'stored resolution clamped', {
+          storedResolution: storedResolution,
+          clampedResolution: previousValue.resolution,
+          maxSupportedWidth: maxSupportedWidth,
+          maxSupportedHeight: maxSupportedHeight
+        });
       }
       $('.videoResolutionMenu li').each(function() {
         if ($(this).data('value') === previousValue.resolution) {
           // Update the video resolution field based on the given value
           $('#selectResolution').text($(this).text()).data('value', previousValue.resolution);
+          logDebugBridge('info', 'stored resolution applied', {
+            storedResolution: storedResolution,
+            appliedResolution: previousValue.resolution,
+            label: $(this).text(),
+            settings: getStreamSettingsSnapshot()
+          });
         }
       });
     }
@@ -3542,15 +5119,18 @@ function loadUserDataCb() {
     }
   });
 
-  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioSync preferences.');
-  getData('audioSync', function(previousValue) {
-    if (previousValue.audioSync == null) {
-      document.querySelector('#audioSyncBtn').MaterialSwitch.off(); // Set the default state
-    } else if (previousValue.audioSync == false) {
-      document.querySelector('#audioSyncBtn').MaterialSwitch.off();
-    } else {
-      document.querySelector('#audioSyncBtn').MaterialSwitch.on();
-    }
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioPacketDuration preferences.');
+  getData('audioPacketDuration', function(previousValue) {
+    const value = (previousValue.audioPacketDuration != null) ? previousValue.audioPacketDuration : 0;
+    const labelMap = { 0: 'Auto', 5: '5 ms', 10: '10 ms', 20: '20 ms' };
+    $('#selectAudioPacketDuration').text(labelMap[value] || 'Auto').data('value', value);
+  });
+
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioJitterMs preferences.');
+  getData('audioJitterMs', function(previousValue) {
+    const value = (previousValue.audioJitterMs != null) ? previousValue.audioJitterMs : 100;
+    $('#jitterSlider')[0].MaterialSlider.change(value);
+    $('#selectAudioJitter').html($('#jitterSlider').val() + ' ms');
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored playHostAudio preferences.');

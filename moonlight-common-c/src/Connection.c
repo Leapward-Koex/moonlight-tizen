@@ -67,6 +67,11 @@ void LiInterruptConnection(void) {
 
 // Stop the connection by undoing the step at the current stage and those before it
 void LiStopConnection(void) {
+    int startingStage = stage;
+    uint64_t stopStartTimeMs = PltGetMillis();
+    Limelog("LiStopConnection requested: stage=%d (%s), interruptedBefore=%d, alreadyTerminatedBefore=%d\n",
+            startingStage, LiGetStageName(startingStage), ConnectionInterrupted, alreadyTerminated);
+
     // Disable termination callbacks now
     alreadyTerminated = true;
 
@@ -141,6 +146,9 @@ void LiStopConnection(void) {
         free(RemoteAddrString);
         RemoteAddrString = NULL;
     }
+
+    Limelog("LiStopConnection complete: startStage=%d, elapsedMs=%llu\n",
+            startingStage, (unsigned long long)(PltGetMillis() - stopStartTimeMs));
 }
 
 static void terminationCallbackThreadFunc(void* context)
@@ -210,6 +218,7 @@ int LiStartConnection(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION stre
     PDECODER_RENDERER_CALLBACKS drCallbacks, PAUDIO_RENDERER_CALLBACKS arCallbacks, void* renderContext, int drFlags,
     void* audioContext, int arFlags) {
     int err;
+    uint64_t connectionStartTimeMs = PltGetMillis();
 
     if (drCallbacks != NULL && (drCallbacks->capabilities & CAPABILITY_PULL_RENDERER) && drCallbacks->submitDecodeUnit) {
         Limelog("CAPABILITY_PULL_RENDERER cannot be set with a submitDecodeUnit callback\n");
@@ -262,6 +271,13 @@ int LiStartConnection(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION stre
     NegotiatedVideoFormat = 0;
     memcpy(&StreamConfig, streamConfig, sizeof(StreamConfig));
     RemoteAddrString = strdup(serverInfo->address);
+
+    Limelog("LiStartConnection requested: host=%s, appVersion=%s, gfeVersion=%s, width=%d, height=%d, fps=%d, bitrate=%d, packetSize=%d, remoteMode=%d, audioConfig=0x%x, supportedVideoFormats=0x%x, encryptionFlags=0x%x, serverCodecModeSupport=0x%x, drCaps=0x%x, arCaps=0x%x\n",
+            serverInfo->address, serverInfo->serverInfoAppVersion, serverInfo->serverInfoGfeVersion,
+            StreamConfig.width, StreamConfig.height, StreamConfig.fps, StreamConfig.bitrate,
+            StreamConfig.packetSize, StreamConfig.streamingRemotely, StreamConfig.audioConfiguration,
+            StreamConfig.supportedVideoFormats, StreamConfig.encryptionFlags,
+            serverInfo->serverCodecModeSupport, VideoCallbacks.capabilities, AudioCallbacks.capabilities);
 
     // The values in RTSP SETUP will be used to populate these.
     VideoPortNumber = 0;
@@ -380,7 +396,7 @@ int LiStartConnection(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION stre
     stage++;
     LC_ASSERT(stage == STAGE_NAME_RESOLUTION);
     ListenerCallbacks.stageComplete(STAGE_NAME_RESOLUTION);
-    Limelog("done\n");
+    Limelog("done (addressFamily=%d, addrLen=%u)\n", RemoteAddr.ss_family, (unsigned int)AddrLen);
 
     // If STREAM_CFG_AUTO was requested, determine the streamingRemotely value
     // now that we have resolved the target address and impose the video packet
@@ -410,6 +426,8 @@ int LiStartConnection(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION stre
             }
         }
     }
+    Limelog("Streaming locality decision: remoteMode=%d, packetSize=%d, addressFamily=%d\n",
+            StreamConfig.streamingRemotely, StreamConfig.packetSize, RemoteAddr.ss_family);
 
     Limelog("Initializing audio stream...");
     ListenerCallbacks.stageStarting(STAGE_AUDIO_STREAM_INIT);
@@ -435,7 +453,11 @@ int LiStartConnection(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION stre
     stage++;
     LC_ASSERT(stage == STAGE_RTSP_HANDSHAKE);
     ListenerCallbacks.stageComplete(STAGE_RTSP_HANDSHAKE);
-    Limelog("done\n");
+    Limelog("done (rtspPort=%u, audioPort=%u, videoPort=%u, controlPort=%u, negotiatedVideoFormat=0x%x, audioPacketDuration=%d, audioEncrypted=%d, encryptionSupported=0x%x, encryptionRequested=0x%x, encryptionEnabled=0x%x, sunshineFlags=0x%x, hqSurroundSupported=%d, hqSurroundEnabled=%d)\n",
+            RtspPortNumber, AudioPortNumber, VideoPortNumber, ControlPortNumber,
+            NegotiatedVideoFormat, AudioPacketDuration, AudioEncryptionEnabled,
+            EncryptionFeaturesSupported, EncryptionFeaturesRequested, EncryptionFeaturesEnabled,
+            SunshineFeatureFlags, HighQualitySurroundSupported, HighQualitySurroundEnabled);
 
     Limelog("Initializing control stream...");
     ListenerCallbacks.stageStarting(STAGE_CONTROL_STREAM_INIT);
@@ -524,10 +546,17 @@ int LiStartConnection(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION stre
     LiSendMouseMoveEvent(-1, -1);
     PltSleepMs(10);
 
+    Limelog("LiStartConnection complete after %llu ms; finalStage=%d (%s)\n",
+            (unsigned long long)(PltGetMillis() - connectionStartTimeMs),
+            stage, LiGetStageName(stage));
     ListenerCallbacks.connectionStarted();
 
 Cleanup:
     if (err != 0) {
+        Limelog("LiStartConnection cleanup after failure: err=%d, stage=%d (%s), elapsedMs=%llu\n",
+                err, stage, LiGetStageName(stage),
+                (unsigned long long)(PltGetMillis() - connectionStartTimeMs));
+
         // Undo any work we've done here before failing
         LiStopConnection();
     }

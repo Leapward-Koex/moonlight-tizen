@@ -11,9 +11,10 @@
   <link rel="stylesheet" href="static/css/material-icons.css">
   <link rel="stylesheet" href="static/css/material.min.css">
   <link rel="stylesheet" href="static/css/style.css">
+  <script type="text/javascript" src="platform/logger.js"></script>
   <script type="text/javascript" src="platform.js"></script>
 </head>
-<body data-name="moonlight-tizen" data-tools="emscripten" data-configs="Debug Release" data-path="{tc}/{config}">
+<body class="startup-loading" data-name="moonlight-tizen" data-tools="emscripten" data-configs="Debug Release" data-path="{tc}/{config}">
   <div class="mdl-layout mdl-js-layout">
     <header id="main-header" class="mdl-layout__header">
       <div class="mdl-layout__header-row">
@@ -256,15 +257,62 @@
               </ul>
             </div>
             <div class="setting-option">
-              <label>Audio synchronization</label>
+              <label>Audio packet duration</label>
               <span class="mdl-list__item-text-body">
-                - This can help reduce delays by keeping audio in sync for a consistent sound while streaming.
+                - Controls the size of each Opus audio packet sent over the network. Smaller packets reduce latency but increase network overhead. Auto uses 10 ms.
+                <table style="margin: 8px 0 4px 0; border-collapse: collapse; font-size: 0.85em; color: #ccc;">
+                  <thead>
+                    <tr style="border-bottom: 1px solid #555;">
+                      <th style="padding: 4px 12px 4px 0; text-align: left;">Duration</th>
+                      <th style="padding: 4px 12px 4px 0; text-align: left;">Frame size</th>
+                      <th style="padding: 4px 12px 4px 0; text-align: left;">Jitter buffer</th>
+                      <th style="padding: 4px 0; text-align: left;">Network packets</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="padding: 3px 12px 3px 0;">20 ms</td>
+                      <td style="padding: 3px 12px 3px 0;">960 samples</td>
+                      <td style="padding: 3px 12px 3px 0;">10 frames</td>
+                      <td style="padding: 3px 0;">~75/sec</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 3px 12px 3px 0;">10 ms</td>
+                      <td style="padding: 3px 12px 3px 0;">480 samples</td>
+                      <td style="padding: 3px 12px 3px 0;">20 frames</td>
+                      <td style="padding: 3px 0;">~150/sec</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 3px 12px 3px 0;">5 ms</td>
+                      <td style="padding: 3px 12px 3px 0;">240 samples</td>
+                      <td style="padding: 3px 12px 3px 0;">40 frames</td>
+                      <td style="padding: 3px 0;">~300/sec</td>
+                    </tr>
+                  </tbody>
+                </table>
               </span>
-              <div id="audioSyncMenu">
-                <label id="audioSyncBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="audioSyncSwitch">
-                  <input type="checkbox" id="audioSyncSwitch" class="mdl-switch__input">
-                  <span class="mdl-switch__label">Allow audio synchronization support for optimal sound output</span>
-                </label>
+              <div id="audioPacketDurationMenu">
+                <button type="button" id="selectAudioPacketDuration" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-value="0">Auto</button>
+              </div>
+              <ul class="audioPacketDurationMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectAudioPacketDuration">
+                <li class="mdl-menu__item" data-value="0">Auto</li>
+                <li class="mdl-menu__item" data-value="5">5 ms</li>
+                <li class="mdl-menu__item" data-value="10">10 ms</li>
+                <li class="mdl-menu__item" data-value="20">20 ms</li>
+              </ul>
+            </div>
+            <div class="setting-option">
+              <label>Audio jitter buffer</label>
+              <span class="mdl-list__item-text-body">
+                - Controls how far ahead audio is pre-scheduled. A larger buffer smooths over network gaps but adds audio delay. Default is 100 ms.
+              </span>
+              <div id="audioJitterMenu">
+                <button type="button" id="selectAudioJitter" class="mdl-button mdl-js-button mdl-js-ripple-effect">100 ms</button>
+              </div>
+              <div class="audioJitterMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectAudioJitter">
+                <span id="jitterLowestValue">50</span>
+                <input type="range" id="jitterSlider" class="mdl-slider mdl-js-slider" min="50" max="500" step="25" value="100">
+                <span id="jitterHighestValue">500</span>
               </div>
             </div>
             <div class="setting-option">
@@ -375,6 +423,29 @@
                 </label>
               </div>
             </div>
+            <div class="setting-option codec-capability-option">
+              <label>TV codec profile cache</label>
+              <span class="mdl-list__item-text-body">
+                - Tracks codec profiles this TV has accepted or rejected during stream startup.
+              </span>
+              <div id="codecCapabilityTable" class="codec-capability-table"></div>
+            </div>
+            <div class="setting-option">
+              <label>Diagnostic log level</label>
+              <span class="mdl-list__item-text-body">
+                - Controls how much diagnostic information Moonlight stores on this TV.
+              </span>
+              <div id="logLevelMenu">
+                <button type="button" id="selectLogLevel" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-value="off">Off</button>
+              </div>
+              <ul class="logLevelMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectLogLevel">
+                <li class="mdl-menu__item" data-value="off">Off</li>
+                <li class="mdl-menu__item" data-value="error">Error</li>
+                <li class="mdl-menu__item" data-value="warn">Warn</li>
+                <li class="mdl-menu__item" data-value="info">Info</li>
+                <li class="mdl-menu__item" data-value="debug">Debug</li>
+              </ul>
+            </div>
           </div>
           <div id="aboutSettings" class="settings-options">
             <div class="setting-option">
@@ -393,6 +464,38 @@
                 <button type="button" id="navigationGuideBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" aria-label="Navigation Guide">
                   Discover navigation controls for all input devices
                   <img src="static/res/ic_tv_remote_48px.svg" id="navigationGuideIcon">
+                </button>
+              </div>
+            </div>
+            <div class="setting-option">
+              <label>Diagnostic log storage</label>
+              <span class="mdl-list__item-text-body"></span>
+              <div id="logStatusMenu">
+                <button type="button" id="logStatusBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" aria-label="Diagnostic Log Storage">
+                  Loading log status...
+                  <i class="settings-action-icon material-icons">refresh</i>
+                </button>
+              </div>
+            </div>
+            <div class="setting-option">
+              <label>Export diagnostic logs</label>
+              <span class="mdl-list__item-text-body">
+                - Creates a temporary one-time download link for the current sanitized log file.
+              </span>
+              <div id="exportLogsMenu">
+                <button type="button" id="exportLogsBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" aria-label="Export Diagnostic Logs">
+                  Export logs
+                  <i class="settings-action-icon material-icons">file_download</i>
+                </button>
+              </div>
+            </div>
+            <div class="setting-option">
+              <label>Clear diagnostic logs</label>
+              <span class="mdl-list__item-text-body"></span>
+              <div id="clearLogsMenu">
+                <button type="button" id="clearLogsBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" aria-label="Clear Diagnostic Logs">
+                  Clear logs
+                  <i class="settings-action-icon material-icons">delete</i>
                 </button>
               </div>
             </div>
@@ -428,7 +531,7 @@
       <!-- Wasm module placeholder, Wasm gets thrown into here -->
       <div id="wasmSpinner" class="mdl-progress mdl-js-progress mdl-progress__indeterminate">
         <img src="static/res/ic_moonlight_logo.svg" id="wasmSpinnerLogo">
-        <h4 id="wasmSpinnerMessage"></h4>
+        <h4 id="wasmSpinnerMessage">Loading Moonlight...</h4>
       </div>
       <div id="loadingSpinner" class="mdl-progress mdl-js-progress mdl-progress__indeterminate">
         <h4 id="loadingSpinnerMessage"></h4>
@@ -440,7 +543,10 @@
   <script defer src="static/js/jquery-2.2.0.min.js"></script>
   <script defer src="static/js/material.min.js"></script>
   <script type="text/javascript" src="$WEBAPIS/webapis/webapis.js"></script>
+  <script type="text/javascript" src="platform/debug_bridge_config.js"></script>
+  <script type="text/javascript" src="platform/debug_bridge.js"></script>
   <script type="text/javascript" src="platform/messages.js"></script>
+  <script type="text/javascript" src="platform/audio.js"></script>
   <script type="text/javascript" src="platform/common.js"></script>
   <script type="text/javascript" src="platform/gamepad.js"></script>
   <script type="text/javascript" src="platform/index.js"></script>
@@ -477,11 +583,12 @@
     <dialog id="pairingDialog" class="mdl-dialog">
       <h3 id="pairingDialogTitle" class="mdl-dialog__title">Pairing</h3>
       <div class="mdl-dialog__content">
+        <div id="pairingPinPanel">
+          <div id="pairingPinLabel">Enter this PIN on your host PC</div>
+          <div id="pairingPinCode">XXXX</div>
+        </div>
         <p id="pairingDialogText">
-          Please enter the following PIN on the target PC: XXXX<br><br>
-          If your host PC is running Sunshine (all GPUs), navigate to the Sunshine Web UI to enter the PIN.<br><br>
-          Alternatively, if your host PC has NVIDIA GameStream (NVIDIA-only), navigate to the GeForce Experience to enter the PIN.<br><br>
-          This dialog will close once the pairing is complete.
+          Open Sunshine Web UI or NVIDIA GeForce Experience on the host PC to complete pairing.
         </p>
       </div>
       <div class="mdl-dialog__actions">
@@ -676,11 +783,26 @@
       </div>
     </dialog>
   </div>
+  <div id="logExportDialogOverlay" class="dialog-overlay">
+    <dialog id="logExportDialog" class="mdl-dialog large-dialog">
+      <h3 id="logExportDialogTitle" class="mdl-dialog__title">Export Logs</h3>
+      <div class="mdl-dialog__content">
+        <p id="logExportStatus">Preparing log export...</p>
+        <div id="logExportQr"></div>
+        <div id="logExportUrl"></div>
+      </div>
+      <div class="mdl-dialog__actions">
+        <button type="button" id="shareLogExport" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect">Share</button>
+        <button type="button" id="stopLogExport" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect">Stop</button>
+        <button type="button" id="closeLogExport" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect">Close</button>
+      </div>
+    </dialog>
+  </div>
   <div id="snackbar" class="mdl-snackbar mdl-js-snackbar">
     <div class="mdl-snackbar__text"></div>
     <button type="button" id="snackButton" class="mdl-snackbar__action"></button>
     <!-- This button exists to suppress the snackbar warning, we're really using a toast -->
   </div>
-  <video id="wasm_module" autoplay tabindex="-1"></video>
+  <video id="wasm_module" autoplay tabindex="-1" style="display: none;"></video>
 </body>
 </html>

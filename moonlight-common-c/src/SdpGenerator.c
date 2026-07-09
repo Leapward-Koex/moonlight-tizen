@@ -1,5 +1,11 @@
 #include "Limelight-internal.h"
 
+#ifdef __EMSCRIPTEN__
+extern int g_AudioPacketDurationOverride;
+#else
+static int g_AudioPacketDurationOverride = 0;
+#endif
+
 #define MAX_OPTION_NAME_LEN 128
 
 #define MAX_SDP_HEADER_LEN 128
@@ -516,6 +522,10 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
                 // Use 5 ms packets by default for lowest latency
                 AudioPacketDuration = 5;
             }
+        }
+
+        if (g_AudioPacketDurationOverride != 0) {
+            AudioPacketDuration = g_AudioPacketDurationOverride;
         }
 
         snprintf(payloadStr, sizeof(payloadStr), "%d", AudioPacketDuration);

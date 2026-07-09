@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tizen Emulator Deploy"
+  short_description: "Build, sign, and run Tizen WGTs"
+  default_prompt: "Use $tizen-emulator-deploy to build, sign, install, and launch the app on the Tizen TV emulator."

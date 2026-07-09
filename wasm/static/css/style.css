@@ -10,6 +10,14 @@ body {
     -moz-user-select: none;
     user-select: none;
 }
+body.startup-loading #main-header,
+body.startup-loading #main-content > :not(#listener):not(#wasmSpinner),
+body.startup-loading #wasm_module {
+    display: none !important;
+}
+body.startup-loading #wasmSpinner {
+    display: inline-block;
+}
 .mdl-grid {
     width: 100%;
 }
@@ -202,30 +210,50 @@ body {
     top: 0;
     left: 0;
     width: 100%;
-    height: 100%;
+    height: 100vh;
     z-index: 999;
     background: rgba(0, 0, 0, 0.4);
     display: none;
     align-items: center;
     justify-content: center;
+    padding: 48px;
+    box-sizing: border-box;
 }
 .mdl-dialog {
     color: #fff;
     background-color: #333846;
     width: 30%;
-    height: auto;
+    height: auto !important;
+    min-height: 0;
+    max-width: calc(100vw - 96px);
+    max-height: 82vh;
     padding: 20px;
     border-radius: 16px;
     box-shadow: 0 0 12px 6px rgba(0, 163, 198, 1);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    margin: 0;
+    transform: translate(-50%, -50%);
 }
 .large-dialog {
     color: #fff;
     background-color: #333846;
     width: 90%;
-    height: auto;
+    height: auto !important;
+    max-height: 88vh;
     padding: 20px;
     border-radius: 16px;
     box-shadow: 0 0 12px 6px rgba(0, 163, 198, 1);
+}
+#pairingDialog {
+    width: 620px;
 }
 .mdl-dialog__title {
     margin: 0;
@@ -233,10 +261,17 @@ body {
     font-size: 2.8rem;
     font-weight: 500;
     letter-spacing: 0.5px;
+    flex: 0 0 auto;
 }
 .mdl-dialog__content {
     color: rgba(255, 255, 255, 0.9);
     padding: 20px 24px 14px 24px;
+    min-height: 0;
+    overflow-y: auto;
+    flex: 1 1 auto;
+}
+.mdl-dialog__actions {
+    flex: 0 0 auto;
 }
 .mdl-dialog__content p, .mdl-dialog__content ul {
     line-height: normal;
@@ -340,6 +375,35 @@ body {
     align-items: center;
     justify-content: center;
 }
+#logExportDialog {
+    max-width: 900px;
+}
+#logExportQr {
+    width: 260px;
+    height: 260px;
+    margin: 10px auto 20px auto;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+}
+#logExportQr svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+#logExportUrl {
+    color: #ececec;
+    background-color: #282C38;
+    min-height: 34px;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 1.25rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+#logExportStatus {
+    font-size: 1.35rem;
+}
 .navGuideContainer {
     display: inline-flex;
     align-items: center;
@@ -402,6 +466,40 @@ body {
 #navGuideDialogText {
     list-style-type: none;
     padding: 5px 20px 5px 20px;
+}
+#pairingPinPanel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin: 4px 0 22px 0;
+    padding: 28px 20px;
+    border: 2px solid #00A3C6;
+    border-radius: 8px;
+    background: rgba(0, 163, 198, 0.18);
+}
+#pairingPinLabel {
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 1.35rem;
+    line-height: 1.25;
+    letter-spacing: 0;
+    text-align: center;
+    text-transform: uppercase;
+}
+#pairingPinCode {
+    color: #fff;
+    font-size: 6rem;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-align: center;
+    margin-top: 14px;
+    width: 100%;
+    overflow-wrap: anywhere;
+}
+#pairingDialogText {
+    text-align: center;
+    letter-spacing: 0;
 }
 #continueAddHost, #cancelAddHost, #cancelPairing, #continueDeleteHost,
 #closeHostMenu, #closeHostDetails, #cancelDeleteHost, #closeAppSupport,
@@ -787,6 +885,95 @@ body {
     letter-spacing: 0.5px;
     text-align: left;
 }
+.codec-capability-option {
+    margin-top: 30px;
+}
+.codec-capability-table {
+    width: 100%;
+    overflow-x: auto;
+}
+.codec-capability-empty {
+    color: #ececec;
+    background-color: #343844;
+    border: 1px solid #545b6a;
+    border-radius: 8px;
+    box-sizing: border-box;
+    font-size: 1.25rem;
+    letter-spacing: 0;
+    padding: 16px 18px;
+}
+.codec-capability-table table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    background-color: #343844;
+    border: 1px solid #545b6a;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.codec-capability-table th,
+.codec-capability-table td {
+    color: #ececec;
+    border-bottom: 1px solid #545b6a;
+    box-sizing: border-box;
+    font-size: 1.1rem;
+    letter-spacing: 0;
+    line-height: 1.35;
+    overflow: hidden;
+    padding: 10px 12px;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.codec-capability-table th {
+    color: #cfcfcf;
+    background-color: #282C38;
+    font-weight: 600;
+}
+.codec-capability-table th:first-child,
+.codec-capability-use-cell {
+    width: 76px;
+    text-align: center;
+}
+.codec-capability-table th:nth-child(2),
+.codec-capability-codec-cell {
+    width: 18%;
+}
+.codec-capability-table th:nth-child(3),
+.codec-capability-profile-cell {
+    width: 34%;
+}
+.codec-capability-table th:nth-child(4),
+.codec-capability-status-cell {
+    width: 18%;
+}
+.codec-capability-table tr:last-child td {
+    border-bottom: 0;
+}
+.codec-capability-disabled td {
+    color: #9fa6b2;
+}
+.codec-capability-toggle {
+    accent-color: #00a3c6;
+    cursor: pointer;
+    height: 28px;
+    width: 28px;
+}
+.codec-capability-toggle.hovered,
+.codec-capability-toggle:hover,
+.codec-capability-toggle:focus {
+    box-shadow: 0 0 2px 3px rgba(0, 163, 198, 1);
+    outline: none;
+}
+.codec-capability-status-supported {
+    color: #7bd88f !important;
+}
+.codec-capability-status-unsupported {
+    color: #ff9b9b !important;
+}
+.codec-capability-status-unknown {
+    color: #ffc046 !important;
+}
 /* =============================
    Switch, Button, Badge, and Menu Styles
 ============================= */
@@ -871,16 +1058,18 @@ body {
     border: 1px solid #FFA620;
 }
 #selectResolution, #selectFramerate, #selectBitrate, #removeAllHostsBtn,
-#selectAudio, #selectCodec, #navigationGuideBtn, #checkUpdatesBtn, #restartAppBtn {
+#selectAudio, #selectAudioPacketDuration, #selectAudioJitter, #selectCodec, #selectLogLevel,
+#navigationGuideBtn, #logStatusBtn, #exportLogsBtn, #clearLogsBtn, #checkUpdatesBtn, #restartAppBtn {
     font-size: 1.45rem;
     letter-spacing: 0.5px;
     text-indent: 36px;
 }
 #selectResolution, #selectFramerate, #selectBitrate, #framePacingBtn, #ipAddressFieldModeBtn,
 #sortAppsListBtn, #optimizeGamesBtn, #removeAllHostsBtn, #rumbleFeedbackBtn, #mouseEmulationBtn,
-#flipABfaceButtonsBtn, #flipXYfaceButtonsBtn, #selectAudio, #audioSyncBtn, #playHostAudioBtn,
+#flipABfaceButtonsBtn, #flipXYfaceButtonsBtn, #selectAudio, #selectAudioPacketDuration, #selectAudioJitter, #playHostAudioBtn,
 #selectCodec, #hdrModeBtn, #fullRangeBtn, #gameModeBtn, #unlockAllFpsBtn, #optimizeBitrateBtn,
-#disableWarningsBtn, #performanceStatsBtn, #navigationGuideBtn, #checkUpdatesBtn, #restartAppBtn {
+#disableWarningsBtn, #performanceStatsBtn, #selectLogLevel, #navigationGuideBtn, #logStatusBtn,
+#exportLogsBtn, #clearLogsBtn, #checkUpdatesBtn, #restartAppBtn {
     color: #ececec;
     background-color: #404354;
     width: 100%;
@@ -933,21 +1122,26 @@ body {
     background-color: #484C5F;
 }
 .videoResolutionMenu, .videoFramerateMenu, .videoBitrateMenu,
-.audioConfigMenu, .videoCodecMenu, .mdl-menu__container {
+.audioConfigMenu, .audioPacketDurationMenu, .audioJitterMenu, .videoCodecMenu, .logLevelMenu, .mdl-menu__container {
     width: 59.4% !important;
 }
 .videoResolutionMenu, .videoFramerateMenu, .videoBitrateMenu,
-.audioConfigMenu, .videoCodecMenu, .mdl-menu__outline {
+.audioConfigMenu, .audioPacketDurationMenu, .videoCodecMenu, .logLevelMenu, .mdl-menu__outline {
     width: 100% !important;
     top: 2.5px !important;
     border-radius: 0 0 8px 8px;
 }
-.videoBitrateMenu {
+.audioJitterMenu, .mdl-menu__outline {
+    width: 100% !important;
+    top: 2.5px !important;
+    border-radius: 0 0 8px 8px;
+}
+.videoBitrateMenu, .audioJitterMenu {
     background-color: #333846;
     display: flex;
     align-items: center;
 }
-.videoBitrateMenu, .mdl-menu__container {
+.videoBitrateMenu, .audioJitterMenu, .mdl-menu__container {
     height: 20% !important;
 }
 .mdl-slider {
@@ -973,15 +1167,37 @@ body {
 #bitrateLowestValue.hovered, #bitrateHighestValue.hovered {
     background-color: #333846;
 }
+#jitterLowestValue {
+    color: #ececec;
+    margin: 0 -12px 0 14px;
+    font-size: 1.45rem;
+    letter-spacing: 0.5px;
+}
+#jitterHighestValue {
+    color: #ececec;
+    margin: 0 12px 0 -14px;
+    font-size: 1.45rem;
+    letter-spacing: 0.5px;
+}
+#jitterLowestValue.hovered, #jitterHighestValue.hovered {
+    background-color: #333846;
+}
 .dropdown-items {
     float: right;
     margin: 5px 28px 5px 28px;
 }
 #videoResolutionMenu > #selectResolution, #videoFramerateMenu > #selectFramerate,
 #videoBitrateMenu > #selectBitrate, #audioConfigMenu > #selectAudio,
-#videoCodecMenu > #selectCodec {
+#audioPacketDurationMenu > #selectAudioPacketDuration,
+#audioJitterMenu > #selectAudioJitter,
+#videoCodecMenu > #selectCodec, #logLevelMenu > #selectLogLevel {
     color: #ececec;
     background: url('../res/ic_arrow_drop_down_48px.svg') 94.8% 50% no-repeat rgba(64, 67, 84, 1);
+}
+.settings-action-icon {
+    float: right;
+    margin: 12px 46px 0 0;
+    font-size: 32px !important;
 }
 #removeAllHostsIcon, #navigationGuideIcon, #checkUpdatesIcon,
 #restartApplicationIcon {
@@ -1006,12 +1222,14 @@ body {
 #framePacingBtn:hover, #framePacingBtn:focus, #ipAddressFieldModeBtn:hover, #ipAddressFieldModeBtn:focus, #sortAppsListBtn:hover,
 #sortAppsListBtn:focus, #optimizeGamesBtn:hover, #optimizeGamesBtn:focus, #removeAllHostsBtn:hover, #removeAllHostsBtn:focus, #rumbleFeedbackBtn:hover,
 #rumbleFeedbackBtn:focus, #mouseEmulationBtn:hover, #mouseEmulationBtn:focus, #flipABfaceButtonsBtn:hover, #flipABfaceButtonsBtn:focus,
-#flipXYfaceButtonsBtn:hover, #flipXYfaceButtonsBtn:focus, #selectAudio:hover, #selectAudio:focus, #audioSyncBtn:hover, #audioSyncBtn:focus,
+#flipXYfaceButtonsBtn:hover, #flipXYfaceButtonsBtn:focus, #selectAudio:hover, #selectAudio:focus, #selectAudioPacketDuration:hover, #selectAudioPacketDuration:focus, #selectAudioJitter:hover, #selectAudioJitter:focus,
 #playHostAudioBtn:hover, #playHostAudioBtn:focus, #selectCodec:hover, #selectCodec:focus, #hdrModeBtn:hover, #hdrModeBtn:focus, #fullRangeBtn:hover,
 #fullRangeBtn:focus, #gameModeBtn:hover, #gameModeBtn:focus, #unlockAllFpsBtn:hover, #unlockAllFpsBtn:focus, #optimizeBitrateBtn:hover,
 #optimizeBitrateBtn:focus, #disableWarningsBtn:hover, #disableWarningsBtn:focus, #performanceStatsBtn:hover, #performanceStatsBtn:focus,
-#systemInfoBtn:hover, #systemInfoBtn:focus, #navigationGuideBtn:hover, #navigationGuideBtn:focus, #checkUpdatesBtn:hover, #checkUpdatesBtn:focus,
-#restartAppBtn:hover, #restartAppBtn:focus {
+#selectLogLevel:hover, #selectLogLevel:focus, #systemInfoBtn:hover, #systemInfoBtn:focus, #navigationGuideBtn:hover, #navigationGuideBtn:focus,
+#logStatusBtn:hover, #logStatusBtn:focus, #exportLogsBtn:hover, #exportLogsBtn:focus, #clearLogsBtn:hover, #clearLogsBtn:focus,
+#checkUpdatesBtn:hover, #checkUpdatesBtn:focus, #restartAppBtn:hover, #restartAppBtn:focus, #shareLogExport:hover, #shareLogExport:focus,
+#stopLogExport:hover, #stopLogExport:focus, #closeLogExport:hover, #closeLogExport:focus {
     background-color: #404354;
     box-shadow: 0 0 2px 3px rgba(0, 163, 198, 1);
 }

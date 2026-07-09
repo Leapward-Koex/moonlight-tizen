@@ -92,6 +92,7 @@ static int lastIntervalLossPercentage;
 static int lastConnectionStatusUpdate;
 static uint32_t currentEnetSequenceNumber;
 static uint64_t firstFrameTimeMs;
+static uint64_t controlStreamStartTimeMs;
 
 static LINKED_BLOCKING_QUEUE invalidReferenceFrameTuples;
 static LINKED_BLOCKING_QUEUE frameFecStatusQueue;
@@ -276,6 +277,7 @@ static bool supportsIdrFrameRequest;
 
 // Initializes the control stream
 int initializeControlStream(void) {
+    controlStreamStartTimeMs = PltGetMillis();
     stopping = false;
     PltCreateEvent(&idrFrameRequiredEvent);
     LbqInitializeLinkedBlockingQueue(&invalidReferenceFrameTuples, 20);
@@ -334,6 +336,10 @@ int initializeControlStream(void) {
     hdrEnabled = false;
     memset(&hdrMetadata, 0, sizeof(hdrMetadata));
 
+    Limelog("Control stream initialized: appMajor=%d, controlPort=%u, encrypted=%d, usePeriodicPing=%d, supportsIdr=%d, controlConnectData=0x%x\n",
+            AppVersionQuad[0], ControlPortNumber, encryptedControlStream, usePeriodicPing,
+            supportsIdrFrameRequest, ControlConnectData);
+
     return 0;
 }
 
@@ -350,6 +356,8 @@ static void freeBasicLbqList(PLINKED_BLOCKING_QUEUE_ENTRY entry) {
 // Cleans up control stream
 void destroyControlStream(void) {
     LC_ASSERT(stopping);
+    Limelog("Destroying control stream: stopping=%d, peer=%d, client=%d, ctlSockOpen=%d\n",
+            stopping, peer != NULL, client != NULL, ctlSock != INVALID_SOCKET);
     PltDestroyCryptoContext(encryptionCtx);
     PltDestroyCryptoContext(decryptionCtx);
     PltCloseEvent(&idrFrameRequiredEvent);
@@ -358,6 +366,7 @@ void destroyControlStream(void) {
     freeBasicLbqList(LbqDestroyLinkedBlockingQueue(&asyncCallbackQueue));
 
     PltDeleteMutex(&enetMutex);
+    Limelog("Control stream destroyed\n");
 }
 
 static void queueFrameInvalidationTuple(uint32_t startFrame, uint32_t endFrame) {
@@ -1529,6 +1538,11 @@ static void requestIdrFrameFunc(void* context) {
 
 // Stops the control stream
 int stopControlStream(void) {
+    uint64_t stopStartMs = PltGetMillis();
+    Limelog("Stopping control stream: peer=%d, client=%d, ctlSockOpen=%d, encrypted=%d, disconnectPending=%d\n",
+            peer != NULL, client != NULL, ctlSock != INVALID_SOCKET,
+            encryptedControlStream, disconnectPending);
+
     stopping = true;
     LbqSignalQueueShutdown(&invalidReferenceFrameTuples);
     LbqSignalQueueShutdown(&frameFecStatusQueue);
@@ -1574,6 +1588,9 @@ int stopControlStream(void) {
         ctlSock = INVALID_SOCKET;
     }
 
+    Limelog("Control stream stopped: elapsedMs=%llu, lifetimeMs=%llu\n",
+            (unsigned long long)(PltGetMillis() - stopStartMs),
+            (unsigned long long)(controlStreamStartTimeMs ? PltGetMillis() - controlStreamStartTimeMs : 0));
     return 0;
 }
 
@@ -1635,6 +1652,9 @@ bool LiGetEstimatedRttInfo(uint32_t* estimatedRtt, uint32_t* estimatedRttVarianc
 // Starts the control stream
 int startControlStream(void) {
     int err;
+    Limelog("Starting control stream: appMajor=%d, controlPort=%u, encrypted=%d, usePeriodicPing=%d, rfiEnabled=%d\n",
+            AppVersionQuad[0], ControlPortNumber, encryptedControlStream,
+            usePeriodicPing, isReferenceFrameInvalidationEnabled());
 
     if (AppVersionQuad[0] >= 5) {
         ENetAddress remoteAddress, localAddress;
@@ -1658,6 +1678,7 @@ int startControlStream(void) {
                                   LocalAddr.ss_family != 0 ? &localAddress : NULL,
                                   1, CTRL_CHANNEL_COUNT, 0, 0);
         if (client == NULL) {
+            Limelog("Failed to create ENet client for control stream\n");
             stopping = true;
             return -1;
         }
@@ -1673,6 +1694,7 @@ int startControlStream(void) {
         // Connect to the host
         peer = enet_host_connect(client, &remoteAddress, CTRL_CHANNEL_COUNT, ControlConnectData);
         if (peer == NULL) {
+            Limelog("Failed to create ENet peer for control stream\n");
             stopping = true;
             enet_host_destroy(client);
             client = NULL;
@@ -1713,6 +1735,8 @@ int startControlStream(void) {
 
         // Ensure the connect verify ACK is sent immediately
         enet_host_flush(client);
+        Limelog("Control ENet connection established: controlPort=%u, peerState=%d, rtt=%u, rttVariance=%u\n",
+                ControlPortNumber, peer->state, peer->roundTripTime, peer->roundTripTimeVariance);
 
 #ifdef __3DS__
         // Set the peer timeout to 1 minute and limit backoff to 2x RTT
@@ -1729,11 +1753,14 @@ int startControlStream(void) {
         ctlSock = connectTcpSocket(&RemoteAddr, AddrLen,
             47995, CONTROL_STREAM_TIMEOUT_SEC);
         if (ctlSock == INVALID_SOCKET) {
+            Limelog("Failed to connect legacy TCP control socket: port=47995, error=%d\n",
+                    (int)LastSocketError());
             stopping = true;
             return LastSocketFail();
         }
 
         enableNoDelay(ctlSock);
+        Limelog("Legacy TCP control socket connected: port=47995\n");
     }
 
     err = PltCreateThread("ControlRecv", controlReceiveThreadFunc, NULL, &controlReceiveThread);
@@ -1751,6 +1778,7 @@ int startControlStream(void) {
         }
         return err;
     }
+    Limelog("Control receive thread created\n");
 
     // Send START A
     if (!sendMessageAndDiscardReply(packetTypes[IDX_START_A],
@@ -1846,6 +1874,7 @@ int startControlStream(void) {
         }
         return err;
     }
+    Limelog("Control loss stats thread created\n");
 
     err = PltCreateThread("ReqIdrFrame", requestIdrFrameFunc, NULL, &requestIdrFrameThread);
     if (err != 0) {
@@ -1877,6 +1906,7 @@ int startControlStream(void) {
 
         return err;
     }
+    Limelog("Control IDR request thread created\n");
 
     err = PltCreateThread("CtrlAsyncCb", asyncCallbackThreadFunc, NULL, &asyncCallbackThread);
     if (err != 0) {
@@ -1912,6 +1942,7 @@ int startControlStream(void) {
 
         return err;
     }
+    Limelog("Control async callback thread created\n");
 
     // Only create the reference frame invalidation thread if RFI is enabled
     if (isReferenceFrameInvalidationEnabled()) {
@@ -1953,8 +1984,11 @@ int startControlStream(void) {
 
             return err;
         }
+        Limelog("Control reference-frame invalidation thread created\n");
     }
 
+    Limelog("Control stream started: elapsedMs=%llu\n",
+            (unsigned long long)(PltGetMillis() - controlStreamStartTimeMs));
     return 0;
 }
 
