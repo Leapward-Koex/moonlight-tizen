@@ -89,8 +89,10 @@ function clickElement(target) {
   }
   // Click the resolved element itself if it supports click event
   if (typeof element.click === 'function') {
-    isGamepadActive ? element.click() : target.click();
+    element.click();
+    return;
   }
+  console.warn('%c[navigation.js, clickElement]', 'color: gray;', 'Resolved target does not support click:', element);
 }
 
 // Mark an element based on various target types

@@ -240,9 +240,10 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   g_Instance->m_Source->Open([](EmssOperationResult result) {
     ClLogMessage("Video: source open callback result=%d\n", static_cast<int>(result));
   });
-  ClLogMessage("Video: waiting for source open-pending state\n");
-  if (!g_Instance->WaitFor(&g_Instance->m_EmssStateChanged, "source open pending", kEmssSourceStateTimeoutMs, [] {
-    return g_Instance->m_EmssReadyState == EmssReadyState::kOpenPending;
+  ClLogMessage("Video: waiting for source open-pending/open state\n");
+  if (!g_Instance->WaitFor(&g_Instance->m_EmssStateChanged, "source open pending/open", kEmssSourceStateTimeoutMs, [] {
+    return g_Instance->m_EmssReadyState == EmssReadyState::kOpenPending ||
+      g_Instance->m_EmssReadyState == EmssReadyState::kOpen;
   })) {
     return -1;
   }

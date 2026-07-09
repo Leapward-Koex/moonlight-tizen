@@ -2450,7 +2450,15 @@ function warningDialog(title, message) {
   warningDialogOverlay.style.display = 'flex';
   warningDialog.showModal();
   isDialogOpen = true;
+  Navigation.start();
   Navigation.push(Views.WarningDialog);
+  setTimeout(function() {
+    Navigation.switch();
+    var closeWarning = document.getElementById('closeWarning');
+    if (closeWarning && typeof closeWarning.focus === 'function') {
+      closeWarning.focus();
+    }
+  }, 5);
 
   // Cancel the operation if the Close button is pressed
   $('#closeWarning').off('click');
@@ -2706,6 +2714,14 @@ function resetStreamUiState(reason, host, options) {
   if (canShowApps && options.navigateToApps) {
     showApps(host);
     setTimeout(() => {
+      if (isDialogOpen) {
+        logDebugBridge('info', 'preserving dialog focus after stream UI reset', {
+          reason: reason
+        });
+        Navigation.start();
+        Navigation.switch();
+        return;
+      }
       Navigation.switch();
       Navigation.change(Views.Apps);
     }, 1500);
