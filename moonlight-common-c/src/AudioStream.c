@@ -126,10 +126,6 @@ int notifyAudioPortNegotiationComplete(void) {
     }
     Limelog("Audio UDP socket bound; starting ping thread\n");
 
-    // Include audio packets already queued by the OS socket buffer in the
-    // initial drop window so startup begins near live audio.
-    firstReceiveTime = PltGetMillis();
-
     // We may receive audio before our threads are started, but that's okay. We'll
     // drop the first 1 second of audio packets to catch up with the backlog.
     int err = PltCreateThread("AudioPing", AudioPingThreadProc, NULL, &udpPingThread);
@@ -371,6 +367,8 @@ static void AudioReceiveThreadProc(void* context) {
                     BE16(rtp->sequenceNumber), BE32(rtp->timestamp));
 
             if (firstReceiveTime != 0) {
+                // XXX firstReceiveTime is never set here...
+                // We're already dropping 500ms of audio so this probably doesn't matter
                 packetsToDrop += (uint32_t)(PltGetMillis() - firstReceiveTime) / AudioPacketDuration;
             }
 
