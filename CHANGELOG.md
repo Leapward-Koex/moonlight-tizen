@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Added a Tizen emulator debug bridge and helper scripts for local debugging
 - Added Tizen web project metadata for easier VS Code Tizen extension workflows
 - Added runtime video codec probing with codec selection exposed in Advanced Settings
+- Added release packaging for standard and Force Game Mode WGT variants
 
 ### Changed
 - Improved Web Audio startup behavior to reduce audio delay and improve short sound playback
