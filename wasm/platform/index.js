@@ -881,7 +881,7 @@ function closeLogExportDialog() {
     logExportDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
     refreshLogStatus();
   });
 }
@@ -964,10 +964,8 @@ function showHosts() {
 
     // Navigate to the Hosts view
     showHostsMode();
+    Navigation.focusCurrent();
   }, 500);
-
-  // Set focus to current item and/or scroll to the current host row
-  setTimeout(() => Navigation.switch(), 500);
 }
 
 function restoreUiAfterWasmLoad() {
@@ -983,7 +981,7 @@ function restoreUiAfterWasmLoad() {
   Navigation.push(Views.Hosts);
   showHostsMode();
   // Set focus to current item and/or scroll to the current host row
-  setTimeout(() => Navigation.switch(), 100);
+  setTimeout(() => Navigation.focusCurrent(), 100);
 
   // Find mDNS host discovered using ServiceFinder (network service discovery)
   // findNvService(function(finder, opt_error) {
@@ -1042,28 +1040,22 @@ function hostChosen(host) {
     pairingDialog(host, function() {
       // After pairing the host, save the host object, show the apps, and navigate to the Apps view
       saveHosts();
-      showApps(host);
-      Navigation.push(Views.Apps);
-      setTimeout(() => {
-        // Scroll to the current game row
-        Navigation.switch();
-        // Switch to Apps view
+      showApps(host, function() {
         Navigation.change(Views.Apps);
-      }, 1500);
+        Navigation.focusCurrent();
+      });
+      Navigation.push(Views.Apps);
     }, function() {
       // Start polling the host after pairing flow
       startPollingHosts();
     });
   } else {
     // But if the host is already paired and online, then we show the apps and navigate to the Apps view as usual.
-    showApps(host);
-    Navigation.push(Views.Apps);
-    setTimeout(() => {
-      // Scroll to the current game row
-      Navigation.switch();
-      // Switch to Apps view
+    showApps(host, function() {
       Navigation.change(Views.Apps);
-    }, 1500);
+      Navigation.focusCurrent();
+    });
+    Navigation.push(Views.Apps);
   }
 }
 
@@ -1362,7 +1354,7 @@ function addHostDialog() {
     var currentAddHostRequestId = ++addHostRequestId;
     var hostConnectionLabel = parsedHostInput.addr + ':' + parsedHostInput.port;
     $('#continueAddHost').addClass('mdl-button--disabled').prop('disabled', true);
-    Navigation.switch();
+    Navigation.focusCurrent();
     logDebugBridge('info', 'Add Host connection request started', {
       requestId: currentAddHostRequestId,
       host: hostConnectionLabel
@@ -1777,7 +1769,7 @@ function hostMenuDialog(host) {
   hostMenuDialog[0].showModal();
   isDialogOpen = true;
   Navigation.push(Views.HostMenuDialog, host.hostname);
-  setTimeout(() => Navigation.switch(), 5);
+  setTimeout(() => Navigation.focusCurrent(), 5);
 }
 
 // Show a confirmation with the Delete Host dialog before removing the host object
@@ -1829,7 +1821,7 @@ function deleteHostDialog(host) {
     Navigation.pop();
     // Reset the Hosts view navigation index to prevent possible out-of-bounds errors
     Views.Hosts.view.reset();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 }
 
@@ -1862,7 +1854,7 @@ function deleteAllHostsDialog() {
       deleteHostDialog.close();
       isDialogOpen = false;
       Navigation.pop();
-      Navigation.switch();
+      Navigation.focusCurrent();
     });
   
     // Remove all existing hosts if the Continue button is pressed
@@ -1891,7 +1883,7 @@ function deleteAllHostsDialog() {
       Navigation.pop();
       // Reset the Hosts view navigation index to prevent possible out-of-bounds errors
       Views.Hosts.view.reset();
-      Navigation.switch();
+      Navigation.focusCurrent();
     });
   }
 }
@@ -1972,7 +1964,7 @@ function hostDetailsDialog(host) {
   hostDetailsDialog[0].showModal();
   isDialogOpen = true;
   Navigation.push(Views.HostDetailsDialog);
-  setTimeout(() => Navigation.switch(), 5);
+  setTimeout(() => Navigation.focusCurrent(), 5);
 }
 
 // Show the Moonlight Support dialog
@@ -1995,7 +1987,7 @@ function appSupportDialog() {
     appSupportDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 }
 
@@ -2055,6 +2047,7 @@ function showSettings() {
     // Navigate to the Settings view
     Navigation.push(Views.Settings);
     showSettingsMode();
+    Navigation.focusCurrent();
   }, 500);
 }
 
@@ -2075,7 +2068,7 @@ function resetSettingsView() {
 function navigateSettingsView(view) {
   Navigation.pop();
   Navigation.push(view);
-  setTimeout(() => Navigation.switch(), 250);
+  setTimeout(() => Navigation.focusCurrent(), 250);
 }
 
 // Handle category selection, display appropriate options, and navigate to the provided settings pane
@@ -2154,7 +2147,7 @@ function navigationGuideDialog() {
     navGuideDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 }
 
@@ -2355,7 +2348,7 @@ function updateAppDialog(latestVersion, releaseNotes) {
     updateAppDialogOverlay.remove();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   }).appendTo(updateAppDialogActions);
 
   // If the dialog element doesn't support the showModal method, register it with dialogPolyfill
@@ -2368,7 +2361,7 @@ function updateAppDialog(latestVersion, releaseNotes) {
   updateAppDialog[0].showModal();
   isDialogOpen = true;
   Navigation.push(Views.UpdateMoonlightDialog);
-  setTimeout(() => Navigation.switch(), 5);
+  setTimeout(() => Navigation.focusCurrent(), 5);
 }
 
 // Check for updates when the Check for Updates button is pressed
@@ -2459,7 +2452,7 @@ function restoreDefaultsDialog() {
     restoreDefaultsDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 
   // Restore all default settings if the Continue button is pressed
@@ -2474,7 +2467,7 @@ function restoreDefaultsDialog() {
     restoreDefaultsDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
     // Show the required Restart Moonlight dialog and push the view
     setTimeout(() => requiredRestartAppDialog(), 2000);
   });
@@ -2497,7 +2490,7 @@ function warningDialog(title, message) {
   Navigation.start();
   Navigation.push(Views.WarningDialog);
   setTimeout(function() {
-    Navigation.switch();
+    Navigation.focusCurrent();
     var closeWarning = document.getElementById('closeWarning');
     if (closeWarning && typeof closeWarning.focus === 'function') {
       closeWarning.focus();
@@ -2512,7 +2505,7 @@ function warningDialog(title, message) {
     warningDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 }
 
@@ -2545,7 +2538,7 @@ function restartAppDialog() {
     restartAppDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 
   // Restart the application if the Restart button is pressed
@@ -2584,7 +2577,7 @@ function requiredRestartAppDialog() {
     restartAppDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.switch();
+    Navigation.focusCurrent();
   });
 
   // Restart the application if the Restart button is pressed
@@ -2626,6 +2619,7 @@ function exitAppDialog() {
     isDialogOpen = false;
     Navigation.pop();
     Navigation.change(Views.Hosts);
+    Navigation.focusCurrent();
   });
 
   // Exit the application if the Exit button is pressed
@@ -2756,26 +2750,26 @@ function resetStreamUiState(reason, host, options) {
   isInGame = false;
 
   if (canShowApps && options.navigateToApps) {
-    showApps(host);
-    setTimeout(() => {
+    showApps(host, function() {
       if (isDialogOpen) {
         logDebugBridge('info', 'preserving dialog focus after stream UI reset', {
           reason: reason
         });
         Navigation.start();
-        Navigation.switch();
+        Navigation.focusCurrent();
         return;
       }
-      Navigation.switch();
       Navigation.change(Views.Apps);
-    }, 1500);
+      Navigation.focusCurrent();
+    });
   } else {
     showAppsMode();
+    Navigation.focusCurrent();
   }
 }
 
 // Show the Apps grid
-function showApps(host) {
+function showApps(host, onReady) {
   // Safety checking should happen before attempting to show the app list
   if (!host || !host.paired) {
     console.error('%c[index.js, showApps]', 'color: green;', 'Error: Unable to initialize the host properly! Host object: ', host);
@@ -2820,6 +2814,7 @@ function showApps(host) {
         emptyAppListImg.src = 'static/res/applist_empty.svg';
         $('#game-grid').html(emptyAppListImg);
         snackbarLogLong('Your list is currently empty. Please add your favorite apps to the list.');
+        if (typeof(onReady) === "function") onReady(false);
         return;
       }
 
@@ -2911,6 +2906,7 @@ function showApps(host) {
         boxArtPlaceholderImg.onload = e => boxArtPlaceholderImg.classList.add('fade-in');
         $(gameContainer).append(boxArtPlaceholderImg);
       });
+      if (typeof(onReady) === "function") onReady(true);
     }, function(failedAppList) {
       // Hide the spinner if the host has failed to retrieve the app list
       $('#wasmSpinner').hide();
@@ -2924,6 +2920,7 @@ function showApps(host) {
       errorAppListImg.src = 'static/res/applist_error.svg';
       $('#game-grid').html(errorAppListImg);
       snackbarLogLong('Unable to retrieve your list of apps at this time. Please refresh the list of apps or try again later!');
+      if (typeof(onReady) === "function") onReady(false);
     });
 
     // Navigate to the Apps view
@@ -2960,7 +2957,7 @@ function quitAppDialog() {
         quitAppDialog.close();
         isDialogOpen = false;
         Navigation.pop();
-        Navigation.switch();
+        Navigation.focusCurrent();
       });
 
       // Quit the running app if the Continue button is pressed
@@ -2972,8 +2969,9 @@ function quitAppDialog() {
         isDialogOpen = false;
         Navigation.pop();
         stopGame(api, function() {
-          // After stopping the game, set focus back to the 'Quit Running App' button
-          setTimeout(() => Navigation.switch(), 3000);
+          // After stopping the game, restore focus to the refreshed Apps grid.
+          Navigation.change(Views.Apps);
+          Navigation.focusCurrent();
         });
       });
     });
@@ -3201,12 +3199,8 @@ function startGame(host, appID) {
           $('#continueQuitApp').on('click', function() {
             console.log('%c[index.js, startGame]', 'color: green;', 'Quitting game, closing app dialog, and returning.');
             stopGame(host, function() {
-              setTimeout(() => {
-                // Scroll to the current game row
-                Navigation.switch();
-                // Switch to Apps view
-                Navigation.change(Views.Apps);
-              }, 1500);
+              Navigation.change(Views.Apps);
+              Navigation.focusCurrent();
               // Please, don't infinite loop with recursion
               setTimeout(() => startGame(host, appID), 3000);
             });
@@ -3530,8 +3524,9 @@ function stopGame(host, callbackFunction) {
         snackbarLog('Successfully quit ' + appTitle);
         host.refreshServerInfo().then(function(ret3) {
           // Refresh to show no app is currently running
-          showApps(host);
-          if (typeof(callbackFunction) === "function") callbackFunction();
+          showApps(host, function() {
+            if (typeof(callbackFunction) === "function") callbackFunction();
+          });
         }, function(failedRefreshInfo2) {
           console.error('%c[index.js, stopGame]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo2 + '! Failed server was: ' + '\n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
         });

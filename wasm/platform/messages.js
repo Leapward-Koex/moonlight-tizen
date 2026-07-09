@@ -666,11 +666,10 @@ function handleMessage(msg) {
       $('#loadingSpinner').css('display', 'none');
       $('body').css('backgroundColor', '#282C38');
       $('#wasm_module').css('display', 'none');
-      showApps(api);
-      setTimeout(() => {
-        Navigation.switch();
+      showApps(api, function() {
         Navigation.change(Views.Apps);
-      }, 1500);
+        Navigation.focusCurrent();
+      });
     }
   } else if (msg === 'Connection Established') {
     logWasmMessage('info', 'stream connection established');

@@ -103,8 +103,10 @@ function mark(target) {
     // Add the hovered class and dispatch the event
     element.classList.add(hoveredClassName);
     element.dispatchEvent(new Event('mouseenter'));
+    return true;
   } else {
     console.error('%c[navigation.js, mark]', 'color: gray;', 'Cannot mark the unresolved target:', target);
+    return false;
   }
 }
 
@@ -116,8 +118,10 @@ function unmark(target) {
     // Remove the hovered class and dispatch the event
     element.classList.remove(hoveredClassName);
     element.dispatchEvent(new Event('mouseleave'));
+    return true;
   } else {
     console.error('%c[navigation.js, unmark]', 'color: gray;', 'Cannot unmark the unresolved target:', target);
+    return false;
   }
 }
 
@@ -141,7 +145,7 @@ function focusElement(target) {
   // Check if the element exists before adding focus
   if (!element) {
     console.error('%c[navigation.js, focusElement]', 'color: gray;', 'Cannot focus the unresolved target:', target);
-    return;
+    return false;
   }
   // Check if the element is a SELECT dropdown
   if (element.tagName === 'SELECT') {
@@ -149,12 +153,14 @@ function focusElement(target) {
     if (listener && typeof listener.focus === 'function') {
       listener.focus();
     }
-    return;
+    return true;
   }
   // If the element supports focus, add focus to it
   if (typeof element.focus === 'function') {
     element.focus();
+    return true;
   }
+  return false;
 }
 
 // Safely remove focus from an element
@@ -163,12 +169,14 @@ function blurElement(target) {
   // Check if the element exists before removing focus
   if (!element) {
     console.error('%c[navigation.js, blurElement]', 'color: gray;', 'Cannot blur the unresolved target:', target);
-    return;
+    return false;
   }
   // If the element supports blur, remove focus from it
   if (typeof element.blur === 'function') {
     element.blur();
+    return true;
   }
+  return false;
 }
 
 // Determine if a popup menu container is active
@@ -262,13 +270,35 @@ class ListView {
     this.func = func;
   }
 
-  current() {
+  items() {
     const array = this.func();
-    return array[this.index];
+    return array || [];
+  }
+
+  normalize() {
+    const array = this.items();
+    if (!array.length) {
+      this.index = 0;
+      return array;
+    }
+    if (this.index < 0) {
+      this.index = 0;
+    } else if (this.index >= array.length) {
+      this.index = array.length - 1;
+    }
+    return array;
+  }
+
+  current() {
+    const array = this.normalize();
+    return array.length ? array[this.index] : null;
   }
 
   prev() {
-    const array = this.func();
+    const array = this.normalize();
+    if (!array.length) {
+      return null;
+    }
     if (this.index > 0) {
       unmark(array[this.index]);
       --this.index;
@@ -278,7 +308,10 @@ class ListView {
   }
 
   next() {
-    const array = this.func();
+    const array = this.normalize();
+    if (!array.length) {
+      return null;
+    }
     if (this.index < array.length - 1) {
       unmark(array[this.index]);
       ++this.index;
@@ -288,7 +321,10 @@ class ListView {
   }
 
   prevCategory() {
-    const array = this.func();
+    const array = this.normalize();
+    if (!array.length) {
+      return false;
+    }
     if (this.index > 0) {
       unmark(array[this.index]);
       --this.index;
@@ -301,7 +337,10 @@ class ListView {
   }
 
   nextCategory() {
-    const array = this.func();
+    const array = this.normalize();
+    if (!array.length) {
+      return false;
+    }
     if (this.index < array.length - 1) {
       unmark(array[this.index]);
       ++this.index;
@@ -314,7 +353,10 @@ class ListView {
   }
 
   prevOption() {
-    const array = this.func();
+    const array = this.normalize();
+    if (!array.length) {
+      return null;
+    }
     unmark(array[this.index]);
     this.index = (this.index - 1 + array.length) % array.length;
     mark(array[this.index]);
@@ -322,7 +364,10 @@ class ListView {
   }
 
   nextOption() {
-    const array = this.func();
+    const array = this.normalize();
+    if (!array.length) {
+      return null;
+    }
     unmark(array[this.index]);
     this.index = (this.index + 1) % array.length;
     mark(array[this.index]);
@@ -330,7 +375,10 @@ class ListView {
   }
 
   prevCard(cardsPerRow) {
-    const array = this.func();
+    const array = this.normalize();
+    if (!array.length) {
+      return null;
+    }
     const currentRow = Math.floor(this.index / cardsPerRow);
     // Check if a previous card exists
     if (this.index > 0) {
@@ -346,7 +394,10 @@ class ListView {
   }
 
   nextCard(cardsPerRow) {
-    const array = this.func();
+    const array = this.normalize();
+    if (!array.length) {
+      return null;
+    }
     const currentRow = Math.floor(this.index / cardsPerRow);
     // Check if a next card exists
     if (this.index < array.length - 1) {
@@ -362,7 +413,7 @@ class ListView {
   }
 
   currentCardRow(cardsPerRow) {
-    const array = this.func();
+    const array = this.normalize();
     // Check if there are any card in the current row
     if (!array || array.length === 0) {
       return;
@@ -374,7 +425,10 @@ class ListView {
   }
 
   prevCardRow(cardsPerRow) {
-    const array = this.func();
+    const array = this.normalize();
+    if (!array.length) {
+      return false;
+    }
     const currentRow = Math.floor(this.index / cardsPerRow);
     // Check if a previous card row exists
     if (currentRow > 0) {
@@ -390,7 +444,10 @@ class ListView {
   }
 
   nextCardRow(cardsPerRow) {
-    const array = this.func();
+    const array = this.normalize();
+    if (!array.length) {
+      return false;
+    }
     const rows = Math.ceil(array.length / cardsPerRow);
     const currentRow = Math.floor(this.index / cardsPerRow);
     // Check if a next card row exists
@@ -407,7 +464,7 @@ class ListView {
   }
 
   scrollToCardRow(row, cardsPerRow) {
-    const array = this.func();
+    const array = this.normalize();
     const targetCard = array[row * cardsPerRow];
     if (targetCard) {
       requestAnimationFrame(() => {
@@ -453,7 +510,14 @@ const Views = {
       focusElement(this.view.current());
     },
     accept: function() {
-      const currentItem = resolveElement(this.view.current());
+      const current = this.view.current();
+      if (!current) {
+        return;
+      }
+      const currentItem = resolveElement(current);
+      if (!currentItem) {
+        return;
+      }
       // Check if the current item is the Add Host container
       if (currentItem && currentItem.id === 'addHostContainer') {
         // Click the Add Host container itself to open the Add Host dialog
@@ -469,7 +533,11 @@ const Views = {
       exitAppDialog();
     },
     press: function() {
-      const currentItem = resolveElement(this.view.current());
+      const current = this.view.current();
+      if (!current) {
+        return;
+      }
+      const currentItem = resolveElement(current);
       // Check if the current item is not the Add Host container
       if (currentItem && currentItem.id !== 'addHostContainer') {
         // If the current item has children, set focus on the second child element (the menu button)
@@ -480,7 +548,14 @@ const Views = {
       }
     },
     switch: function() {
-      const currentItem = resolveElement(this.view.current());
+      const current = this.view.current();
+      if (!current) {
+        return;
+      }
+      const currentItem = resolveElement(current);
+      if (!currentItem) {
+        return;
+      }
       // Check if the current item is the Add Host container
       if (currentItem && currentItem.id === 'addHostContainer') {
         // Set focus on the Add Host container itself
@@ -494,12 +569,18 @@ const Views = {
       }
     },
     enter: function() {
-      mark(this.view.current());
+      const current = this.view.current();
+      if (current) {
+        mark(current);
+      }
       // Disable the IP address text input field when entering the Hosts view
       handleIpTextFieldState(false);
     },
     leave: function() {
-      unmark(this.view.current());
+      const current = this.view.current();
+      if (current) {
+        unmark(current);
+      }
     },
   },
   HostsNav: {
@@ -539,10 +620,16 @@ const Views = {
       focusElement(this.view.current());
     },
     enter: function() {
-      mark(this.view.current());
+      const current = this.view.current();
+      if (current) {
+        mark(current);
+      }
     },
     leave: function() {
-      unmark(this.view.current());
+      const current = this.view.current();
+      if (current) {
+        unmark(current);
+      }
     },
   },
   AddHostDialog: {
@@ -1606,7 +1693,16 @@ const Views = {
     },
     press: function() {},
     switch: function() {
+      const current = this.view.current();
+      if (!current) {
+        return;
+      }
+      const currentItem = resolveElement(current);
+      if (!currentItem) {
+        return;
+      }
       this.view.currentCardRow(6);
+      focusElement(currentItem);
     },
     enter: function() {
       mark(this.view.current());
@@ -1791,16 +1887,34 @@ const Navigation = (function() {
   let hasFocus = false;
 
   function loseFocus() {
-    if (hasFocus) {
+    const view = Stack.get();
+    if (hasFocus && view) {
       hasFocus = false;
-      Stack.get().leave();
+      view.leave();
     }
   }
 
   function focus() {
+    const view = Stack.get();
+    if (!view) {
+      return false;
+    }
     if (!hasFocus) {
       hasFocus = true;
-      Stack.get().enter();
+      view.enter();
+    }
+    return true;
+  }
+
+  function focusCurrent() {
+    State.start();
+    if (!focus()) {
+      return;
+    }
+
+    const view = Stack.get();
+    if (view && view.switch) {
+      view.switch();
     }
   }
 
@@ -1837,12 +1951,18 @@ const Navigation = (function() {
         view.hostname = hostname;
       }
       viewStack.push(view);
+      hasFocus = true;
       get().enter();
     }
 
     function change(view) {
-      get().leave();
-      viewStack[viewStack.length - 1] = view;
+      if (get()) {
+        get().leave();
+        viewStack[viewStack.length - 1] = view;
+      } else {
+        viewStack.push(view);
+      }
+      hasFocus = true;
       get().enter();
     }
 
@@ -1850,6 +1970,7 @@ const Navigation = (function() {
       if (viewStack.length > 1) {
         get().leave();
         viewStack.pop();
+        hasFocus = true;
         get().enter();
       }
     }
@@ -1902,6 +2023,7 @@ const Navigation = (function() {
     push: Stack.push,
     change: Stack.change,
     pop: Stack.pop,
+    focusCurrent,
     start: State.start,
     stop: State.stop,
   };
