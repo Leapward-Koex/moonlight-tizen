@@ -17,7 +17,7 @@ permissions:
 jobs:
   noResponse:
     runs-on: ubuntu-latest
-    if: ${{ github.repository == 'brightcraft/moonlight-tizen' }}
+    if: ${{ github.repository == 'Leapward-Koex/moonlight-tizen' }}
     # Close issues that have been labeled with "need more info" and have not received a response from the issue opener within 7 days.
     steps:
       - name: Close issue with no response

@@ -9,6 +9,9 @@ Moonlight Tizen is a port of [Moonlight ChromeOS](https://github.com/moonlight-s
 
 This application allows you to stream your collection of games, programs, or your full desktop from your powerful PC to your Samsung Smart TV.
 
+> [!NOTE]
+> This fork is maintained primarily for my own use. Its purpose is to improve the day-to-day TV streaming experience on my terms, with particular focus on UX refinements and audio performance. Changes in this fork may reflect my setup, preferences, and tradeoffs rather than general upstream direction.
+
 ---
 
 ## ✨ Features
@@ -67,6 +70,10 @@ For in-depth guides, technical support, and comprehensive documentation, please 
 ---
 
 ## 📖 About This Repository
+
+This fork builds on the original Moonlight Tizen project while intentionally staying focused on personal-use improvements. The main goals are to make the interface feel better to use on my TV, reduce friction in the workflows I care about, and improve audio behavior and performance where the stock experience does not meet my needs.
+
+The original project background is retained below for context.
 
 This project originally started as a **WASM port** for Tizen TV created by the [Samsung Developers Forum](https://github.com/SamsungDForum/moonlight-chrome). They demonstrated how Moonlight could run on Tizen OS by converting the original Native Client module to WebAssembly, enabling raw TCP/UDP socket access for networking, reimplementing the video and audio pipelines using the Tizen WASM Player to leverage hardware acceleration, and fully adapting the application to the Tizen web environment (see their [full article](https://developer.samsung.com/smarttv/develop/extension-libraries/webassembly/game-streaming-on-tizen-tv-with-wasm.html) for technical details).
 
