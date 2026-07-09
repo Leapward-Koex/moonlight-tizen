@@ -10,6 +10,14 @@ body {
     -moz-user-select: none;
     user-select: none;
 }
+body.startup-loading #main-header,
+body.startup-loading #main-content > :not(#listener):not(#wasmSpinner),
+body.startup-loading #wasm_module {
+    display: none !important;
+}
+body.startup-loading #wasmSpinner {
+    display: inline-block;
+}
 .mdl-grid {
     width: 100%;
 }
@@ -876,6 +884,95 @@ body {
     line-height: normal;
     letter-spacing: 0.5px;
     text-align: left;
+}
+.codec-capability-option {
+    margin-top: 30px;
+}
+.codec-capability-table {
+    width: 100%;
+    overflow-x: auto;
+}
+.codec-capability-empty {
+    color: #ececec;
+    background-color: #343844;
+    border: 1px solid #545b6a;
+    border-radius: 8px;
+    box-sizing: border-box;
+    font-size: 1.25rem;
+    letter-spacing: 0;
+    padding: 16px 18px;
+}
+.codec-capability-table table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    background-color: #343844;
+    border: 1px solid #545b6a;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.codec-capability-table th,
+.codec-capability-table td {
+    color: #ececec;
+    border-bottom: 1px solid #545b6a;
+    box-sizing: border-box;
+    font-size: 1.1rem;
+    letter-spacing: 0;
+    line-height: 1.35;
+    overflow: hidden;
+    padding: 10px 12px;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.codec-capability-table th {
+    color: #cfcfcf;
+    background-color: #282C38;
+    font-weight: 600;
+}
+.codec-capability-table th:first-child,
+.codec-capability-use-cell {
+    width: 76px;
+    text-align: center;
+}
+.codec-capability-table th:nth-child(2),
+.codec-capability-codec-cell {
+    width: 18%;
+}
+.codec-capability-table th:nth-child(3),
+.codec-capability-profile-cell {
+    width: 34%;
+}
+.codec-capability-table th:nth-child(4),
+.codec-capability-status-cell {
+    width: 18%;
+}
+.codec-capability-table tr:last-child td {
+    border-bottom: 0;
+}
+.codec-capability-disabled td {
+    color: #9fa6b2;
+}
+.codec-capability-toggle {
+    accent-color: #00a3c6;
+    cursor: pointer;
+    height: 28px;
+    width: 28px;
+}
+.codec-capability-toggle.hovered,
+.codec-capability-toggle:hover,
+.codec-capability-toggle:focus {
+    box-shadow: 0 0 2px 3px rgba(0, 163, 198, 1);
+    outline: none;
+}
+.codec-capability-status-supported {
+    color: #7bd88f !important;
+}
+.codec-capability-status-unsupported {
+    color: #ff9b9b !important;
+}
+.codec-capability-status-unknown {
+    color: #ffc046 !important;
 }
 /* =============================
    Switch, Button, Badge, and Menu Styles

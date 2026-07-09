@@ -14,7 +14,7 @@
   <script type="text/javascript" src="platform/logger.js"></script>
   <script type="text/javascript" src="platform.js"></script>
 </head>
-<body data-name="moonlight-tizen" data-tools="emscripten" data-configs="Debug Release" data-path="{tc}/{config}">
+<body class="startup-loading" data-name="moonlight-tizen" data-tools="emscripten" data-configs="Debug Release" data-path="{tc}/{config}">
   <div class="mdl-layout mdl-js-layout">
     <header id="main-header" class="mdl-layout__header">
       <div class="mdl-layout__header-row">
@@ -423,6 +423,13 @@
                 </label>
               </div>
             </div>
+            <div class="setting-option codec-capability-option">
+              <label>TV codec profile cache</label>
+              <span class="mdl-list__item-text-body">
+                - Tracks codec profiles this TV has accepted or rejected during stream startup.
+              </span>
+              <div id="codecCapabilityTable" class="codec-capability-table"></div>
+            </div>
             <div class="setting-option">
               <label>Diagnostic log level</label>
               <span class="mdl-list__item-text-body">
@@ -524,7 +531,7 @@
       <!-- Wasm module placeholder, Wasm gets thrown into here -->
       <div id="wasmSpinner" class="mdl-progress mdl-js-progress mdl-progress__indeterminate">
         <img src="static/res/ic_moonlight_logo.svg" id="wasmSpinnerLogo">
-        <h4 id="wasmSpinnerMessage"></h4>
+        <h4 id="wasmSpinnerMessage">Loading Moonlight...</h4>
       </div>
       <div id="loadingSpinner" class="mdl-progress mdl-js-progress mdl-progress__indeterminate">
         <h4 id="loadingSpinnerMessage"></h4>
@@ -796,6 +803,6 @@
     <button type="button" id="snackButton" class="mdl-snackbar__action"></button>
     <!-- This button exists to suppress the snackbar warning, we're really using a toast -->
   </div>
-  <video id="wasm_module" autoplay tabindex="-1"></video>
+  <video id="wasm_module" autoplay tabindex="-1" style="display: none;"></video>
 </body>
 </html>

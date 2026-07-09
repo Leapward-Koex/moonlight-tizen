@@ -1409,9 +1409,10 @@ const Views = {
       'unlockAllFpsBtn',
       'optimizeBitrateBtn',
       'disableWarningsBtn',
-      'performanceStatsBtn',
+      'performanceStatsBtn'
+    ].concat(Array.prototype.slice.call(document.querySelectorAll('.codec-capability-toggle')), [
       'selectLogLevel'
-    ]),
+    ])),
     up: function() {
       this.view.prevOption();
       focusElement(this.view.current());

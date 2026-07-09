@@ -98,6 +98,12 @@ const UPDATE_TIMESTAMP = 'lastUpdateCheck'; // Use the update check timestamp ke
 const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // Automatic check for updates interval is set to 24 hours
 const SWITCH_GAME_REFRESH_RETRIES = 6; // Maximum refresh attempts while waiting for the previous game to quit
 const SWITCH_GAME_REFRESH_DELAY_MS = 500; // Delay between refresh attempts when switching games
+const CODEC_CAPABILITY_CACHE_KEY = 'codecCapabilityCache';
+const CODEC_CAPABILITY_CACHE_VERSION = 1;
+var codecCapabilityCache = {
+  version: CODEC_CAPABILITY_CACHE_VERSION,
+  entries: {}
+};
 
 function logDebugBridge(level, eventName, details) {
   if (typeof window.moonlightDebugLog !== 'function') {
@@ -211,6 +217,375 @@ function getHostDebugSnapshot(host) {
   };
 }
 
+function getCodecCapabilityEntryKey(candidate) {
+  if (!candidate) {
+    return '';
+  }
+  if (candidate.mimeType) {
+    return candidate.mimeType.toString();
+  }
+  return [
+    candidate.codec || '',
+    candidate.hdr ? 'HDR' : 'SDR',
+    candidate.videoFormat || '',
+    candidate.profile || ''
+  ].join('|');
+}
+
+function normalizeCodecCapabilityCache(savedCache) {
+  var normalized = {
+    version: CODEC_CAPABILITY_CACHE_VERSION,
+    entries: {}
+  };
+  if (!savedCache || typeof savedCache !== 'object') {
+    return normalized;
+  }
+
+  var savedEntries = savedCache.entries || {};
+  Object.keys(savedEntries).forEach(function(key) {
+    var entry = savedEntries[key];
+    if (!entry || typeof entry !== 'object') {
+      return;
+    }
+
+    var normalizedKey = (entry.key || key || entry.mimeType || '').toString();
+    if (!normalizedKey) {
+      return;
+    }
+
+    normalized.entries[normalizedKey] = {
+      key: normalizedKey,
+      enabled: entry.enabled !== false,
+      codec: (entry.codec || '').toString(),
+      hdr: !!entry.hdr,
+      videoFormat: Number(entry.videoFormat) || 0,
+      profile: (entry.profile || '').toString(),
+      mimeType: (entry.mimeType || normalizedKey).toString(),
+      supported: typeof entry.supported === 'boolean' ? entry.supported : null,
+      attempts: Number(entry.attempts) || 0,
+      lastTriedAt: Number(entry.lastTriedAt) || 0,
+      lastSkippedAt: Number(entry.lastSkippedAt) || 0,
+      lastSkipReason: (entry.lastSkipReason || '').toString(),
+      lastSelected: !!entry.lastSelected,
+      lastWidth: Number(entry.lastWidth) || 0,
+      lastHeight: Number(entry.lastHeight) || 0,
+      lastFps: Number(entry.lastFps) || 0,
+      lastRequestedCodec: (entry.lastRequestedCodec || '').toString(),
+      lastRequestedHdrMode: !!entry.lastRequestedHdrMode,
+      lastUserChangedAt: Number(entry.lastUserChangedAt) || 0
+    };
+  });
+
+  return normalized;
+}
+
+function getCodecCapabilityEntries() {
+  var entries = codecCapabilityCache && codecCapabilityCache.entries ? codecCapabilityCache.entries : {};
+  return Object.keys(entries).map(function(key) {
+    return entries[key];
+  }).sort(function(a, b) {
+    var aTime = Math.max(a.lastTriedAt || 0, a.lastSkippedAt || 0, a.lastUserChangedAt || 0);
+    var bTime = Math.max(b.lastTriedAt || 0, b.lastSkippedAt || 0, b.lastUserChangedAt || 0);
+    if (aTime !== bTime) {
+      return bTime - aTime;
+    }
+    return (a.mimeType || a.key || '').localeCompare(b.mimeType || b.key || '');
+  });
+}
+
+function getDisabledCodecMimeTypesForProbe() {
+  var disabledMimeTypes = [];
+  getCodecCapabilityEntries().forEach(function(entry) {
+    if (entry.enabled === false && entry.mimeType) {
+      disabledMimeTypes.push(entry.mimeType);
+    }
+  });
+  return disabledMimeTypes.join('\n');
+}
+
+function persistCodecCapabilityCache() {
+  storeData(CODEC_CAPABILITY_CACHE_KEY, codecCapabilityCache, null);
+  renderCodecCapabilityTable();
+}
+
+function loadCodecCapabilityCache() {
+  console.log('%c[index.js, loadCodecCapabilityCache]', 'color: green;', 'Load stored codec capability cache.');
+  getData(CODEC_CAPABILITY_CACHE_KEY, function(previousValue) {
+    codecCapabilityCache = normalizeCodecCapabilityCache(previousValue[CODEC_CAPABILITY_CACHE_KEY]);
+    renderCodecCapabilityTable();
+    logDebugBridge('info', 'codec capability cache loaded', {
+      entries: getCodecCapabilityEntries().length,
+      disabledMimeTypes: getDisabledCodecMimeTypesForProbe().split('\n').filter(Boolean).length
+    });
+  });
+}
+
+function resetCodecCapabilityCache() {
+  codecCapabilityCache = {
+    version: CODEC_CAPABILITY_CACHE_VERSION,
+    entries: {}
+  };
+  persistCodecCapabilityCache();
+}
+
+function updateCodecCapabilityCacheFromProbe(probeResult, streamWidth, streamHeight, frameRate) {
+  if (!probeResult || !Array.isArray(probeResult.candidates)) {
+    return;
+  }
+
+  codecCapabilityCache = normalizeCodecCapabilityCache(codecCapabilityCache);
+  var entries = codecCapabilityCache.entries;
+  var now = Date.now();
+  var changed = false;
+
+  probeResult.candidates.forEach(function(candidate) {
+    var key = getCodecCapabilityEntryKey(candidate);
+    if (!key) {
+      return;
+    }
+
+    var existing = entries[key] || {};
+    var entry = Object.assign({}, existing, {
+      key: key,
+      enabled: existing.enabled !== false,
+      codec: (candidate.codec || existing.codec || '').toString(),
+      hdr: !!candidate.hdr,
+      videoFormat: Number(candidate.videoFormat) || Number(existing.videoFormat) || 0,
+      profile: (candidate.profile || existing.profile || '').toString(),
+      mimeType: (candidate.mimeType || existing.mimeType || key).toString(),
+      lastSelected: !!(probeResult.selectedMimeType && candidate.mimeType === probeResult.selectedMimeType),
+      lastWidth: Number(streamWidth) || Number(probeResult.width) || Number(existing.lastWidth) || 0,
+      lastHeight: Number(streamHeight) || Number(probeResult.height) || Number(existing.lastHeight) || 0,
+      lastFps: Number(frameRate) || Number(probeResult.fps) || Number(existing.lastFps) || 0,
+      lastRequestedCodec: (probeResult.requestedCodec || existing.lastRequestedCodec || '').toString(),
+      lastRequestedHdrMode: !!probeResult.requestedHdrMode
+    });
+
+    if (candidate.skipped) {
+      entry.lastSkippedAt = now;
+      entry.lastSkipReason = (candidate.skipReason || 'skipped').toString();
+      if (typeof entry.supported !== 'boolean') {
+        entry.supported = null;
+      }
+      entry.attempts = Number(existing.attempts) || 0;
+    } else {
+      entry.supported = !!candidate.supported;
+      entry.attempts = (Number(existing.attempts) || 0) + 1;
+      entry.lastTriedAt = now;
+      entry.lastSkippedAt = Number(existing.lastSkippedAt) || 0;
+      entry.lastSkipReason = '';
+    }
+
+    entries[key] = entry;
+    changed = true;
+  });
+
+  if (changed) {
+    codecCapabilityCache.entries = entries;
+    persistCodecCapabilityCache();
+  }
+}
+
+function formatCodecCapabilityTime(timestamp) {
+  if (!timestamp) {
+    return 'Never';
+  }
+  try {
+    return new Date(timestamp).toLocaleString();
+  } catch (e) {
+    return timestamp.toString();
+  }
+}
+
+function getCodecCapabilityStatus(entry) {
+  if (entry.supported === true) {
+    return 'Supported';
+  }
+  if (entry.supported === false) {
+    return 'Unsupported';
+  }
+  return 'Unknown';
+}
+
+function addCodecCapabilityTextCell(row, className, text) {
+  var cell = document.createElement('td');
+  cell.className = className;
+  cell.textContent = text;
+  row.appendChild(cell);
+  return cell;
+}
+
+function renderCodecCapabilityTable() {
+  var container = document.getElementById('codecCapabilityTable');
+  if (!container) {
+    return;
+  }
+
+  while (container.firstChild) {
+    container.removeChild(container.firstChild);
+  }
+
+  var entries = getCodecCapabilityEntries();
+  if (!entries.length) {
+    var empty = document.createElement('div');
+    empty.className = 'codec-capability-empty';
+    empty.textContent = 'No codec profiles tested yet';
+    container.appendChild(empty);
+    return;
+  }
+
+  var table = document.createElement('table');
+  var thead = document.createElement('thead');
+  var headerRow = document.createElement('tr');
+  ['Use', 'Codec', 'Profile', 'Status', 'Last mode'].forEach(function(label) {
+    var header = document.createElement('th');
+    header.textContent = label;
+    headerRow.appendChild(header);
+  });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  entries.forEach(function(entry, index) {
+    var row = document.createElement('tr');
+    if (entry.enabled === false) {
+      row.className = 'codec-capability-disabled';
+    }
+
+    var useCell = document.createElement('td');
+    useCell.className = 'codec-capability-use-cell';
+    var checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = 'codecCapabilityToggle' + index;
+    checkbox.className = 'codec-capability-toggle';
+    checkbox.checked = entry.enabled !== false;
+    checkbox.setAttribute('data-codec-key', entry.key);
+    checkbox.setAttribute('aria-label', 'Use codec profile ' + (entry.profile || entry.mimeType || entry.codec || entry.key));
+    useCell.appendChild(checkbox);
+    row.appendChild(useCell);
+
+    addCodecCapabilityTextCell(row, 'codec-capability-codec-cell', (entry.codec || 'Unknown') + (entry.hdr ? ' HDR' : ' SDR'));
+    var profileCell = addCodecCapabilityTextCell(row, 'codec-capability-profile-cell', entry.profile || entry.mimeType || entry.key);
+    profileCell.title = entry.mimeType || entry.key;
+
+    var statusCell = addCodecCapabilityTextCell(row, 'codec-capability-status-cell', getCodecCapabilityStatus(entry));
+    statusCell.className += ' codec-capability-status-' + getCodecCapabilityStatus(entry).toLowerCase();
+
+    var modeText = entry.lastWidth && entry.lastHeight && entry.lastFps
+      ? entry.lastWidth + 'x' + entry.lastHeight + ' @ ' + entry.lastFps + ' FPS'
+      : '-';
+    var modeCell = addCodecCapabilityTextCell(row, 'codec-capability-mode-cell', modeText);
+    modeCell.title = 'Last tried: ' + formatCodecCapabilityTime(entry.lastTriedAt || entry.lastSkippedAt);
+
+    tbody.appendChild(row);
+  });
+
+  table.appendChild(tbody);
+  container.appendChild(table);
+}
+
+function setCodecCapabilityEnabled(key, enabled) {
+  codecCapabilityCache = normalizeCodecCapabilityCache(codecCapabilityCache);
+  var entry = codecCapabilityCache.entries[key];
+  if (!entry) {
+    return;
+  }
+
+  entry.enabled = !!enabled;
+  entry.lastUserChangedAt = Date.now();
+  persistCodecCapabilityCache();
+  logDebugBridge('info', 'codec capability preference changed', {
+    mimeType: entry.mimeType,
+    profile: entry.profile,
+    codec: entry.codec,
+    hdr: entry.hdr,
+    enabled: entry.enabled
+  });
+  snackbarLog((entry.enabled ? 'Enabled ' : 'Disabled ') + (entry.profile || entry.mimeType || 'codec profile') + '.');
+}
+
+function saveCodecCapabilityToggle(e) {
+  var input = e && e.currentTarget ? e.currentTarget : this;
+  if (!input) {
+    return;
+  }
+  setCodecCapabilityEnabled(input.getAttribute('data-codec-key'), input.checked);
+}
+
+function probeVideoCodecForTv(streamWidth, streamHeight, frameRate, hdrMode, videoCodec, host) {
+  if (typeof Module === 'undefined' || typeof Module.probeVideoCodecSupport !== 'function') {
+    logDebugBridge('warn', 'video codec probe unavailable', {
+      streamWidth: streamWidth,
+      streamHeight: streamHeight,
+      frameRate: frameRate,
+      hdrMode: hdrMode,
+      videoCodec: videoCodec,
+      serverCodecModeSupport: host && host.serverCodecModeSupport ? host.serverCodecModeSupport : 0
+    });
+    return null;
+  }
+
+  var startedAt = Date.now();
+  var rawProbeResult = '';
+  var disabledMimeTypes = getDisabledCodecMimeTypesForProbe();
+  var disabledMimeTypeCount = disabledMimeTypes.split('\n').filter(Boolean).length;
+  logDebugBridge('info', 'video codec probe requested', {
+    streamWidth: streamWidth,
+    streamHeight: streamHeight,
+    frameRate: frameRate,
+    hdrMode: !!hdrMode,
+    videoCodec: videoCodec,
+    serverCodecModeSupport: host && host.serverCodecModeSupport ? host.serverCodecModeSupport : 0,
+    disabledMimeTypeCount: disabledMimeTypeCount,
+    host: getHostDebugSnapshot(host)
+  });
+
+  try {
+    rawProbeResult = Module.probeVideoCodecSupport(
+      streamWidth.toString(),
+      streamHeight.toString(),
+      frameRate.toString(),
+      !!hdrMode,
+      host && host.serverCodecModeSupport ? host.serverCodecModeSupport : 0,
+      videoCodec,
+      disabledMimeTypes
+    );
+    var probeResult = JSON.parse(rawProbeResult);
+    updateCodecCapabilityCacheFromProbe(probeResult, streamWidth, streamHeight, frameRate);
+    logDebugBridge(probeResult && probeResult.selectedCodec ? 'info' : 'warn', 'video codec probe complete', {
+      requestedCodec: videoCodec,
+      requestedHdrMode: !!hdrMode,
+      selectedCodec: probeResult ? probeResult.selectedCodec : '',
+      selectedHdrMode: probeResult ? probeResult.selectedHdrMode : false,
+      selectedProfile: probeResult ? probeResult.selectedProfile : '',
+      selectedMimeType: probeResult ? probeResult.selectedMimeType : '',
+      fallback: probeResult ? probeResult.fallback : false,
+      attemptedProfiles: probeResult ? probeResult.attemptedProfiles : 0,
+      skippedProfiles: probeResult ? probeResult.skippedProfiles : 0,
+      disabledMimeTypeCount: disabledMimeTypeCount,
+      nativeElapsedMs: probeResult ? probeResult.elapsedMs : null,
+      elapsedMs: Date.now() - startedAt,
+      candidates: probeResult ? probeResult.candidates : [],
+      host: getHostDebugSnapshot(host)
+    });
+    return probeResult;
+  } catch (e) {
+    logDebugBridge('error', 'video codec probe failed', {
+      streamWidth: streamWidth,
+      streamHeight: streamHeight,
+      frameRate: frameRate,
+      hdrMode: hdrMode,
+      videoCodec: videoCodec,
+      elapsedMs: Date.now() - startedAt,
+      disabledMimeTypeCount: disabledMimeTypeCount,
+      rawResultLength: rawProbeResult ? rawProbeResult.length : 0,
+      rawResultPrefix: rawProbeResult ? rawProbeResult.slice(0, 200) : '',
+      error: e && e.message ? e.message : String(e)
+    });
+    return null;
+  }
+}
+
 function getHostDisplayModeSupport(host, width, height) {
   if (!host || !host.supportedDisplayModes) {
     return null;
@@ -271,6 +646,7 @@ function attachListeners() {
   $('#disableWarningsSwitch').on('click', saveDisableWarnings);
   $('#performanceStatsSwitch').on('click', savePerformanceStats);
   $('.logLevelMenu li').on('click', saveLogLevel);
+  $('#codecCapabilityTable').on('change', '.codec-capability-toggle', saveCodecCapabilityToggle);
   $('#logStatusBtn').on('click', refreshLogStatus);
   $('#exportLogsBtn').on('click', logExportDialog);
   $('#clearLogsBtn').on('click', clearDiagnosticLogs);
@@ -360,6 +736,7 @@ function attachListeners() {
 }
 
 function changeUiModeForWasmLoad() {
+  $('body').addClass('startup-loading');
   $('#main-header').hide();
   $('#main-header').children().hide();
   $('#main-content').children().not('#listener, #wasmSpinner').hide();
@@ -976,6 +1353,7 @@ function restoreUiAfterWasmLoad() {
   // Stop navigation before showing the loading screen
   Navigation.stop();
 
+  $('body').removeClass('startup-loading');
   $('#main-header').children().not('#goBackBtn, #restoreDefaultsBtn, #quitRunningAppBtn').show();
   $('#main-content').children().not('#listener, #wasmSpinner, #settings-list, #game-grid').show();
   $('#wasmSpinner').hide();
@@ -3368,7 +3746,7 @@ function startGame(host, appID, options) {
       const audioJitterMs = parseInt($('#jitterSlider').val(), 10);
       const playHostAudio = $('#playHostAudioSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var videoCodec = $('#selectCodec').data('value').toString();
-      const hdrMode = $('#hdrModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
+      var hdrMode = $('#hdrModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const fullRange = $('#fullRangeSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const gameMode = $('#gameModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const disableWarnings = $('#disableWarningsSwitch').parent().hasClass('is-checked') ? 1 : 0;
@@ -3404,6 +3782,81 @@ function startGame(host, appID, options) {
         remoteInputKeyIdGenerated: rikeyid !== null && typeof rikeyid !== 'undefined',
         selectedDisplayModeSupport: getHostDisplayModeSupport(host, streamWidth, streamHeight)
       };
+
+      var codecProbeResult = probeVideoCodecForTv(streamWidth, streamHeight, frameRate, hdrMode, videoCodec, host);
+      if (codecProbeResult && codecProbeResult.selectedCodec) {
+        var requestedVideoCodec = videoCodec;
+        var requestedHdrMode = hdrMode;
+        videoCodec = codecProbeResult.selectedCodec;
+        hdrMode = codecProbeResult.selectedHdrMode ? 1 : 0;
+        streamStartDetails.videoCodec = videoCodec;
+        streamStartDetails.hdrMode = hdrMode;
+        streamStartDetails.codecProbe = {
+          requestedCodec: requestedVideoCodec,
+          requestedHdrMode: !!requestedHdrMode,
+          selectedCodec: codecProbeResult.selectedCodec,
+          selectedHdrMode: !!codecProbeResult.selectedHdrMode,
+          selectedProfile: codecProbeResult.selectedProfile,
+          selectedMimeType: codecProbeResult.selectedMimeType,
+          fallback: !!codecProbeResult.fallback,
+          candidates: codecProbeResult.candidates || []
+        };
+
+        if (requestedVideoCodec !== videoCodec || !!requestedHdrMode !== !!hdrMode) {
+          logDebugBridge('warn', 'video codec probe adjusted stream request', {
+            requestedCodec: requestedVideoCodec,
+            requestedHdrMode: !!requestedHdrMode,
+            selectedCodec: videoCodec,
+            selectedHdrMode: !!hdrMode,
+            selectedProfile: codecProbeResult.selectedProfile,
+            selectedMimeType: codecProbeResult.selectedMimeType,
+            candidates: codecProbeResult.candidates || []
+          });
+          snackbarLogLong('Using ' + videoCodec + (hdrMode ? ' HDR' : ' SDR') + ' for this stream because the TV rejected the requested codec profile.');
+        } else {
+          logDebugBridge('info', 'video codec probe kept stream request', {
+            selectedCodec: videoCodec,
+            selectedHdrMode: !!hdrMode,
+            selectedProfile: codecProbeResult.selectedProfile,
+            selectedMimeType: codecProbeResult.selectedMimeType
+          });
+        }
+      } else if (codecProbeResult) {
+        streamStartDetails.codecProbe = {
+          noUsableSelection: true,
+          requestedCodec: videoCodec,
+          requestedHdrMode: !!hdrMode,
+          attemptedProfiles: codecProbeResult.attemptedProfiles || 0,
+          skippedProfiles: codecProbeResult.skippedProfiles || 0,
+          candidates: codecProbeResult.candidates || []
+        };
+        logDebugBridge('error', 'video codec probe produced no usable selection', {
+          requestedCodec: videoCodec,
+          requestedHdrMode: !!hdrMode,
+          streamWidth: streamWidth,
+          streamHeight: streamHeight,
+          frameRate: frameRate,
+          attemptedProfiles: codecProbeResult.attemptedProfiles || 0,
+          skippedProfiles: codecProbeResult.skippedProfiles || 0,
+          candidates: codecProbeResult.candidates || [],
+          host: getHostDebugSnapshot(host)
+        });
+        snackbarLogLong('No enabled codec profile was accepted by this TV for the selected stream settings.');
+        resetStreamUiState('codec probe produced no usable selection', host, { navigateToApps: true });
+        return;
+      } else {
+        streamStartDetails.codecProbe = {
+          unavailable: true
+        };
+        logDebugBridge('warn', 'video codec probe produced no usable selection', {
+          requestedCodec: videoCodec,
+          requestedHdrMode: !!hdrMode,
+          streamWidth: streamWidth,
+          streamHeight: streamHeight,
+          frameRate: frameRate,
+          host: getHostDebugSnapshot(host)
+        });
+      }
 
       console.log('%c[index.js, startGame]', 'color: green;', 'startRequest:' + 
       '\n Host address: ' + host.address + ':' + host.httpPort + 
@@ -4495,6 +4948,8 @@ function restoreDefaultsSettingsValues() {
   setLogLevelSelection(defaultLogLevel);
   storeData('logLevel', defaultLogLevel, null);
   refreshLogStatus();
+
+  resetCodecCapabilityCache();
 }
 
 function initSamsungKeys() {
@@ -4585,6 +5040,8 @@ function loadUserDataCb() {
     setLogLevelSelection(storedLogLevel);
     refreshLogStatus();
   });
+
+  loadCodecCapabilityCache();
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored resolution preferences.');
   getData('resolution', function(previousValue) {

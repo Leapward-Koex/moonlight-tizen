@@ -78,7 +78,13 @@ MoonlightInstance::MoonlightInstance()
     m_Source(nullptr),
     m_SourceListener(this),
     m_VideoTrackListener(this),
-    m_VideoTrack() {
+    m_VideoTrack(),
+    m_ProbedVideoFormat(0),
+    m_ProbedVideoWidth(0),
+    m_ProbedVideoHeight(0),
+    m_ProbedVideoFps(0),
+    m_ProbedVideoMimeType(),
+    m_ProbedVideoProfileLabel() {
       m_Dispatcher.start();
       ClLogMessage("MoonlightInstance initialized\n");
     }
@@ -805,6 +811,12 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
   audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats);
 }
 
+std::string probeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes) {
+  MoonlightInstance::ClLogMessage("JS bridge invoked probeVideoCodecSupport: width=%s, height=%s, fps=%s, hdrMode=%d, serverCodecModeSupport=0x%x, preferredCodec=%s, disabledMimeTypesLength=%u\n",
+    width.c_str(), height.c_str(), fps.c_str(), hdrMode, serverCodecModeSupport, preferredCodec.c_str(), static_cast<unsigned int>(disabledMimeTypes.size()));
+  return g_Instance->ProbeVideoCodecSupport(width, height, fps, hdrMode, serverCodecModeSupport, preferredCodec, disabledMimeTypes);
+}
+
 MessageResult stopStream() {
   MoonlightInstance::ClLogMessage("JS bridge invoked stopStream\n");
   PostToJs("Stopping the streaming session...");
@@ -864,6 +876,7 @@ void PostPromiseMessage(int callbackId, const std::string& type, const std::vect
 EMSCRIPTEN_BINDINGS(handle_message) {
   emscripten::value_object<MessageResult>("MessageResult").field("type", &MessageResult::type).field("ret", &MessageResult::ret);
   emscripten::function("startStream", &startStream);
+  emscripten::function("probeVideoCodecSupport", &probeVideoCodecSupport);
   emscripten::function("stopStream", &stopStream);
   emscripten::function("toggleStats", &toggleStats);
   emscripten::function("stun", &stun);

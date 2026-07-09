@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <sstream>
+#include <vector>
 
 #include <h264_stream.h>
 
@@ -70,6 +72,22 @@ struct H264ProfileSelection {
   const char* label;
 };
 
+struct VideoProfileSelection {
+  const char* mimeType;
+  const char* label;
+};
+
+struct VideoFormatCandidate {
+  const char* codec;
+  bool hdr;
+  int videoFormat;
+  int serverCodecMode;
+};
+
+const char* BoolText(bool value) {
+  return value ? "true" : "false";
+}
+
 struct AsyncOperationWait {
   std::mutex mutex;
   std::condition_variable condition;
@@ -98,6 +116,237 @@ H264ProfileSelection SelectH264Profile(int width, int height, int framerate) {
     return { "video/mp4; codecs=\"avc1.640033\"", "H.264 High Level Profile 5.1" };
   }
   return { "video/mp4; codecs=\"avc1.640034\"", "H.264 High Level Profile 5.2" };
+}
+
+bool PreferHighThroughputVideoLevel(int width, int height, int framerate) {
+  if (width <= 0 || height <= 0 || framerate <= 0) {
+    return false;
+  }
+
+  const uint64_t pixelsPerSecond =
+    static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * static_cast<uint64_t>(framerate);
+  return pixelsPerSecond > (3840ULL * 2160ULL * 30ULL);
+}
+
+std::vector<VideoProfileSelection> GetVideoProfileCandidates(int videoFormat, int width, int height, int framerate) {
+  const bool highThroughput = PreferHighThroughputVideoLevel(width, height, framerate);
+
+  if (videoFormat & VIDEO_FORMAT_H264) {
+    const H264ProfileSelection profile = SelectH264Profile(width, height, framerate);
+    return { { profile.mimeType, profile.label } };
+  }
+  if (videoFormat & VIDEO_FORMAT_H265) {
+    if (highThroughput) {
+      return {
+        { "video/mp4; codecs=\"hev1.1.6.L156.B0\"", "HEVC Main Level Profile 5.2" },
+        { "video/mp4; codecs=\"hev1.1.6.L153.B0\"", "HEVC Main Level Profile 5.1" },
+      };
+    }
+    return {
+      { "video/mp4; codecs=\"hev1.1.6.L153.B0\"", "HEVC Main Level Profile 5.1" },
+      { "video/mp4; codecs=\"hev1.1.6.L156.B0\"", "HEVC Main Level Profile 5.2" },
+    };
+  }
+  if (videoFormat & VIDEO_FORMAT_H265_MAIN10) {
+    if (highThroughput) {
+      return {
+        { "video/mp4; codecs=\"hev1.2.4.L156.B0\"", "HEVC Main10 Level Profile 5.2" },
+        { "video/mp4; codecs=\"hev1.2.4.L153.B0\"", "HEVC Main10 Level Profile 5.1" },
+      };
+    }
+    return {
+      { "video/mp4; codecs=\"hev1.2.4.L153.B0\"", "HEVC Main10 Level Profile 5.1" },
+      { "video/mp4; codecs=\"hev1.2.4.L156.B0\"", "HEVC Main10 Level Profile 5.2" },
+    };
+  }
+  if (videoFormat & VIDEO_FORMAT_AV1_MAIN8) {
+    if (highThroughput) {
+      return {
+        { "video/mp4; codecs=\"av01.0.14M.08\"", "AV1 Main Level Profile 5.2" },
+        { "video/mp4; codecs=\"av01.0.15M.08\"", "AV1 Main Level Profile 5.3" },
+        { "video/mp4; codecs=\"av01.0.16M.08\"", "AV1 Main Level Profile 6.0" },
+        { "video/mp4; codecs=\"av01.0.17M.08\"", "AV1 Main Level Profile 6.1" },
+        { "video/mp4; codecs=\"av01.0.18M.08\"", "AV1 Main Level Profile 6.2" },
+        { "video/mp4; codecs=\"av01.0.19M.08\"", "AV1 Main Level Profile 6.3" },
+        { "video/mp4; codecs=\"av01.0.13M.08\"", "AV1 Main Level Profile 5.1" },
+      };
+    }
+    return {
+      { "video/mp4; codecs=\"av01.0.13M.08\"", "AV1 Main Level Profile 5.1" },
+      { "video/mp4; codecs=\"av01.0.14M.08\"", "AV1 Main Level Profile 5.2" },
+      { "video/mp4; codecs=\"av01.0.15M.08\"", "AV1 Main Level Profile 5.3" },
+      { "video/mp4; codecs=\"av01.0.16M.08\"", "AV1 Main Level Profile 6.0" },
+      { "video/mp4; codecs=\"av01.0.17M.08\"", "AV1 Main Level Profile 6.1" },
+      { "video/mp4; codecs=\"av01.0.18M.08\"", "AV1 Main Level Profile 6.2" },
+      { "video/mp4; codecs=\"av01.0.19M.08\"", "AV1 Main Level Profile 6.3" },
+    };
+  }
+  if (videoFormat & VIDEO_FORMAT_AV1_MAIN10) {
+    if (highThroughput) {
+      return {
+        { "video/mp4; codecs=\"av01.0.14M.10\"", "AV1 Main10 Level Profile 5.2" },
+        { "video/mp4; codecs=\"av01.0.15M.10\"", "AV1 Main10 Level Profile 5.3" },
+        { "video/mp4; codecs=\"av01.0.16M.10\"", "AV1 Main10 Level Profile 6.0" },
+        { "video/mp4; codecs=\"av01.0.17M.10\"", "AV1 Main10 Level Profile 6.1" },
+        { "video/mp4; codecs=\"av01.0.18M.10\"", "AV1 Main10 Level Profile 6.2" },
+        { "video/mp4; codecs=\"av01.0.19M.10\"", "AV1 Main10 Level Profile 6.3" },
+        { "video/mp4; codecs=\"av01.0.13M.10\"", "AV1 Main10 Level Profile 5.1" },
+      };
+    }
+    return {
+      { "video/mp4; codecs=\"av01.0.13M.10\"", "AV1 Main10 Level Profile 5.1" },
+      { "video/mp4; codecs=\"av01.0.14M.10\"", "AV1 Main10 Level Profile 5.2" },
+      { "video/mp4; codecs=\"av01.0.15M.10\"", "AV1 Main10 Level Profile 5.3" },
+      { "video/mp4; codecs=\"av01.0.16M.10\"", "AV1 Main10 Level Profile 6.0" },
+      { "video/mp4; codecs=\"av01.0.17M.10\"", "AV1 Main10 Level Profile 6.1" },
+      { "video/mp4; codecs=\"av01.0.18M.10\"", "AV1 Main10 Level Profile 6.2" },
+      { "video/mp4; codecs=\"av01.0.19M.10\"", "AV1 Main10 Level Profile 6.3" },
+    };
+  }
+
+  return {};
+}
+
+VideoProfileSelection SelectVideoProfile(int videoFormat, int width, int height, int framerate) {
+  std::vector<VideoProfileSelection> candidates = GetVideoProfileCandidates(videoFormat, width, height, framerate);
+  if (!candidates.empty()) {
+    return candidates.front();
+  }
+  return { nullptr, nullptr };
+}
+
+bool ServerSupportsCodecMode(int serverCodecModeSupport, int serverCodecMode) {
+  if (serverCodecMode == SCM_H264) {
+    return true;
+  }
+  return (serverCodecModeSupport & serverCodecMode) != 0;
+}
+
+bool IsDuplicateVideoFormat(const std::vector<VideoFormatCandidate>& candidates, int videoFormat) {
+  for (const VideoFormatCandidate& candidate : candidates) {
+    if (candidate.videoFormat == videoFormat) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void AddVideoFormatCandidate(
+  std::vector<VideoFormatCandidate>& candidates,
+  const std::string& codec,
+  bool hdr,
+  int serverCodecModeSupport) {
+  VideoFormatCandidate candidate;
+
+  if (codec == "AV1") {
+    candidate = hdr
+      ? VideoFormatCandidate { "AV1", true, VIDEO_FORMAT_AV1_MAIN10, SCM_AV1_MAIN10 }
+      : VideoFormatCandidate { "AV1", false, VIDEO_FORMAT_AV1_MAIN8, SCM_AV1_MAIN8 };
+  } else if (codec == "HEVC") {
+    candidate = hdr
+      ? VideoFormatCandidate { "HEVC", true, VIDEO_FORMAT_H265_MAIN10, SCM_HEVC_MAIN10 }
+      : VideoFormatCandidate { "HEVC", false, VIDEO_FORMAT_H265, SCM_HEVC };
+  } else if (codec == "H264" && !hdr) {
+    candidate = { "H264", false, VIDEO_FORMAT_H264, SCM_H264 };
+  } else {
+    MoonlightInstance::ClLogMessage("Video codec probe candidate skipped: codec=%s, hdr=%d, reason=unsupported codec/hdr combination\n",
+      codec.c_str(), hdr);
+    return;
+  }
+
+  if (!ServerSupportsCodecMode(serverCodecModeSupport, candidate.serverCodecMode)) {
+    MoonlightInstance::ClLogMessage("Video codec probe candidate skipped: codec=%s, hdr=%d, format=0x%x, serverCodecMode=0x%x, serverCodecModeSupport=0x%x, reason=host does not advertise codec mode\n",
+      candidate.codec, candidate.hdr, candidate.videoFormat, candidate.serverCodecMode, serverCodecModeSupport);
+    return;
+  }
+  if (IsDuplicateVideoFormat(candidates, candidate.videoFormat)) {
+    MoonlightInstance::ClLogMessage("Video codec probe candidate skipped: codec=%s, hdr=%d, format=0x%x, reason=duplicate candidate\n",
+      candidate.codec, candidate.hdr, candidate.videoFormat);
+    return;
+  }
+
+  MoonlightInstance::ClLogMessage("Video codec probe candidate queued: codec=%s, hdr=%d, format=0x%x, serverCodecMode=0x%x\n",
+    candidate.codec, candidate.hdr, candidate.videoFormat, candidate.serverCodecMode);
+  candidates.push_back(candidate);
+}
+
+std::vector<VideoFormatCandidate> BuildVideoFormatProbeOrder(
+  const std::string& preferredCodec,
+  bool hdrMode,
+  int serverCodecModeSupport) {
+  std::vector<VideoFormatCandidate> candidates;
+
+  if (hdrMode) {
+    AddVideoFormatCandidate(candidates, preferredCodec, true, serverCodecModeSupport);
+    AddVideoFormatCandidate(candidates, "HEVC", true, serverCodecModeSupport);
+    AddVideoFormatCandidate(candidates, "AV1", true, serverCodecModeSupport);
+    AddVideoFormatCandidate(candidates, preferredCodec, false, serverCodecModeSupport);
+  } else {
+    AddVideoFormatCandidate(candidates, preferredCodec, false, serverCodecModeSupport);
+  }
+
+  AddVideoFormatCandidate(candidates, "AV1", false, serverCodecModeSupport);
+  AddVideoFormatCandidate(candidates, "HEVC", false, serverCodecModeSupport);
+  AddVideoFormatCandidate(candidates, "H264", false, serverCodecModeSupport);
+
+  return candidates;
+}
+
+void AppendJsonString(std::ostringstream& json, const std::string& value) {
+  json << '"';
+  for (char ch : value) {
+    switch (ch) {
+      case '"':
+        json << "\\\"";
+        break;
+      case '\\':
+        json << "\\\\";
+        break;
+      case '\n':
+        json << "\\n";
+        break;
+      case '\r':
+        json << "\\r";
+        break;
+      case '\t':
+        json << "\\t";
+        break;
+      default:
+        json << ch;
+        break;
+    }
+  }
+  json << '"';
+}
+
+bool IsMimeTypeDisabled(const std::string& disabledMimeTypes, const char* mimeType) {
+  if (disabledMimeTypes.empty() || mimeType == nullptr || mimeType[0] == '\0') {
+    return false;
+  }
+
+  std::string disabledList = "\n";
+  disabledList += disabledMimeTypes;
+  disabledList += "\n";
+
+  std::string needle = "\n";
+  needle += mimeType;
+  needle += "\n";
+
+  return disabledList.find(needle) != std::string::npos;
+}
+
+int CountDisabledMimeTypes(const std::string& disabledMimeTypes) {
+  if (disabledMimeTypes.empty()) {
+    return 0;
+  }
+
+  int count = 1;
+  for (char ch : disabledMimeTypes) {
+    if (ch == '\n') {
+      count++;
+    }
+  }
+  return count;
 }
 
 }
@@ -183,34 +432,25 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   ClLogMessage("Video: source closed, adding track\n");
 
   {
-    const char *mimetype = "video/mp4"; // MIME-type: Video MP4 Container
-    if (videoFormat & VIDEO_FORMAT_H264) {
-      const H264ProfileSelection profile = SelectH264Profile(width, height, redrawRate);
-      mimetype = profile.mimeType;
-      ClLogMessage("Video codec profile selected: %s\n", profile.label);
-    } else if (videoFormat & VIDEO_FORMAT_H265) {
-      mimetype = "video/mp4; codecs=\"hev1.1.6.L153.B0\""; // Video Codec: HEVC Main Level Profile 5.1
-      /* NOTE: Depending on the capabilities of the TV, it may support higher-level codec profiles, such as:
-      5.2 (hev1.1.6.L156.B0); */
-      ClLogMessage("Video codec profile selected: HEVC Main Level Profile 5.1\n");
-    } else if (videoFormat & VIDEO_FORMAT_H265_MAIN10) {
-      mimetype = "video/mp4; codecs=\"hev1.2.4.L153.B0\""; // Video Codec: HEVC Main10 Level Profile 5.1
-      /* NOTE: Depending on the capabilities of the TV, it may support higher-level codec profiles, such as:
-      5.2 (hev1.2.4.L156.B0); */
-      ClLogMessage("Video codec profile selected: HEVC Main10 Level Profile 5.1\n");
-    } else if (videoFormat & VIDEO_FORMAT_AV1_MAIN8) {
-      mimetype = "video/mp4; codecs=\"av01.0.13M.08\""; // Video Codec: AV1 Main Level Profile 5.1
-      /* NOTE: Depending on the capabilities of the TV, it may support higher-level codec profiles, such as:
-      5.2 (av01.0.14M.08); */
-      ClLogMessage("Video codec profile selected: AV1 Main Level Profile 5.1\n");
-    } else if (videoFormat & VIDEO_FORMAT_AV1_MAIN10) {
-      mimetype = "video/mp4; codecs=\"av01.0.13M.10\""; // Video Codec: AV1 Main10 Level Profile 5.1
-      /* NOTE: Depending on the capabilities of the TV, it may support higher-level codec profiles, such as:
-      5.2 (av01.0.14M.10); */
-      ClLogMessage("Video codec profile selected: AV1 Main10 Level Profile 5.1\n");
-    } else {
+    VideoProfileSelection profile = SelectVideoProfile(videoFormat, width, height, redrawRate);
+    const char* mimetype = profile.mimeType;
+    const char* profileLabel = profile.label;
+
+    if (!mimetype) {
       ClLogMessage("Failed to select video codec profile (videoFormat=0x%x)\n", videoFormat);
       return -1;
+    }
+
+    if (g_Instance->m_ProbedVideoFormat == videoFormat &&
+        g_Instance->m_ProbedVideoWidth == width &&
+        g_Instance->m_ProbedVideoHeight == height &&
+        g_Instance->m_ProbedVideoFps == redrawRate &&
+        !g_Instance->m_ProbedVideoMimeType.empty()) {
+      mimetype = g_Instance->m_ProbedVideoMimeType.c_str();
+      profileLabel = g_Instance->m_ProbedVideoProfileLabel.c_str();
+      ClLogMessage("Video codec profile selected from probe: %s\n", profileLabel);
+    } else {
+      ClLogMessage("Video codec profile selected: %s\n", profileLabel);
     }
 
     ClLogMessage("Using mimeType %s\n", mimetype);
@@ -794,6 +1034,227 @@ bool MoonlightInstance::WaitFor(std::condition_variable* variable, const char* w
     waitName, m_StreamAttemptId.load(), EmssReadyStateName(m_EmssReadyState),
     m_VideoStarted.load(), static_cast<unsigned int>(m_VideoSessionId.load()));
   return true;
+}
+
+bool MoonlightInstance::ProbeVideoTrack(const char* mimeType, int width, int height, int redrawRate) {
+  const uint64_t probeStartMs = LiGetMillis();
+
+  if (GetLifecycle() != StreamLifecycle::Idle) {
+    ClLogMessage("Video codec probe skipped because lifecycle is %s\n", GetLifecycleName());
+    return false;
+  }
+
+  if (m_Source) {
+    m_MediaElement.SetSrc(nullptr);
+    m_VideoTrack = samsung::wasm::ElementaryMediaTrack();
+    m_Source.reset();
+  }
+
+  {
+    std::unique_lock<std::mutex> lock(m_Mutex);
+    m_EmssReadyState = EmssReadyState::kDetached;
+    m_VideoStarted = false;
+    m_VideoSessionId.store(0);
+  }
+
+  ClLogMessage("Video codec probe track setup started: mimeType=%s, width=%d, height=%d, fps=%d\n",
+    mimeType, width, height, redrawRate);
+
+  auto probeSource = std::make_unique<samsung::wasm::ElementaryMediaStreamSource>(
+    samsung::wasm::ElementaryMediaStreamSource::LatencyMode::kLow,
+    samsung::wasm::ElementaryMediaStreamSource::RenderingMode::kMediaElement
+  );
+  probeSource->SetListener(&m_SourceListener);
+
+  m_MediaElement.SetSrc(probeSource.get());
+  if (!WaitFor(&m_EmssStateChanged, "codec probe source closed", 750, [this] {
+    return m_EmssReadyState == EmssReadyState::kClosed;
+  })) {
+    m_MediaElement.SetSrc(nullptr);
+    ClLogMessage("Video codec probe track setup failed before AddTrack: mimeType=%s, elapsedMs=%llu\n",
+      mimeType, (unsigned long long)(LiGetMillis() - probeStartMs));
+    return false;
+  }
+
+  auto addTrackResult = probeSource->AddTrack(
+    samsung::wasm::ElementaryVideoTrackConfig {
+      mimeType,
+      {},
+      samsung::wasm::DecodingMode::kHardware,
+      static_cast<uint32_t>(width),
+      static_cast<uint32_t>(height),
+      static_cast<uint32_t>(redrawRate),
+      1,
+    }
+  );
+  const bool supported = static_cast<bool>(addTrackResult);
+  ClLogMessage("Video codec probe AddTrack result: mimeType=%s, supported=%d, elapsedMs=%llu\n",
+    mimeType, supported, (unsigned long long)(LiGetMillis() - probeStartMs));
+
+  m_MediaElement.SetSrc(nullptr);
+  {
+    std::unique_lock<std::mutex> lock(m_Mutex);
+    m_EmssReadyState = EmssReadyState::kDetached;
+    m_VideoStarted = false;
+    m_VideoSessionId.store(0);
+  }
+
+  return supported;
+}
+
+std::string MoonlightInstance::ProbeVideoCodecSupport(
+  std::string width,
+  std::string height,
+  std::string fps,
+  bool hdrMode,
+  int serverCodecModeSupport,
+  std::string preferredCodec,
+  std::string disabledMimeTypes) {
+  const uint64_t probeStartMs = LiGetMillis();
+  int parsedWidth = 0;
+  int parsedHeight = 0;
+  int parsedFps = 0;
+
+  m_ProbedVideoFormat = 0;
+  m_ProbedVideoWidth = 0;
+  m_ProbedVideoHeight = 0;
+  m_ProbedVideoFps = 0;
+  m_ProbedVideoMimeType.clear();
+  m_ProbedVideoProfileLabel.clear();
+
+  try {
+    parsedWidth = std::stoi(width);
+    parsedHeight = std::stoi(height);
+    parsedFps = std::stoi(fps);
+  } catch (const std::exception& e) {
+    std::ostringstream errorJson;
+    errorJson << "{\"error\":\"invalid dimensions\",\"message\":";
+    AppendJsonString(errorJson, e.what());
+    errorJson << "}";
+    return errorJson.str();
+  }
+
+  const int disabledMimeTypeCount = CountDisabledMimeTypes(disabledMimeTypes);
+  ClLogMessage("Video codec probe started: preferredCodec=%s, hdrMode=%d, width=%d, height=%d, fps=%d, serverCodecModeSupport=0x%x, disabledMimeTypes=%d\n",
+    preferredCodec.c_str(), hdrMode, parsedWidth, parsedHeight, parsedFps, serverCodecModeSupport, disabledMimeTypeCount);
+
+  std::vector<VideoFormatCandidate> formats = BuildVideoFormatProbeOrder(preferredCodec, hdrMode, serverCodecModeSupport);
+  ClLogMessage("Video codec probe format queue prepared: candidateFormats=%u\n",
+    static_cast<unsigned int>(formats.size()));
+
+  std::ostringstream candidatesJson;
+  bool wroteCandidate = false;
+  bool selected = false;
+  VideoFormatCandidate selectedFormat = {};
+  VideoProfileSelection selectedProfile = {};
+  int attemptedProfiles = 0;
+  int skippedProfiles = 0;
+  int formatIndex = 0;
+  auto appendCandidateJson = [&](const VideoFormatCandidate& format, const VideoProfileSelection& profile, int currentFormatIndex, int currentProfileIndex, bool supported, bool skipped, const char* skipReason) {
+    if (wroteCandidate) {
+      candidatesJson << ",";
+    }
+    candidatesJson << "{";
+    candidatesJson << "\"codec\":";
+    AppendJsonString(candidatesJson, format.codec);
+    candidatesJson << ",\"hdr\":" << (format.hdr ? "true" : "false");
+    candidatesJson << ",\"videoFormat\":" << format.videoFormat;
+    candidatesJson << ",\"formatIndex\":" << currentFormatIndex;
+    candidatesJson << ",\"profileIndex\":" << currentProfileIndex;
+    candidatesJson << ",\"profile\":";
+    AppendJsonString(candidatesJson, profile.label);
+    candidatesJson << ",\"mimeType\":";
+    AppendJsonString(candidatesJson, profile.mimeType);
+    candidatesJson << ",\"supported\":" << (supported ? "true" : "false");
+    candidatesJson << ",\"skipped\":" << (skipped ? "true" : "false");
+    candidatesJson << ",\"skipReason\":";
+    AppendJsonString(candidatesJson, skipReason ? skipReason : "");
+    candidatesJson << "}";
+    wroteCandidate = true;
+  };
+
+  for (const VideoFormatCandidate& format : formats) {
+    std::vector<VideoProfileSelection> profiles = GetVideoProfileCandidates(format.videoFormat, parsedWidth, parsedHeight, parsedFps);
+    ClLogMessage("Video codec probe format started: index=%d, codec=%s, hdr=%d, format=0x%x, profileCandidates=%u\n",
+      formatIndex, format.codec, format.hdr, format.videoFormat, static_cast<unsigned int>(profiles.size()));
+
+    int profileIndex = 0;
+    for (const VideoProfileSelection& profile : profiles) {
+      if (IsMimeTypeDisabled(disabledMimeTypes, profile.mimeType)) {
+        skippedProfiles++;
+        ClLogMessage("Video codec probe candidate skipped: formatIndex=%d, profileIndex=%d, codec=%s, hdr=%d, format=0x%x, profile=%s, mimeType=%s, reason=disabled by user\n",
+          formatIndex, profileIndex, format.codec, format.hdr, format.videoFormat, profile.label, profile.mimeType);
+        appendCandidateJson(format, profile, formatIndex, profileIndex, false, true, "disabledByUser");
+        profileIndex++;
+        continue;
+      }
+
+      attemptedProfiles++;
+      const bool supported = ProbeVideoTrack(profile.mimeType, parsedWidth, parsedHeight, parsedFps);
+      ClLogMessage("Video codec probe candidate result: formatIndex=%d, profileIndex=%d, codec=%s, hdr=%d, format=0x%x, profile=%s, mimeType=%s, supported=%d\n",
+        formatIndex, profileIndex, format.codec, format.hdr, format.videoFormat, profile.label, profile.mimeType, supported);
+
+      appendCandidateJson(format, profile, formatIndex, profileIndex, supported, false, "");
+
+      if (supported) {
+        selected = true;
+        selectedFormat = format;
+        selectedProfile = profile;
+        break;
+      }
+
+      profileIndex++;
+    }
+
+    if (selected) {
+      break;
+    }
+
+    formatIndex++;
+  }
+
+  if (selected) {
+    m_ProbedVideoFormat = selectedFormat.videoFormat;
+    m_ProbedVideoWidth = parsedWidth;
+    m_ProbedVideoHeight = parsedHeight;
+    m_ProbedVideoFps = parsedFps;
+    m_ProbedVideoMimeType = selectedProfile.mimeType;
+    m_ProbedVideoProfileLabel = selectedProfile.label;
+
+    ClLogMessage("Video codec probe selected: codec=%s, hdr=%d, format=0x%x, profile=%s, mimeType=%s\n",
+      selectedFormat.codec, selectedFormat.hdr, selectedFormat.videoFormat, selectedProfile.label, selectedProfile.mimeType);
+  } else {
+    ClLogMessage("Video codec probe found no supported candidates\n");
+  }
+
+  ClLogMessage("Video codec probe complete: selected=%s, attemptedProfiles=%d, skippedProfiles=%d, disabledMimeTypes=%d, elapsedMs=%llu\n",
+    BoolText(selected), attemptedProfiles, skippedProfiles, disabledMimeTypeCount, (unsigned long long)(LiGetMillis() - probeStartMs));
+
+  std::ostringstream resultJson;
+  resultJson << "{";
+  resultJson << "\"requestedCodec\":";
+  AppendJsonString(resultJson, preferredCodec);
+  resultJson << ",\"requestedHdrMode\":" << (hdrMode ? "true" : "false");
+  resultJson << ",\"width\":" << parsedWidth;
+  resultJson << ",\"height\":" << parsedHeight;
+  resultJson << ",\"fps\":" << parsedFps;
+  resultJson << ",\"selectedCodec\":";
+  AppendJsonString(resultJson, selected ? selectedFormat.codec : "");
+  resultJson << ",\"selectedHdrMode\":" << (selected && selectedFormat.hdr ? "true" : "false");
+  resultJson << ",\"selectedVideoFormat\":" << (selected ? selectedFormat.videoFormat : 0);
+  resultJson << ",\"selectedProfile\":";
+  AppendJsonString(resultJson, selected ? selectedProfile.label : "");
+  resultJson << ",\"selectedMimeType\":";
+  AppendJsonString(resultJson, selected ? selectedProfile.mimeType : "");
+  resultJson << ",\"attemptedProfiles\":" << attemptedProfiles;
+  resultJson << ",\"skippedProfiles\":" << skippedProfiles;
+  resultJson << ",\"disabledMimeTypes\":" << disabledMimeTypeCount;
+  resultJson << ",\"elapsedMs\":" << (LiGetMillis() - probeStartMs);
+  resultJson << ",\"fallback\":" << (selected && (preferredCodec != selectedFormat.codec || hdrMode != selectedFormat.hdr) ? "true" : "false");
+  resultJson << ",\"candidates\":[" << candidatesJson.str() << "]";
+  resultJson << "}";
+
+  return resultJson.str();
 }
 
 DECODER_RENDERER_CALLBACKS MoonlightInstance::s_DrCallbacks = {

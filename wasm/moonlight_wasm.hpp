@@ -104,6 +104,7 @@ class MoonlightInstance {
     bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
     std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
     bool disableWarnings, bool performanceStats);
+  std::string ProbeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
   MessageResult StopStream();
 
   void STUN(int callbackId);
@@ -203,6 +204,7 @@ class MoonlightInstance {
   };
 
   bool WaitFor(std::condition_variable* variable, const char* waitName, uint32_t timeoutMs, std::function<bool()> condition);
+  bool ProbeVideoTrack(const char* mimeType, int width, int height, int redrawRate);
   bool TrySetLifecycle(StreamLifecycle expected, StreamLifecycle desired, const char* reason);
   void SetLifecycle(StreamLifecycle lifecycle, const char* reason);
   StreamLifecycle GetLifecycle() const;
@@ -287,6 +289,12 @@ class MoonlightInstance {
   SourceListener m_SourceListener;
   VideoTrackListener m_VideoTrackListener;
   samsung::wasm::ElementaryMediaTrack m_VideoTrack;
+  int m_ProbedVideoFormat;
+  int m_ProbedVideoWidth;
+  int m_ProbedVideoHeight;
+  int m_ProbedVideoFps;
+  std::string m_ProbedVideoMimeType;
+  std::string m_ProbedVideoProfileLabel;
 };
 
 extern MoonlightInstance* g_Instance;
@@ -306,6 +314,7 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats);
+std::string probeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
 MessageResult stopStream();
 
 void toggleStats();
