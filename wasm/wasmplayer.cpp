@@ -248,13 +248,18 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
     return -1;
   }
 
-  ClLogMessage("Video: source ready, calling Play\n");
+  const uint32_t playAttemptId = g_Instance->GetStreamAttemptId();
+  ClLogMessage("Video: source ready, calling Play (attemptId=%u, videoStarted=%d)\n",
+    playAttemptId, g_Instance->m_VideoStarted.load());
   auto playState = std::make_shared<AsyncOperationWait>();
-  g_Instance->m_MediaElement.Play([playState](EmssOperationResult err) {
+  g_Instance->m_MediaElement.Play([playState, playAttemptId](EmssOperationResult err) {
     if (err != EmssOperationResult::kSuccess) {
-      ClLogMessage("Video: Play error result=%d\n", static_cast<int>(err));
+      ClLogMessage("Video: Play callback returned error: result=%d, callbackAttemptId=%u, currentAttemptId=%u, videoStarted=%d\n",
+        static_cast<int>(err), playAttemptId, g_Instance->GetStreamAttemptId(),
+        g_Instance->m_VideoStarted.load());
     } else {
-      ClLogMessage("Video: Play success\n");
+      ClLogMessage("Video: Play callback succeeded: callbackAttemptId=%u, currentAttemptId=%u, videoStarted=%d\n",
+        playAttemptId, g_Instance->GetStreamAttemptId(), g_Instance->m_VideoStarted.load());
     }
     std::unique_lock<std::mutex> lock(playState->mutex);
     playState->done = true;
@@ -264,20 +269,21 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   });
   {
     std::unique_lock<std::mutex> lock(playState->mutex);
-    if (!playState->condition.wait_for(lock, std::chrono::milliseconds(kEmssPlayTimeoutMs), [&playState] {
+    if (g_Instance->m_VideoStarted.load()) {
+      ClLogMessage("Video: track already open after Play request; continuing without waiting for Play callback (attemptId=%u, emssState=%s, sessionId=%u)\n",
+        g_Instance->GetStreamAttemptId(), MoonlightInstance::EmssReadyStateName(g_Instance->m_EmssReadyState),
+        static_cast<unsigned int>(g_Instance->m_VideoSessionId.load()));
+    } else if (!playState->condition.wait_for(lock, std::chrono::milliseconds(kEmssPlayTimeoutMs), [&playState] {
       return playState->done;
     })) {
-      ClLogMessage("Video: Play callback timed out after %u ms (attemptId=%u, emssState=%s, videoStarted=%d, sessionId=%u)\n",
+      ClLogMessage("Video: Play callback timed out after %u ms; continuing to video track wait (attemptId=%u, emssState=%s, videoStarted=%d, sessionId=%u)\n",
         kEmssPlayTimeoutMs, g_Instance->GetStreamAttemptId(),
         MoonlightInstance::EmssReadyStateName(g_Instance->m_EmssReadyState),
         g_Instance->m_VideoStarted.load(),
         static_cast<unsigned int>(g_Instance->m_VideoSessionId.load()));
-      return -1;
-    }
-    if (!playState->success) {
-      ClLogMessage("Video: Play failed before track open: result=%d, attemptId=%u\n",
+    } else if (!playState->success) {
+      ClLogMessage("Video: Play callback failed before track open; continuing to video track wait: result=%d, attemptId=%u\n",
         playState->result, g_Instance->GetStreamAttemptId());
-      return -1;
     }
   }
 
