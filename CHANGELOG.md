@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.13.0
+
+### Added
+- Added persistent file logging and on-device diagnostic log export
+- Added a Tizen emulator debug bridge and helper scripts for local debugging
+- Added Tizen web project metadata for easier VS Code Tizen extension workflows
+- Added runtime video codec probing with codec selection exposed in Advanced Settings
+
+### Changed
+- Improved Web Audio startup behavior to reduce audio delay and improve short sound playback
+- Incorporated ruanformigoni's WebAudio fixes in https://github.com/ruanformigoni/moonlight-tizen to resolve audio crackling issues.
+- Improved host and game launch flows to reduce unnecessary input delays and better handle failures
+- Improved pairing, navigation, quit, and error dialog UX for TV remote usage
+- Adjusted H.264 profile selection based on stream resolution and codec capabilities
+- Reorganized widget resources under the `wasm` project directory for easier local packaging
+- Updated fork-owned release, update, and bot workflow references
+
+### Fixed
+- Fixed codec profile selection during stream setup
+- Fixed video startup reliability when probing available playback formats
+- Fixed cases where games could fail to open from the app list
+- Fixed pairing flow edge cases that could prevent successful host setup
+
 ## v1.12.1
 
 ### Changed
