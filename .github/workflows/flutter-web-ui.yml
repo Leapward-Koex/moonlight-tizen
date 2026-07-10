@@ -63,4 +63,3 @@ jobs:
           if-no-files-found: error
       - name: Build browser-fake development UI
         run: flutter build web --debug -t lib/main_fake.dart --no-wasm-dry-run
-

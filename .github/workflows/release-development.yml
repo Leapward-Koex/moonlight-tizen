@@ -105,7 +105,7 @@ jobs:
         working-directory: flutter_ui
         run: >-
           flutter build web --release -t lib/main.dart --csp
-          --base-href ./ --no-web-resources-cdn --no-wasm-dry-run
+          --base-href / --no-web-resources-cdn --no-wasm-dry-run
           --pwa-strategy=none
       - name: Verify production diagnostic assets
         working-directory: flutter_ui
