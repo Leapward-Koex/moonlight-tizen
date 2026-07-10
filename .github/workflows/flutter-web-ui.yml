@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.6 seconds
+Output:
 name: Flutter Web UI
 
 on:
@@ -40,7 +43,7 @@ jobs:
       - run: flutter test
       - run: >-
           flutter build web --release -t lib/main.dart --csp
-          --base-href ./ --no-web-resources-cdn --no-wasm-dry-run
+          --base-href / --no-web-resources-cdn --no-wasm-dry-run
           --pwa-strategy=none
       - name: Verify native bridge contract
         working-directory: .
@@ -60,3 +63,4 @@ jobs:
           if-no-files-found: error
       - name: Build browser-fake development UI
         run: flutter build web --debug -t lib/main_fake.dart --no-wasm-dry-run
+
