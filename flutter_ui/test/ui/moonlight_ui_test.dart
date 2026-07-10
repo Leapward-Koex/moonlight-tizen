@@ -118,6 +118,10 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     expect(activated, 'second');
+
+    activated = '';
+    expect(TvFocusable.activate(FocusManager.instance.primaryFocus), isTrue);
+    expect(activated, 'second');
   });
 
   testWidgets('narrow settings open options on a separate page', (
@@ -162,5 +166,75 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Video resolution'), findsOneWidget);
     expect(find.bySemanticsLabel('Settings categories'), findsOneWidget);
+  });
+
+  testWidgets('wide settings give the selected category remote focus', (
+    tester,
+  ) async {
+    setViewport(tester, const Size(1600, 900));
+    String? selected = 'basic';
+    await tester.pumpWidget(
+      themed(
+        StatefulBuilder(
+          builder: (context, setState) => SettingsScreen(
+            categories: [
+              SettingsCategoryViewModel(
+                id: 'basic',
+                label: 'Basic Settings',
+                icon: Icons.tune,
+                options: [
+                  MoonlightSettingOption(
+                    title: 'Video resolution',
+                    control: TvActionButton(
+                      label: '1280 × 720',
+                      onPressed: () {},
+                    ),
+                  ),
+                ],
+              ),
+              SettingsCategoryViewModel(
+                id: 'input',
+                label: 'Input Settings',
+                icon: Icons.gamepad,
+                options: [
+                  MoonlightSettingOption(
+                    title: 'Rumble',
+                    control: TvActionButton(label: 'Enabled', onPressed: () {}),
+                  ),
+                ],
+              ),
+            ],
+            selectedCategoryId: selected,
+            onCategorySelected: (value) {
+              setState(() => selected = value);
+            },
+            onBack: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Basic Settings');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Input Settings');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(selected, 'input');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Basic Settings');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(selected, 'basic');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, '1280 × 720');
   });
 }

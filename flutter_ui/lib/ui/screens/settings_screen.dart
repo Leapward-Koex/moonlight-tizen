@@ -86,20 +86,22 @@ class SettingsScreen extends StatelessWidget {
           }
 
           final selected = _selectedCategory!;
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(
-                width: constraints.maxWidth * .3,
-                child: SettingsCategoryList(
-                  categories: categories,
-                  selectedCategoryId: selected.id,
-                  onSelected: (category) => onCategorySelected(category.id),
+          return TvFocusTraversalGroup(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  width: constraints.maxWidth * .3,
+                  child: SettingsCategoryList(
+                    categories: categories,
+                    selectedCategoryId: selected.id,
+                    onSelected: (category) => onCategorySelected(category.id),
+                  ),
                 ),
-              ),
-              const VerticalDivider(width: 4, thickness: 4),
-              Expanded(child: SettingsOptionsPane(category: selected)),
-            ],
+                const VerticalDivider(width: 4, thickness: 4),
+                Expanded(child: SettingsOptionsPane(category: selected)),
+              ],
+            ),
           );
         },
       ),
@@ -121,23 +123,26 @@ class SettingsCategoryList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TvFocusTraversalGroup(
-      child: ListView.separated(
-        key: const PageStorageKey('settings-categories'),
-        padding: const EdgeInsets.symmetric(horizontal: 42, vertical: 28),
-        itemCount: categories.length,
-        separatorBuilder: (context, index) => const SizedBox(height: 16),
-        itemBuilder: (context, index) {
-          final category = categories[index];
-          return SettingsCategoryTile(
-            key: ValueKey('settings-category-${category.id}'),
-            category: category,
-            selected: category.id == selectedCategoryId,
-            autofocus: selectedCategoryId == null ? index == 0 : false,
-            onPressed: () => onSelected(category),
-          );
-        },
-      ),
+    return ListView.separated(
+      key: const PageStorageKey('settings-categories'),
+      padding: const EdgeInsets.symmetric(horizontal: 42, vertical: 28),
+      itemCount: categories.length,
+      separatorBuilder: (context, index) => const SizedBox(height: 16),
+      itemBuilder: (context, index) {
+        final category = categories[index];
+        return SettingsCategoryTile(
+          key: ValueKey('settings-category-${category.id}'),
+          category: category,
+          selected: category.id == selectedCategoryId,
+          // Settings normally opens with a selected category. Request focus
+          // for that tile so a remote user can immediately move through the
+          // category list or into its controls.
+          autofocus:
+              category.id == selectedCategoryId ||
+              (selectedCategoryId == null && index == 0),
+          onPressed: () => onSelected(category),
+        );
+      },
     );
   }
 }
@@ -209,13 +214,11 @@ class SettingsOptionsPane extends StatelessWidget {
     if (category.options.isEmpty) {
       return const Center(child: Text('No options in this category.'));
     }
-    return TvFocusTraversalGroup(
-      child: ListView.builder(
-        key: PageStorageKey('settings-options-${category.id}'),
-        padding: const EdgeInsets.symmetric(horizontal: 34, vertical: 12),
-        itemCount: category.options.length,
-        itemBuilder: (context, index) => category.options[index],
-      ),
+    return ListView.builder(
+      key: PageStorageKey('settings-options-${category.id}'),
+      padding: const EdgeInsets.symmetric(horizontal: 34, vertical: 12),
+      itemCount: category.options.length,
+      itemBuilder: (context, index) => category.options[index],
     );
   }
 }

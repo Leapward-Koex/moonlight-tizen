@@ -31,6 +31,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_riverpod: ^3.3.2
+  go_router: ^14.8.1
   riverpod_annotation: ^4.0.3
   web: ^1.1.1
   xml: ^6.6.1

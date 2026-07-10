@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const workspace = path.resolve(testDirectory, '..', '..', '..');
 const bridgePath = path.join(workspace, 'flutter_ui', 'web', 'native', 'moonlight_native.js');
+let browserKeyDownListener;
 
 // Every native helper must be safe to evaluate in an ordinary browser where
 // neither `tizen` nor Samsung's `webapis` globals exist.
@@ -21,7 +22,9 @@ const browserContext = vm.createContext({
   screen: { width: 1280, height: 720 },
   location: { reload() {} },
   document: {
-    addEventListener() {},
+    addEventListener(type, listener) {
+      if (type === 'keydown') browserKeyDownListener = listener;
+    },
     getElementById() { return null; }
   },
   requestAnimationFrame() { return 1; },
@@ -39,6 +42,38 @@ assert.equal(browserContext.MoonlightTizenPlatform.isTizen(), false);
 assert.equal(browserContext.MoonlightTizenPlatform.getPlatformInfo().supportsNativeStreaming, false);
 assert.equal(browserContext.MoonlightAudio.unlock(), false);
 assert.equal(browserContext.MoonlightInput.setMode('ui'), 'ui');
+assert.equal(typeof browserKeyDownListener, 'function');
+
+const browserInputEvents = [];
+browserContext.MoonlightInput.setSink((event) => browserInputEvents.push(event));
+function browserKeyEvent(key, keyCode) {
+  return {
+    key,
+    keyCode,
+    which: keyCode,
+    repeat: false,
+    preventDefaultCalled: false,
+    stopImmediatePropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopImmediatePropagation() { this.stopImmediatePropagationCalled = true; }
+  };
+}
+for (const [key, keyCode] of [
+  ['ArrowUp', 38],
+  ['ArrowDown', 40],
+  ['ArrowLeft', 37],
+  ['ArrowRight', 39],
+  ['Enter', 13]
+]) {
+  const event = browserKeyEvent(key, keyCode);
+  browserKeyDownListener(event);
+  assert.equal(event.preventDefaultCalled, false, `${key} must reach Flutter focus navigation`);
+}
+assert.equal(browserInputEvents.length, 0, 'remote navigation keys must not bypass Flutter focus');
+const backEvent = browserKeyEvent('XF86Back', 10009);
+browserKeyDownListener(backEvent);
+assert.equal(backEvent.preventDefaultCalled, true, 'Tizen Back remains a normalized action');
+assert.equal(browserInputEvents.at(-1).action, 'back');
 
 class FakeElement {
   constructor(id = '') {

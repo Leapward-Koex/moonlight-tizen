@@ -37,6 +37,17 @@ class TvFocusable extends StatefulWidget {
   final Color focusColor;
   final BorderRadius borderRadius;
 
+  static final Map<FocusNode, VoidCallback> _activationCallbacks = {};
+
+  /// Invokes the control currently represented by [node]. This is used by
+  /// normalized gamepad input, which does not arrive as a browser key event.
+  static bool activate(FocusNode? node) {
+    final callback = node == null ? null : _activationCallbacks[node];
+    if (callback == null) return false;
+    callback();
+    return true;
+  }
+
   @override
   State<TvFocusable> createState() => _TvFocusableState();
 }
@@ -50,15 +61,18 @@ class _TvFocusableState extends State<TvFocusable> {
   void initState() {
     super.initState();
     _setFocusNode(widget.focusNode);
+    _syncActivationCallback();
   }
 
   @override
   void didUpdateWidget(TvFocusable oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.focusNode != widget.focusNode) {
+      _removeActivationCallback();
       if (_ownsFocusNode) _focusNode.dispose();
       _setFocusNode(widget.focusNode);
     }
+    _syncActivationCallback();
   }
 
   void _setFocusNode(FocusNode? node) {
@@ -66,8 +80,21 @@ class _TvFocusableState extends State<TvFocusable> {
     _focusNode = node ?? FocusNode(debugLabel: widget.semanticLabel);
   }
 
+  void _syncActivationCallback() {
+    if (widget.enabled && widget.onActivate != null) {
+      TvFocusable._activationCallbacks[_focusNode] = widget.onActivate!;
+    } else {
+      _removeActivationCallback();
+    }
+  }
+
+  void _removeActivationCallback() {
+    TvFocusable._activationCallbacks.remove(_focusNode);
+  }
+
   @override
   void dispose() {
+    _removeActivationCallback();
     if (_ownsFocusNode) _focusNode.dispose();
     super.dispose();
   }

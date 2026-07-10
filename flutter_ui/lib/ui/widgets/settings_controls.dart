@@ -181,13 +181,15 @@ class TvChoiceControl<T> extends StatelessWidget {
     return null;
   }
 
-  void _step(int delta) {
+  bool _step(int delta) {
     final enabledChoices = choices.where((choice) => choice.enabled).toList();
-    if (enabledChoices.isEmpty) return;
+    if (enabledChoices.isEmpty) return false;
     var index = enabledChoices.indexWhere((choice) => choice.value == value);
     if (index < 0) index = 0;
     final next = (index + delta).clamp(0, enabledChoices.length - 1);
-    if (next != index) onChanged(enabledChoices[next].value);
+    if (next == index) return false;
+    onChanged(enabledChoices[next].value);
+    return true;
   }
 
   Future<void> _showChoices(BuildContext context) async {
@@ -257,12 +259,10 @@ class TvChoiceControl<T> extends StatelessWidget {
         onActivate: () => _showChoices(context),
         onDirection: (direction) {
           if (direction == TraversalDirection.left) {
-            _step(-1);
-            return true;
+            return _step(-1);
           }
           if (direction == TraversalDirection.right) {
-            _step(1);
-            return true;
+            return _step(1);
           }
           return false;
         },
@@ -314,8 +314,11 @@ class TvSliderControl extends StatelessWidget {
   final String Function(double value)? valueLabel;
   final String? semanticLabel;
 
-  void _change(double next) {
-    onChanged(next.clamp(min, max));
+  bool _change(double next) {
+    final clamped = next.clamp(min, max);
+    if (clamped == value) return false;
+    onChanged(clamped);
+    return true;
   }
 
   @override
@@ -329,12 +332,10 @@ class TvSliderControl extends StatelessWidget {
         onActivate: () {},
         onDirection: (direction) {
           if (direction == TraversalDirection.left) {
-            _change(value - step);
-            return true;
+            return _change(value - step);
           }
           if (direction == TraversalDirection.right) {
-            _change(value + step);
-            return true;
+            return _change(value + step);
           }
           return false;
         },

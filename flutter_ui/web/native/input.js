@@ -142,11 +142,23 @@
       return;
     }
 
-    // Let Flutter's own keyboard/focus system handle navigation until Dart
-    // explicitly installs the normalized input sink.
+    // Flutter owns physical remote/keyboard navigation in UI mode. In
+    // particular, it needs the original Arrow and Enter key events for focus
+    // traversal and activation. The normalized sink is still used for
+    // gamepad actions and Tizen-only actions that Flutter cannot reliably
+    // receive as keyboard events (for example Back).
     if (typeof inputSink !== 'function') {
       return;
     }
+
+    if (action === 'up' ||
+        action === 'down' ||
+        action === 'left' ||
+        action === 'right' ||
+        action === 'accept') {
+      return;
+    }
+
     event.preventDefault();
     emitAction(action, event.repeat ? 'repeat' : 'pressed', 'keyboard', { keyCode: keyCode });
   }

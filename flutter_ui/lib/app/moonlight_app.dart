@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../data/host_workflows.dart';
 import '../domain/domain.dart';
@@ -22,7 +23,7 @@ typedef DiagnosticQrSvg = String Function(String value);
 typedef ProbeCodecs =
     Future<Map<String, Object?>> Function(Map<String, Object?> request);
 
-class MoonlightFlutterApp extends StatelessWidget {
+class MoonlightFlutterApp extends StatefulWidget {
   const MoonlightFlutterApp({
     required this.startNativeStream,
     required this.stopNativeStream,
@@ -57,33 +58,76 @@ class MoonlightFlutterApp extends StatelessWidget {
   final ProbeCodecs probeCodecs;
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
+  State<MoonlightFlutterApp> createState() => _MoonlightFlutterAppState();
+}
+
+class _MoonlightFlutterAppState extends State<MoonlightFlutterApp> {
+  late final GoRouter _router = GoRouter(
+    routes: [
+      GoRoute(
+        path: '/',
+        pageBuilder: (context, state) => _page(state, _Page.hosts),
+      ),
+      GoRoute(
+        path: '/settings',
+        pageBuilder: (context, state) => _page(state, _Page.settings),
+      ),
+      GoRoute(
+        path: '/apps/:hostId',
+        pageBuilder: (context, state) =>
+            _page(state, _Page.apps, hostId: state.pathParameters['hostId']),
+      ),
+      GoRoute(
+        path: '/stream/:hostId',
+        pageBuilder: (context, state) =>
+            _page(state, _Page.stream, hostId: state.pathParameters['hostId']),
+      ),
+    ],
+  );
+
+  Page<void> _page(GoRouterState state, _Page page, {String? hostId}) =>
+      MaterialPage<void>(
+        key: state.pageKey,
+        child: _MoonlightExperience(
+          page: page,
+          hostId: hostId,
+          startNativeStream: widget.startNativeStream,
+          stopNativeStream: widget.stopNativeStream,
+          unlockAudio: widget.unlockAudio,
+          connectedGamepadMask: widget.connectedGamepadMask,
+          navigationActions: widget.navigationActions,
+          checkForUpdates: widget.checkForUpdates,
+          restartApp: widget.restartApp,
+          setDiagnosticLogLevel: widget.setDiagnosticLogLevel,
+          diagnosticStatus: widget.diagnosticStatus,
+          clearDiagnosticLogs: widget.clearDiagnosticLogs,
+          startLogExport: widget.startLogExport,
+          stopLogExport: widget.stopLogExport,
+          diagnosticQrSvg: widget.diagnosticQrSvg,
+          probeCodecs: widget.probeCodecs,
+        ),
+      );
+
+  @override
+  void dispose() {
+    _router.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => MaterialApp.router(
     title: 'Moonlight Flutter',
     debugShowCheckedModeBanner: false,
     theme: buildMoonlightTheme(),
-    home: MoonlightExperience(
-      startNativeStream: startNativeStream,
-      stopNativeStream: stopNativeStream,
-      unlockAudio: unlockAudio,
-      connectedGamepadMask: connectedGamepadMask,
-      navigationActions: navigationActions,
-      checkForUpdates: checkForUpdates,
-      restartApp: restartApp,
-      setDiagnosticLogLevel: setDiagnosticLogLevel,
-      diagnosticStatus: diagnosticStatus,
-      clearDiagnosticLogs: clearDiagnosticLogs,
-      startLogExport: startLogExport,
-      stopLogExport: stopLogExport,
-      diagnosticQrSvg: diagnosticQrSvg,
-      probeCodecs: probeCodecs,
-    ),
+    routerConfig: _router,
   );
 }
 
 enum _Page { hosts, apps, settings, stream }
 
-class MoonlightExperience extends ConsumerStatefulWidget {
-  const MoonlightExperience({
+class _MoonlightExperience extends ConsumerStatefulWidget {
+  const _MoonlightExperience({
+    required this.page,
     required this.startNativeStream,
     required this.stopNativeStream,
     required this.unlockAudio,
@@ -98,9 +142,11 @@ class MoonlightExperience extends ConsumerStatefulWidget {
     required this.stopLogExport,
     required this.diagnosticQrSvg,
     required this.probeCodecs,
-    super.key,
+    this.hostId,
   });
 
+  final _Page page;
+  final String? hostId;
   final StartNativeStream startNativeStream;
   final StopNativeStream stopNativeStream;
   final NativeAction unlockAudio;
@@ -117,13 +163,11 @@ class MoonlightExperience extends ConsumerStatefulWidget {
   final ProbeCodecs probeCodecs;
 
   @override
-  ConsumerState<MoonlightExperience> createState() =>
+  ConsumerState<_MoonlightExperience> createState() =>
       _MoonlightExperienceState();
 }
 
-class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
-  _Page _page = _Page.hosts;
-  String? _selectedHostId;
+class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
   String? _settingsCategory = 'basic';
   Timer? _pollTimer;
   Timer? _updateTimer;
@@ -175,10 +219,10 @@ class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
       final ended =
           next.phase == StreamSessionPhase.stopped ||
           next.phase == StreamSessionPhase.failed;
-      if (_page == _Page.stream && ended) {
+      if (widget.page == _Page.stream && ended) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && _page == _Page.stream) {
-            setState(() => _page = _Page.apps);
+          if (mounted && widget.page == _Page.stream) {
+            _goApps(widget.hostId);
           }
         });
       }
@@ -190,7 +234,7 @@ class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
         error: 'Moonlight could not start: $error',
         onRetry: () => ref.invalidate(bootstrapProvider),
       ),
-      data: (_) => switch (_page) {
+      data: (_) => switch (widget.page) {
         _Page.hosts => _buildHosts(),
         _Page.apps => _buildApps(),
         _Page.settings => _buildSettings(),
@@ -219,7 +263,7 @@ class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
           id: 'settings',
           label: 'Settings',
           icon: Icons.settings,
-          onPressed: () => setState(() => _page = _Page.settings),
+          onPressed: _goSettings,
         ),
         HeaderActionViewModel(
           id: 'support',
@@ -234,7 +278,7 @@ class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
   Widget _buildApps() {
     final host = _selectedHost;
     if (host == null) {
-      _page = _Page.hosts;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _goHosts());
       return _buildHosts();
     }
     final apps = ref.watch(appsProvider(host.id));
@@ -262,7 +306,7 @@ class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
               )
               .toList(growable: false) ??
           const [],
-      onBack: () => setState(() => _page = _Page.hosts),
+      onBack: _goHosts,
       onRetry: () => ref.invalidate(appsProvider(host.id)),
       onAppSelected: (viewModel) {
         final app = apps.value
@@ -292,7 +336,7 @@ class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
     categories: _settingsCategories(ref.watch(settingsProvider)),
     selectedCategoryId: _settingsCategory,
     onCategorySelected: (id) => setState(() => _settingsCategory = id),
-    onBack: () => setState(() => _page = _Page.hosts),
+    onBack: _goHosts,
     headerActions: [
       HeaderActionViewModel(
         id: 'restore',
@@ -344,8 +388,23 @@ class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
 
   SavedHost? get _selectedHost => ref
       .watch(savedHostsProvider)
-      .where((host) => host.id == _selectedHostId)
+      .where((host) => host.id == widget.hostId)
       .firstOrNull;
+
+  void _goHosts() => context.go('/');
+
+  void _goSettings() => context.go('/settings');
+
+  void _goApps(String? hostId) {
+    if (hostId == null || hostId.isEmpty) {
+      _goHosts();
+      return;
+    }
+    context.go('/apps/${Uri.encodeComponent(hostId)}');
+  }
+
+  void _goStream(String hostId) =>
+      context.go('/stream/${Uri.encodeComponent(hostId)}');
 
   Future<void> _pollHosts() async {
     if (!mounted || _polling || ref.read(streamSessionProvider).isActive) {
@@ -387,10 +446,7 @@ class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
       _pair(host);
       return;
     }
-    setState(() {
-      _selectedHostId = host.id;
-      _page = _Page.apps;
-    });
+    _goApps(host.id);
   }
 
   void _showAddHost() {
@@ -522,7 +578,7 @@ class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
             gamepadMask: widget.connectedGamepadMask(),
           );
       if (!mounted) return;
-      setState(() => _page = _Page.stream);
+      _goStream(host.id);
       await widget.startNativeStream(request);
     } catch (error, stackTrace) {
       _logger.error('ui.stream.launch_failed', error, stackTrace, {
@@ -532,7 +588,7 @@ class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
           .read(streamSessionProvider.notifier)
           .fail(MoonlightRuntimeError(code: 'stream-start', message: '$error'));
       if (mounted) {
-        setState(() => _page = _Page.apps);
+        _goApps(host.id);
         showMoonlightSnackBar(context, 'Unable to start ${app.title}: $error');
       }
     } finally {
@@ -549,7 +605,7 @@ class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
       if (mounted) showMoonlightSnackBar(context, 'Stop stream failed: $error');
     } finally {
       ref.read(appCoordinatorProvider).stopStreamOnly();
-      if (mounted) setState(() => _page = _Page.apps);
+      if (mounted) _goApps(widget.hostId);
     }
   }
 
@@ -1045,10 +1101,9 @@ class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
 
   Future<void> _probeCodecProfiles(AppSettings settings) async {
     try {
-      final status = _selectedHostId == null
+      final status = widget.hostId == null
           ? const HostStatus()
-          : ref.read(hostStatusesProvider)[_selectedHostId] ??
-                const HostStatus();
+          : ref.read(hostStatusesProvider)[widget.hostId] ?? const HostStatus();
       final current = ref.read(codecCapabilitiesProvider);
       final result = await widget.probeCodecs({
         'width': settings.resolution.width,
@@ -1331,14 +1386,37 @@ class _MoonlightExperienceState extends ConsumerState<MoonlightExperience> {
   }
 
   void _handleNavigationAction(String action) {
-    if (!mounted || action != 'back') return;
-    final navigator = Navigator.of(context);
-    if (navigator.canPop()) {
-      navigator.pop();
+    if (!mounted) return;
+    if (action == 'back') {
+      final navigator = Navigator.of(context);
+      if (navigator.canPop()) {
+        navigator.pop();
+        return;
+      }
+      if (widget.page == _Page.apps || widget.page == _Page.settings) {
+        _goHosts();
+      }
       return;
     }
-    if (_page == _Page.apps || _page == _Page.settings) {
-      setState(() => _page = _Page.hosts);
+
+    // Browser keyboard events already move Flutter focus directly. Gamepad
+    // actions arrive through the normalized native sink, so mirror those
+    // actions onto the current focus node while the app is in UI mode.
+    if (widget.page == _Page.stream) return;
+    final focus = FocusManager.instance.primaryFocus;
+    final direction = switch (action) {
+      'up' => TraversalDirection.up,
+      'down' => TraversalDirection.down,
+      'left' => TraversalDirection.left,
+      'right' => TraversalDirection.right,
+      _ => null,
+    };
+    if (direction != null) {
+      focus?.focusInDirection(direction);
+      return;
+    }
+    if (action == 'accept') {
+      TvFocusable.activate(focus);
     }
   }
 }
