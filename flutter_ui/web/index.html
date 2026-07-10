@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="-1">
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: blob: https:; media-src 'self' blob:; worker-src 'self' blob:; child-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'"
+  >
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="description" content="Moonlight game streaming for Samsung Tizen, rebuilt with Flutter.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#282c38">
+  <title>Moonlight Flutter</title>
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles/native_surface.css">
+
+  <!-- Samsung host bindings must exist before moonlight-wasm.js is loaded. -->
+  <script src="$WEBAPIS/webapis/webapis.js"></script>
+  <script defer src="native/diagnostics.js"></script>
+  <script defer src="native/debug_bridge_config.js"></script>
+  <script defer src="native/debug_bridge.js"></script>
+  <script defer src="native/audio.js"></script>
+  <script defer src="native/tizen_platform.js"></script>
+  <script defer src="native/input.js"></script>
+  <script defer src="native/moonlight_native.js"></script>
+  <script defer src="flutter_bootstrap.js"></script>
+</head>
+<body>
+  <main id="native-surface" aria-label="Moonlight streaming surface">
+    <!--
+      Keep this element in the light DOM for the whole application lifetime.
+      Emscripten, Samsung media bindings, pointer lock, and native input all
+      resolve this exact ID.
+    -->
+    <video id="wasm_module" autoplay tabindex="-1" playsinline aria-label="Moonlight video stream"></video>
+
+    <section id="stream-overlays" aria-live="polite" aria-atomic="false">
+      <div id="stream-loading" class="stream-overlay stream-loading" hidden>
+        <div class="stream-spinner" aria-hidden="true"></div>
+        <p id="stream-progress">Starting stream…</p>
+      </div>
+      <div id="stream-warning" class="stream-overlay stream-warning" role="status" hidden></div>
+      <pre id="stream-statistics" class="stream-overlay stream-statistics" hidden></pre>
+      <div id="stream-transient" class="stream-overlay stream-transient" role="status" hidden></div>
+      <div id="stream-fatal" class="stream-overlay stream-fatal" role="alertdialog" aria-modal="true" hidden>
+        <h2>Streaming error</h2>
+        <p id="stream-fatal-message"></p>
+      </div>
+    </section>
+  </main>
+
+  <div id="flutter-host" aria-label="Moonlight application"></div>
+
+  <noscript>Moonlight Flutter requires JavaScript.</noscript>
+</body>
+</html>

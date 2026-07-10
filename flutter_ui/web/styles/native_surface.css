@@ -1,0 +1,170 @@
+:root {
+  color-scheme: dark;
+  background: #282c38;
+  font-family: Roboto, Arial, sans-serif;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #282c38;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+}
+
+#flutter-host,
+#native-surface,
+#wasm_module,
+#stream-overlays {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#flutter-host {
+  z-index: 10;
+  overflow: hidden;
+  background: #282c38;
+}
+
+#native-surface {
+  z-index: 20;
+  visibility: hidden;
+  pointer-events: none;
+  background: #000;
+}
+
+#wasm_module {
+  display: block;
+  border: 0;
+  outline: 0;
+  object-fit: contain;
+  background: #000;
+}
+
+#stream-overlays {
+  z-index: 1;
+  pointer-events: none;
+}
+
+html[data-stream-state="loading"] #native-surface,
+html[data-stream-state="active"] #native-surface,
+html[data-stream-state="stopping"] #native-surface,
+html[data-stream-state="error"] #native-surface {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+html[data-stream-state="loading"] #flutter-host,
+html[data-stream-state="active"] #flutter-host,
+html[data-stream-state="stopping"] #flutter-host {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.stream-overlay {
+  position: absolute;
+  box-sizing: border-box;
+  color: #fff;
+  text-shadow: 0 1px 2px #000;
+}
+
+.stream-overlay[hidden] {
+  display: none !important;
+}
+
+.stream-loading {
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: rgba(0, 0, 0, 0.78);
+  font-size: clamp(20px, 2vw, 36px);
+}
+
+.stream-spinner {
+  width: 70px;
+  height: 70px;
+  border: 7px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #00a3c6;
+  border-radius: 50%;
+  animation: stream-spin 900ms linear infinite;
+}
+
+.stream-warning {
+  top: 28px;
+  left: 50%;
+  max-width: min(90vw, 1200px);
+  transform: translateX(-50%);
+  padding: 12px 20px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #ffd54f;
+  font-size: clamp(16px, 1.35vw, 26px);
+  text-align: center;
+}
+
+.stream-statistics {
+  top: 24px;
+  right: 24px;
+  max-width: 46vw;
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.64);
+  font: clamp(13px, 1vw, 20px)/1.35 monospace;
+  white-space: pre-wrap;
+}
+
+.stream-transient {
+  bottom: 48px;
+  left: 50%;
+  max-width: min(88vw, 1200px);
+  transform: translateX(-50%);
+  padding: 14px 22px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.78);
+  font-size: clamp(16px, 1.4vw, 28px);
+  text-align: center;
+}
+
+.stream-fatal {
+  top: 50%;
+  left: 50%;
+  width: min(82vw, 900px);
+  transform: translate(-50%, -50%);
+  padding: 30px 40px;
+  border: 2px solid #ef5350;
+  border-radius: 10px;
+  background: rgba(30, 30, 30, 0.97);
+  pointer-events: auto;
+  text-align: center;
+}
+
+.stream-fatal h2 {
+  margin: 0 0 16px;
+  color: #ef5350;
+  font-size: clamp(24px, 2vw, 38px);
+}
+
+.stream-fatal p {
+  margin: 0;
+  font-size: clamp(18px, 1.5vw, 28px);
+}
+
+@keyframes stream-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stream-spinner { animation: none; }
+}

@@ -1,0 +1,16 @@
+{
+  "packageId": "MLFlutter1",
+  "applicationId": "MLFlutter1.MoonlightFlutter",
+  "widgetId": "http://samsung.tv/MoonlightFlutter",
+  "displayName": "Moonlight Flutter",
+  "version": "1.13.0",
+  "requiredTizenVersion": "10.0",
+  "standardArtifact": "MoonlightFlutter.wgt",
+  "forceGameModeArtifact": "MoonlightFlutter-ForceGM.wgt",
+  "runtimeArtifacts": [
+    "moonlight-wasm.js",
+    "moonlight-wasm.js.mem",
+    "moonlight-wasm.wasm",
+    "moonlight-wasm.worker.js"
+  ]
+}

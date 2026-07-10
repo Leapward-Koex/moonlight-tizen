@@ -1,0 +1,62 @@
+name: Flutter Web UI
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "flutter_ui/**"
+      - "packaging/flutter_tizen/**"
+      - ".github/workflows/flutter-web-ui.yml"
+  pull_request:
+    paths:
+      - "flutter_ui/**"
+      - "packaging/flutter_tizen/**"
+      - ".github/workflows/flutter-web-ui.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flutter-web-ui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: flutter_ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.1"
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: dart run build_runner build --delete-conflicting-outputs
+      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter analyze
+      - run: flutter test
+      - run: >-
+          flutter build web --release -t lib/main.dart --csp
+          --base-href ./ --no-web-resources-cdn --no-wasm-dry-run
+          --pwa-strategy=none
+      - name: Verify native bridge contract
+        working-directory: .
+        run: node --test packaging/flutter_tizen/tests/*.test.mjs
+      - name: Verify production diagnostic assets
+        run: |
+          test -f build/web/native/diagnostics.js
+          test -f build/web/native/debug_bridge_config.js
+          test -f build/web/native/debug_bridge.js
+          grep -q "enabled: false" build/web/native/debug_bridge_config.js
+          grep -q "token: ''" build/web/native/debug_bridge_config.js
+      - name: Upload production Flutter web bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: moonlight-flutter-web
+          path: flutter_ui/build/web
+          if-no-files-found: error
+      - name: Build browser-fake development UI
+        run: flutter build web --debug -t lib/main_fake.dart --no-wasm-dry-run

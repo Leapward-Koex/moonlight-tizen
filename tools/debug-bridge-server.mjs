@@ -10,7 +10,18 @@ const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_LOGS = 5000;
 const MAX_RESULTS = 1000;
 const MAX_COMMANDS_PER_CLIENT = 200;
-const ALLOWED_COMMAND_TYPES = new Set(['nav', 'click', 'setValue', 'addHost', 'getState', 'localStorage', 'reload']);
+const ALLOWED_COMMAND_TYPES = new Set([
+  'nav',
+  'click',
+  'setValue',
+  'addHost',
+  'getState',
+  'getDiagnostics',
+  'setLogLevel',
+  'clearDiagnostics',
+  'localStorage',
+  'reload',
+]);
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -326,13 +337,17 @@ function makeServer(options) {
 
   function storeResult(commandId, body, req) {
     const clientId = normalizeId(body.clientId, 'unknown');
+    const safeResult = safeJsonValue(body.result || {});
+    if (body.result && typeof body.result.logs === 'string') {
+      safeResult.logs = truncateString(body.result.logs, 750000);
+    }
     const result = {
       id: `result-${(resultSeq += 1).toString(36)}`,
       serverTime: new Date().toISOString(),
       clientId,
       commandId: normalizeId(body.commandId || commandId, commandId),
       ok: body.ok === true,
-      result: safeJsonValue(body.result || {}),
+      result: safeResult,
       error: body.error ? safeJsonValue(body.error) : null,
     };
 
