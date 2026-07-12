@@ -40,6 +40,12 @@ final class NativeRuntimeInfo {
         supportsRumble: isTizen,
         supportsPointerLock: true,
         supportsRestart: isTizen,
+        supportsNativeAudio:
+            isTizen &&
+            jsonBool(
+              platform['supportsNativeAudio'],
+              jsonBool(platform['supportsNativeStreaming']),
+            ),
         supportedCodecs: isTizen
             ? const {VideoCodec.h264, VideoCodec.hevc, VideoCodec.av1}
             : const {VideoCodec.h264},

@@ -837,6 +837,25 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
         icon: Icons.volume_up,
         options: [
           MoonlightSettingOption(
+            title: 'Audio backend',
+            control: TvChoiceControl<AudioBackend>(
+              value: settings.audioBackend,
+              choices: [
+                const ChoiceItem(
+                  value: AudioBackend.webAudio,
+                  label: 'Web Audio (recommended)',
+                ),
+                ChoiceItem(
+                  value: AudioBackend.nativeEmss,
+                  label: 'Native EMSS (experimental)',
+                  enabled: capabilities.supportsNativeAudio,
+                ),
+              ],
+              onChanged: (value) =>
+                  update(settings.copyWith(audioBackend: value)),
+            ),
+          ),
+          MoonlightSettingOption(
             title: 'Speaker configuration',
             control: TvChoiceControl<AudioConfiguration>(
               value: settings.audioConfiguration,
@@ -863,18 +882,20 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
                   update(settings.copyWith(audioPacketDurationMs: value)),
             ),
           ),
-          MoonlightSettingOption(
-            title: 'Audio jitter buffer',
-            control: TvSliderControl(
-              value: settings.audioJitterBufferMs.toDouble(),
-              min: 50,
-              max: 500,
-              step: 25,
-              valueLabel: (value) => '${value.round()} ms',
-              onChanged: (value) =>
-                  update(settings.copyWith(audioJitterBufferMs: value.round())),
+          if (settings.audioBackend == AudioBackend.webAudio)
+            MoonlightSettingOption(
+              title: 'Maximum Web Audio buffer',
+              control: TvSliderControl(
+                value: settings.audioJitterBufferMs.toDouble(),
+                min: 10,
+                max: 500,
+                step: 10,
+                valueLabel: (value) => '${value.round()} ms',
+                onChanged: (value) => update(
+                  settings.copyWith(audioJitterBufferMs: value.round()),
+                ),
+              ),
             ),
-          ),
           _toggle('Play audio on host', settings.playAudioOnHost, (value) {
             update(settings.copyWith(playAudioOnHost: value));
           }),

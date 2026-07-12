@@ -10,6 +10,7 @@ void main() {
       expect(settings.frameRate, 60);
       expect(settings.bitrateMbps, 10);
       expect(settings.audioConfiguration, AudioConfiguration.stereo);
+      expect(settings.audioBackend, AudioBackend.webAudio);
       expect(settings.audioPacketDurationMs, 0);
       expect(settings.audioJitterBufferMs, 100);
       expect(settings.videoCodec, VideoCodec.h264);
@@ -80,6 +81,7 @@ void main() {
         unlockAllFrameRates: true,
         videoCodec: VideoCodec.hevc,
         hdr: true,
+        audioBackend: AudioBackend.nativeEmss,
       );
       final restored = AppSettings.fromJson(
         source.toJson(),
@@ -89,7 +91,20 @@ void main() {
       expect(restored.frameRate, source.frameRate);
       expect(restored.bitrateMbps, source.bitrateMbps);
       expect(restored.videoCodec, source.videoCodec);
+      expect(restored.audioBackend, AudioBackend.nativeEmss);
+      expect(restored.toJson()['schemaVersion'], 2);
       expect(restored.hdr, isTrue);
     });
+
+    test(
+      'falls back from native audio when the platform cannot provide it',
+      () {
+        final settings = const AppSettings(
+          audioBackend: AudioBackend.nativeEmss,
+        ).normalized(const PlatformCapabilities());
+
+        expect(settings.audioBackend, AudioBackend.webAudio);
+      },
+    );
   });
 }

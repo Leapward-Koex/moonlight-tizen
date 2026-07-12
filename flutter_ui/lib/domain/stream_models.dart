@@ -53,10 +53,10 @@ final class LaunchResult {
   bool get isSuccess => statusCode == 200 && sessionUrl.isNotEmpty;
 }
 
-/// Named replacement for the native runtime's historical 29 positional
+/// Named replacement for the native runtime's historical positional
 /// arguments. [toJson] is passed unchanged to `MoonlightNative.startStream`.
 final class StreamRequest {
-  static const int currentSchemaVersion = 1;
+  static const int currentSchemaVersion = 2;
 
   const StreamRequest({
     this.schemaVersion = currentSchemaVersion,
@@ -79,6 +79,7 @@ final class StreamRequest {
     required this.mouseEmulation,
     required this.flipAbButtons,
     required this.flipXyButtons,
+    required this.audioBackend,
     required this.audioConfiguration,
     required this.audioPacketDurationMs,
     required this.audioJitterBufferMs,
@@ -112,6 +113,7 @@ final class StreamRequest {
   final bool mouseEmulation;
   final bool flipAbButtons;
   final bool flipXyButtons;
+  final AudioBackend audioBackend;
   final AudioConfiguration audioConfiguration;
   final int audioPacketDurationMs;
   final int audioJitterBufferMs;
@@ -152,6 +154,7 @@ final class StreamRequest {
     mouseEmulation: settings.mouseEmulation,
     flipAbButtons: settings.flipAbButtons,
     flipXyButtons: settings.flipXyButtons,
+    audioBackend: settings.audioBackend,
     audioConfiguration: settings.audioConfiguration,
     audioPacketDurationMs: settings.audioPacketDurationMs,
     audioJitterBufferMs: settings.audioJitterBufferMs,
@@ -190,6 +193,9 @@ final class StreamRequest {
     mouseEmulation: jsonBool(json['mouseEmulation']),
     flipAbButtons: jsonBool(json['flipAbButtons']),
     flipXyButtons: jsonBool(json['flipXyButtons']),
+    audioBackend: AudioBackend.fromWireName(
+      jsonString(json['audioBackend'], AudioBackend.webAudio.wireName),
+    ),
     audioConfiguration: AudioConfiguration.fromWireName(
       jsonString(json['audioConfiguration'], 'Stereo'),
     ),
@@ -232,6 +238,7 @@ final class StreamRequest {
     'mouseEmulation': mouseEmulation,
     'flipAbButtons': flipAbButtons,
     'flipXyButtons': flipXyButtons,
+    'audioBackend': audioBackend.wireName,
     'audioConfiguration': audioConfiguration.wireName,
     'audioPacketDurationMs': audioPacketDurationMs,
     'audioJitterBufferMs': audioJitterBufferMs,

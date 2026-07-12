@@ -49,7 +49,11 @@ int g_AudioJitterMsOverride = 0;
 }
 
 MoonlightInstance::MoonlightInstance()
-  : m_OpusDecoder(NULL),
+  : m_AudioBackend(AudioBackend::WebAudio),
+    m_AudioSampleRate(0),
+    m_AudioChannelCount(0),
+    m_AudioSamplesPerFrame(0),
+    m_OpusDecoder(NULL),
     m_MouseLocked(false),
     m_MouseLastPosX(-1),
     m_MouseLastPosY(-1),
@@ -70,14 +74,19 @@ MoonlightInstance::MoonlightInstance()
     m_StopThreadCreated(false),
     m_Mutex(),
     m_EmssStateChanged(),
+    m_EmssAudioStateChanged(),
     m_EmssVideoStateChanged(),
     m_EmssReadyState(EmssReadyState::kDetached),
+    m_AudioStarted(false),
     m_VideoStarted(false),
+    m_AudioSessionId(0),
     m_VideoSessionId(0),
     m_MediaElement("wasm_module"),
     m_Source(nullptr),
     m_SourceListener(this),
+    m_AudioTrackListener(this),
     m_VideoTrackListener(this),
+    m_AudioTrack(),
     m_VideoTrack(),
     m_ProbedVideoFormat(0),
     m_ProbedVideoWidth(0),
@@ -174,22 +183,30 @@ void MoonlightInstance::JoinStaleThreadsIfIdle() {
 }
 
 void MoonlightInstance::ResetMediaStateForStart(uint32_t attemptId) {
-  ClLogMessage("Resetting media state for stream start: attemptId=%u, sourceExisting=%d, emssState=%s, videoStarted=%d, sessionId=%u\n",
+  ClLogMessage("Resetting media state for stream start: attemptId=%u, sourceExisting=%d, emssState=%s, audioStarted=%d, videoStarted=%d, audioSessionId=%u, videoSessionId=%u\n",
     attemptId, m_Source ? 1 : 0, EmssReadyStateName(m_EmssReadyState),
-    m_VideoStarted.load(), static_cast<unsigned int>(m_VideoSessionId.load()));
+    m_AudioStarted.load(), m_VideoStarted.load(),
+    static_cast<unsigned int>(m_AudioSessionId.load()),
+    static_cast<unsigned int>(m_VideoSessionId.load()));
 
   {
     std::unique_lock<std::mutex> lock(m_Mutex);
     m_EmssReadyState = EmssReadyState::kDetached;
+    m_AudioStarted = false;
     m_VideoStarted = false;
+    m_AudioSessionId.store(0);
     m_VideoSessionId.store(0);
   }
 
   if (m_Source) {
     m_MediaElement.SetSrc(nullptr);
   }
+  m_AudioTrack = samsung::wasm::ElementaryMediaTrack();
   m_VideoTrack = samsung::wasm::ElementaryMediaTrack();
   m_Source.reset();
+  m_AudioSampleRate.store(0);
+  m_AudioChannelCount.store(0);
+  m_AudioSamplesPerFrame.store(0);
 }
 
 void MoonlightInstance::CompleteStartFailure(uint32_t attemptId, int errorCode, const std::string& reason) {
@@ -410,9 +427,8 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
     PostToJs("Selecting the fallback server code mode to: SCM_H264");
   }
 
-  // Apply user-selected audio packet duration override. Auto maps to 10 ms
-  // because it is a stable low-latency default on Tizen's Web Audio path.
-  g_AudioPacketDurationOverride = me->m_AudioPacketDuration != 0 ? me->m_AudioPacketDuration : 10;
+  // A zero override preserves moonlight-common's automatic low-latency choice.
+  g_AudioPacketDurationOverride = me->m_AudioPacketDuration;
 
   // Apply user-selected Web Audio jitter target. Zero means the scheduler uses
   // its default of 100 ms.
@@ -420,8 +436,11 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
   ClLogMessage("Audio startup overrides applied: packetDurationMs=%d, jitterTargetMs=%d\n",
     g_AudioPacketDurationOverride, g_AudioJitterMsOverride != 0 ? g_AudioJitterMsOverride : 100);
 
+  AUDIO_RENDERER_CALLBACKS* audioCallbacks = me->m_AudioBackend == AudioBackend::NativeEmss
+    ? &MoonlightInstance::s_NativeAudioCallbacks
+    : &MoonlightInstance::s_WebAudioCallbacks;
   err = LiStartConnection(&serverInfo, &me->m_StreamConfig, &MoonlightInstance::s_ClCallbacks,
-    &MoonlightInstance::s_DrCallbacks, &MoonlightInstance::s_ArCallbacks, NULL, 0, NULL, 0);
+    &MoonlightInstance::s_DrCallbacks, audioCallbacks, NULL, 0, NULL, 0);
   if (err != 0) {
     ClLogMessage("LiStartConnection failed after %llu ms: attemptId=%u, err=%d, lifecycle=%s\n",
       (unsigned long long)(LiGetMillis() - connectStartMs), attemptId, err, me->GetLifecycleName());
@@ -469,7 +488,7 @@ static void HexStringToBytes(const char* str, char* output) {
 MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+  std::string audioBackend, std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes) {
   JoinStaleThreadsIfIdle();
 
@@ -487,10 +506,10 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   m_InputThreadCreated = false;
   m_StopThreadCreated = false;
 
-  ClLogMessage("StartStream requested: attemptId=%u, host=%s:%d, mode=%sx%s@%s, bitrate=%s Kbps, codec=%s, audio=%s, audioPacketDuration=%d, audioJitterMs=%d, playHostAudio=%d, gameMode=%d, runningBefore=%d, videoStarted=%d, sourceExisting=%d, disabledVideoMimeTypesLength=%u\n",
+  ClLogMessage("StartStream requested: attemptId=%u, host=%s:%d, mode=%sx%s@%s, bitrate=%s Kbps, codec=%s, audioBackend=%s, audio=%s, audioPacketDuration=%d, audioJitterMs=%d, playHostAudio=%d, gameMode=%d, runningBefore=%d, videoStarted=%d, sourceExisting=%d, disabledVideoMimeTypesLength=%u\n",
     attemptId,
     host.c_str(), httpPort, width.c_str(), height.c_str(), fps.c_str(), bitrate.c_str(),
-    videoCodec.c_str(), audioConfig.c_str(), audioPacketDuration, audioJitterMs, playHostAudio,
+    videoCodec.c_str(), audioBackend.c_str(), audioConfig.c_str(), audioPacketDuration, audioJitterMs, playHostAudio,
     gameMode, m_Running.load(), m_VideoStarted.load(), m_Source ? 1 : 0, static_cast<unsigned int>(disabledVideoMimeTypes.size()));
 
   auto failStartSetup = [&](const std::string& reason) {
@@ -520,6 +539,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   PostToJs("Setting the Mouse emulation to: " + std::to_string(mouseEmulation));
   PostToJs("Setting the Flip A/B face buttons to: " + std::to_string(flipABfaceButtons));
   PostToJs("Setting the Flip X/Y face buttons to: " + std::to_string(flipXYfaceButtons));
+  PostToJs("Setting the Audio backend to: " + audioBackend);
   PostToJs("Setting the Audio configuration to: " + audioConfig);
   PostToJs("Setting the Audio packet duration to: " + (audioPacketDuration ? std::to_string(audioPacketDuration) + " ms" : "auto"));
   PostToJs("Setting the Audio jitter buffer to: " + (audioJitterMs ? std::to_string(audioJitterMs) + " ms" : "auto (100 ms)"));
@@ -639,6 +659,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   m_MouseEmulationEnabled = mouseEmulation;
   m_FlipABfaceButtonsEnabled = flipABfaceButtons;
   m_FlipXYfaceButtonsEnabled = flipXYfaceButtons;
+  m_AudioBackend = audioBackend == "emss" ? AudioBackend::NativeEmss : AudioBackend::WebAudio;
   m_AudioPacketDuration = audioPacketDuration;
   m_AudioJitterMs = audioJitterMs;
   m_PlayHostAudioEnabled = playHostAudio;
@@ -803,13 +824,13 @@ int main(int argc, char** argv) {
 MessageResult startStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+  std::string audioBackend, std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes) {
   MoonlightInstance::ClLogMessage("JS bridge invoked startStream: host=%s:%d, width=%s, height=%s, fps=%s, bitrate=%s\n",
     host.c_str(), httpPort, width.c_str(), height.c_str(), fps.c_str(), bitrate.c_str());
   PostToJs("Starting the streaming session...");
   return g_Instance->StartStream(host, httpPort, width, height, fps, bitrate, rikey, rikeyid, appversion, gfeversion, rtspurl, serverCodecModeSupport,
-  framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons, audioConfig,
+  framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons, audioBackend, audioConfig,
   audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats, disabledVideoMimeTypes);
 }
 

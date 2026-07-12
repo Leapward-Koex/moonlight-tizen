@@ -1,22 +1,32 @@
-/*
- * Event-driven Web Audio scheduler for Moonlight's decoded PCM frames.
- *
- * auddec.cpp invokes the global _audReceiveFrame() on the browser main thread
- * and frees the source buffer as soon as that function returns. The PCM copy
- * below must therefore remain synchronous and in JavaScript.
- */
+/* Low-latency Web Audio sink with an AudioWorklet/shared-memory fast path. */
 (function installMoonlightAudio(root) {
   'use strict';
 
-  if (root.MoonlightAudio) {
-    return;
-  }
+  if (root.MoonlightAudio) return;
+
+  var CONTROL_LENGTH = 12;
+  var WRITE_FRAME = 0;
+  var READ_FRAME = 1;
+  var GENERATION = 2;
+  var TARGET_FRAMES = 3;
+  var MAXIMUM_TARGET_FRAMES = 4;
+  var MINIMUM_TARGET_FRAMES = 5;
+  var PACKET_FRAMES = 6;
+  var UNDERRUNS = 7;
+  var OVERRUNS = 8;
+  var SKIPPED_FRAMES = 9;
+  var DECODED_FRAMES = 10;
+  var ACTIVE = 11;
 
   var nextTime = 0;
   var started = false;
   var schedulerStartedAt = 0;
   var lastResumeAttemptAt = 0;
   var scheduledSources = [];
+  var workletLoadPromise = null;
+  var workletReady = false;
+  var workletNode = null;
+  var sharedControl = null;
   var stats = {
     receivedFrames: 0,
     scheduledFrames: 0,
@@ -26,7 +36,9 @@
     lateResyncs: 0,
     scheduleErrors: 0,
     maxLeadMs: 0,
-    lastLeadMs: 0
+    lastLeadMs: 0,
+    maxProxyDelayMs: 0,
+    lastProxyDelayMs: 0
   };
 
   function nowMs() {
@@ -42,9 +54,7 @@
   }
 
   function snapshot(context) {
-    if (!context) {
-      return null;
-    }
+    if (!context) return null;
     return {
       state: context.state,
       sampleRate: context.sampleRate,
@@ -56,17 +66,18 @@
 
   function createContext() {
     var AudioContextType = root.AudioContext || root.webkitAudioContext;
-    if (!AudioContextType) {
-      return null;
-    }
+    if (!AudioContextType) return null;
     if (!root._mlAudioCtx || root._mlAudioCtx.state === 'closed') {
-      root._mlAudioCtx = new AudioContextType();
+      try {
+        root._mlAudioCtx = new AudioContextType({ latencyHint: 'interactive', sampleRate: 48000 });
+      } catch (_) {
+        root._mlAudioCtx = new AudioContextType();
+      }
     }
     return root._mlAudioCtx;
   }
 
-  // Must be invoked directly from the user's Launch/Resume gesture. This
-  // function intentionally starts resume() and a silent buffer synchronously.
+  // Called synchronously from the Launch/Resume gesture so Tizen permits audio.
   function unlock() {
     var context;
     try {
@@ -75,13 +86,11 @@
         log('warn', 'Web Audio is unavailable');
         return false;
       }
-
       var silentBuffer = context.createBuffer(1, 1, context.sampleRate || 48000);
       var source = context.createBufferSource();
       source.buffer = silentBuffer;
       source.connect(context.destination);
       source.start(0);
-
       if (context.state === 'suspended' && typeof context.resume === 'function') {
         var resumeResult = context.resume();
         if (resumeResult && typeof resumeResult.catch === 'function') {
@@ -105,15 +114,44 @@
   }
 
   function resetStats() {
-    Object.keys(stats).forEach(function(key) {
-      stats[key] = 0;
-    });
+    Object.keys(stats).forEach(function(key) { stats[key] = 0; });
     root._mlAudioStats = stats;
+  }
+
+  function resolveWorkletUrl() {
+    try {
+      return new root.URL('native/audio-worklet.js', root.document.baseURI).toString();
+    } catch (_) {
+      return 'native/audio-worklet.js';
+    }
+  }
+
+  function prepareWorklet(context) {
+    if (workletReady) return Promise.resolve(true);
+    if (workletLoadPromise) return workletLoadPromise;
+    if (!context || !context.audioWorklet || typeof context.audioWorklet.addModule !== 'function' ||
+        typeof root.AudioWorkletNode !== 'function' || typeof root.SharedArrayBuffer !== 'function' ||
+        typeof root.Atomics !== 'object') {
+      return Promise.resolve(false);
+    }
+    workletLoadPromise = context.audioWorklet.addModule(resolveWorkletUrl()).then(function() {
+      workletReady = true;
+      log('info', 'audio worklet module loaded', { context: snapshot(context) });
+      return true;
+    }).catch(function(error) {
+      workletLoadPromise = null;
+      log('warn', 'audio worklet unavailable; using BufferSource fallback', {
+        error: error && error.message ? error.message : String(error),
+        context: snapshot(context)
+      });
+      return false;
+    });
+    return workletLoadPromise;
   }
 
   function start(targetJitterMs) {
     if (typeof targetJitterMs === 'number' && isFinite(targetJitterMs)) {
-      root._mlAudioTargetMs = Math.max(0, targetJitterMs);
+      root._mlAudioTargetMs = Math.max(10, targetJitterMs);
     } else if (typeof root._mlAudioTargetMs !== 'number') {
       root._mlAudioTargetMs = 100;
     }
@@ -122,49 +160,101 @@
     schedulerStartedAt = nowMs();
     lastResumeAttemptAt = 0;
     resetStats();
+    var context = createContext();
     log('info', 'audio scheduler started', {
-      targetJitterMs: root._mlAudioTargetMs,
-      context: snapshot(root._mlAudioCtx)
+      maximumBufferMs: root._mlAudioTargetMs,
+      context: snapshot(context)
     });
+    return prepareWorklet(context);
+  }
+
+  function detachSharedRing() {
+    if (sharedControl && typeof root.Atomics === 'object') {
+      root.Atomics.store(sharedControl, ACTIVE, 0);
+      root.Atomics.add(sharedControl, GENERATION, 1);
+    }
+    if (workletNode) {
+      try { workletNode.disconnect(); } catch (_) {}
+      workletNode = null;
+    }
+    sharedControl = null;
   }
 
   function stop() {
+    detachSharedRing();
     scheduledSources.splice(0).forEach(function(source) {
-      try {
-        source.stop(0);
-      } catch (_) {
-        // The source may already have completed.
-      }
+      try { source.stop(0); } catch (_) {}
     });
     log('info', 'audio scheduler stopped', {
       lifetimeMs: schedulerStartedAt ? nowMs() - schedulerStartedAt : null,
-      stats: Object.assign({}, stats),
+      stats: getStats(),
       context: snapshot(root._mlAudioCtx)
     });
     nextTime = 0;
     started = false;
   }
 
-  function removeScheduledSource(source) {
-    var index = scheduledSources.indexOf(source);
-    if (index !== -1) {
-      scheduledSources.splice(index, 1);
+  function attachSharedRing(controlPointer, pcmPointer, capacityFrames, channels, sampleRate) {
+    var context = root._mlAudioCtx;
+    var module = root.Module;
+    if (!workletReady || !context || !module || !module.HEAP16 ||
+        typeof root.SharedArrayBuffer !== 'function' || context.sampleRate !== sampleRate ||
+        !(module.HEAP16.buffer instanceof root.SharedArrayBuffer)) {
+      return false;
+    }
+    try {
+      detachSharedRing();
+      sharedControl = new Int32Array(module.HEAP16.buffer, controlPointer, CONTROL_LENGTH);
+      workletNode = new root.AudioWorkletNode(context, 'moonlight-pcm-sink', {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [channels],
+        channelCount: channels,
+        channelCountMode: 'explicit',
+        processorOptions: {
+          sharedBuffer: module.HEAP16.buffer,
+          controlByteOffset: controlPointer,
+          pcmByteOffset: pcmPointer,
+          capacityFrames: capacityFrames,
+          channels: channels,
+          streamSampleRate: sampleRate
+        }
+      });
+      workletNode.onprocessorerror = function() {
+        log('error', 'audio worklet processor error', { stats: getStats() });
+      };
+      workletNode.connect(context.destination);
+      log('info', 'audio shared ring attached', {
+        capacityFrames: capacityFrames,
+        channels: channels,
+        sampleRate: sampleRate,
+        context: snapshot(context)
+      });
+      return true;
+    } catch (error) {
+      detachSharedRing();
+      log('warn', 'audio shared ring attach failed; using BufferSource fallback', {
+        error: error && error.message ? error.message : String(error)
+      });
+      return false;
     }
   }
 
-  function receiveFrame(pointer, samplesPerFrame, channels, sampleRate) {
+  function removeScheduledSource(source) {
+    var index = scheduledSources.indexOf(source);
+    if (index !== -1) scheduledSources.splice(index, 1);
+  }
+
+  function receiveFrame(pointer, samplesPerFrame, channels, sampleRate, postedAtMs) {
     var context = root._mlAudioCtx;
     var receivedAt = nowMs();
     stats.receivedFrames += 1;
-
-    if (!context) {
-      stats.droppedNoContext += 1;
-      return;
+    if (typeof postedAtMs === 'number') {
+      stats.lastProxyDelayMs = Math.max(0, receivedAt - postedAtMs);
+      stats.maxProxyDelayMs = Math.max(stats.maxProxyDelayMs, stats.lastProxyDelayMs);
     }
-    if (context.state === 'closed') {
-      stats.droppedClosedContext += 1;
-      return;
-    }
+    if (!context) { stats.droppedNoContext += 1; return; }
+    if (context.state === 'closed') { stats.droppedClosedContext += 1; return; }
 
     if (context.state === 'suspended' && receivedAt - lastResumeAttemptAt >= 1000) {
       lastResumeAttemptAt = receivedAt;
@@ -185,32 +275,25 @@
     }
 
     var module = root.Module;
-    if (!module || !module.HEAP16) {
-      stats.droppedFrames += 1;
-      return;
-    }
-
+    if (!module || !module.HEAP16) { stats.droppedFrames += 1; return; }
     var now = context.currentTime;
-    var targetSeconds = (root._mlAudioTargetMs || 100) / 1000;
+    var targetMs = typeof root._mlAudioTargetMs === 'number' ? root._mlAudioTargetMs : 100;
+    var targetSeconds = targetMs / 1000;
     var frameSeconds = samplesPerFrame / sampleRate;
     var minimumLead = Math.max(frameSeconds, 0.01);
     var maximumLead = targetSeconds + Math.max(0.05, frameSeconds * 4);
 
     if (!started) {
-      nextTime = now + Math.max(0, targetSeconds - frameSeconds);
+      nextTime = now + Math.min(targetSeconds, minimumLead);
       started = true;
     } else if (nextTime < now) {
       stats.lateResyncs += 1;
       nextTime = now + Math.min(targetSeconds, minimumLead);
     }
-
     var leadSeconds = nextTime - now;
     stats.lastLeadMs = Math.round(leadSeconds * 1000);
     stats.maxLeadMs = Math.max(stats.maxLeadMs, stats.lastLeadMs);
-    if (leadSeconds > maximumLead) {
-      stats.droppedFrames += 1;
-      return;
-    }
+    if (leadSeconds > maximumLead) { stats.droppedFrames += 1; return; }
 
     try {
       var audioBuffer = context.createBuffer(channels, samplesPerFrame, sampleRate);
@@ -221,7 +304,6 @@
           channelData[sample] = module.HEAP16[heapBase + sample * channels + channel] / 32768;
         }
       }
-
       var source = context.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(context.destination);
@@ -242,6 +324,30 @@
     }
   }
 
+  function getStats() {
+    var result = Object.assign({}, stats, {
+      mode: workletNode ? 'audio-worklet-shared-ring' : 'buffer-source-fallback'
+    });
+    if (sharedControl && typeof root.Atomics === 'object') {
+      var writeFrame = root.Atomics.load(sharedControl, WRITE_FRAME);
+      var readFrame = root.Atomics.load(sharedControl, READ_FRAME);
+      result.bufferedFrames = Math.max(0, writeFrame - readFrame);
+      result.targetFrames = root.Atomics.load(sharedControl, TARGET_FRAMES);
+      result.maximumTargetFrames = root.Atomics.load(sharedControl, MAXIMUM_TARGET_FRAMES);
+      result.minimumTargetFrames = root.Atomics.load(sharedControl, MINIMUM_TARGET_FRAMES);
+      result.packetFrames = root.Atomics.load(sharedControl, PACKET_FRAMES);
+      result.underruns = root.Atomics.load(sharedControl, UNDERRUNS);
+      result.overruns = root.Atomics.load(sharedControl, OVERRUNS);
+      result.skippedFrames = root.Atomics.load(sharedControl, SKIPPED_FRAMES);
+      result.decodedFrames = root.Atomics.load(sharedControl, DECODED_FRAMES);
+      if (root._mlAudioCtx && root._mlAudioCtx.sampleRate) {
+        result.bufferedMs = Math.round(result.bufferedFrames * 10000 / root._mlAudioCtx.sampleRate) / 10;
+        result.targetMs = Math.round(result.targetFrames * 10000 / root._mlAudioCtx.sampleRate) / 10;
+      }
+    }
+    return result;
+  }
+
   root._audReceiveFrame = receiveFrame;
   root.startAudioScheduler = start;
   root.stopAudioScheduler = stop;
@@ -249,8 +355,10 @@
     unlock: unlock,
     start: start,
     stop: stop,
+    attachSharedRing: attachSharedRing,
+    detachSharedRing: detachSharedRing,
     receiveFrame: receiveFrame,
-    getStats: function() { return Object.assign({}, stats); },
+    getStats: getStats,
     getContextSnapshot: function() { return snapshot(root._mlAudioCtx); }
   });
 })(window);

@@ -2,7 +2,7 @@
 param(
     [string] $FlutterBuild = 'flutter_ui/build/web',
     [string] $WasmBuild = 'build/codex-wasm-proxy-pthread',
-    [string] $Output = 'build/flutter-tizen/widget',
+    [string] $Output = 'build/flutter-tizen/widget-standard',
     [switch] $ForceGameMode
 )
 
@@ -58,6 +58,7 @@ $requiredFiles = @(
     'flutter_bootstrap.js',
     'main.dart.js',
     'native/audio.js',
+    'native/audio-worklet.js',
     'native/diagnostics.js',
     'native/debug_bridge_config.js',
     'native/debug_bridge.js',

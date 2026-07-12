@@ -12,6 +12,7 @@
 #include <assert.h>
 #include <pthread.h>
 
+#include "samsung/wasm/elementary_audio_track_config.h"
 #include "samsung/wasm/elementary_media_packet.h"
 #include "samsung/wasm/elementary_video_track_config.h"
 #include "samsung/html/html_media_element_listener.h"
@@ -53,6 +54,7 @@ static bool s_loggedFirstAppend = false;
 static uint32_t s_DecodeUnitsBeforeVideoStart = 0;
 static uint64_t s_VideoSetupStartMs = 0;
 static constexpr uint32_t kEmssSourceStateTimeoutMs = 5000;
+static constexpr uint32_t kEmssAudioTrackTimeoutMs = 10000;
 static constexpr uint32_t kEmssVideoTrackTimeoutMs = 10000;
 static constexpr uint32_t kEmssPlayTimeoutMs = 5000;
 
@@ -458,6 +460,39 @@ void MoonlightInstance::VideoTrackListener::OnSessionIdChanged(samsung::wasm::Se
   m_Instance->m_VideoSessionId.store(new_session_id);
 }
 
+MoonlightInstance::AudioTrackListener::AudioTrackListener(
+  MoonlightInstance* instance
+) : m_Instance(instance) {}
+
+void MoonlightInstance::AudioTrackListener::OnTrackOpen() {
+  ClLogMessage("AUDIO ElementaryMediaTrack::OnTrackOpen (sessionId=%u)\n",
+    static_cast<unsigned int>(m_Instance->m_AudioSessionId.load()));
+  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
+  m_Instance->m_AudioStarted = true;
+  m_Instance->m_EmssAudioStateChanged.notify_all();
+}
+
+void MoonlightInstance::AudioTrackListener::OnTrackClosed(samsung::wasm::ElementaryMediaTrack::CloseReason reason) {
+  ClLogMessage("AUDIO ElementaryMediaTrack::OnTrackClosed (reason=%d, sessionId=%u)\n",
+    static_cast<int>(reason), static_cast<unsigned int>(m_Instance->m_AudioSessionId.load()));
+  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
+  m_Instance->m_AudioStarted = false;
+  m_Instance->m_EmssAudioStateChanged.notify_all();
+}
+
+void MoonlightInstance::AudioTrackListener::OnSessionIdChanged(samsung::wasm::SessionId new_session_id) {
+  ClLogMessage("AUDIO ElementaryMediaTrack::OnSessionIdChanged: old=%u, new=%u\n",
+    static_cast<unsigned int>(m_Instance->m_AudioSessionId.load()),
+    static_cast<unsigned int>(new_session_id));
+  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
+  m_Instance->m_AudioSessionId.store(new_session_id);
+}
+
+void MoonlightInstance::AudioTrackListener::OnAppendError(samsung::wasm::OperationResult result) {
+  ClLogMessage("AUDIO ElementaryMediaTrack::OnAppendError: result=%d, sessionId=%u\n",
+    static_cast<int>(result), static_cast<unsigned int>(m_Instance->m_AudioSessionId.load()));
+}
+
 void MoonlightInstance::DidChangeFocus(bool got_focus) {
   // Request an IDR frame to dump the frame queue that may have
   // built up from the GL pipeline being stalled.
@@ -484,6 +519,63 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
     return -1;
   }
   ClLogMessage("Video: source closed, adding track\n");
+
+  if (g_Instance->m_AudioBackend == AudioBackend::NativeEmss) {
+    // moonlight-common starts the video renderer before the audio renderer's
+    // init callback. The selected stream configuration is already final here,
+    // and all supported Opus configurations negotiate at 48 kHz.
+    const int channelCount = CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(g_Instance->m_AudioConfig);
+    const int sampleRate = 48000;
+    samsung::wasm::ChannelLayout channelLayout = samsung::wasm::ChannelLayout::kUnsupported;
+    switch (channelCount) {
+      case 2:
+        channelLayout = samsung::wasm::ChannelLayout::kStereo;
+        break;
+      case 6:
+        channelLayout = samsung::wasm::ChannelLayout::k5_1Back;
+        break;
+      case 8:
+        channelLayout = samsung::wasm::ChannelLayout::k7_1;
+        break;
+      default:
+        ClLogMessage("Native audio: unsupported channel count %d\n", channelCount);
+        return -1;
+    }
+
+    if (sampleRate <= 0) {
+      ClLogMessage("Native audio: invalid negotiated sample rate %d\n", sampleRate);
+      return -1;
+    }
+
+    g_Instance->m_AudioChannelCount.store(channelCount);
+    g_Instance->m_AudioSampleRate.store(sampleRate);
+
+    auto addAudioTrackResult = g_Instance->m_Source->AddTrack(
+      samsung::wasm::ElementaryAudioTrackConfig {
+        "audio/webm; codecs=\"pcm\"",
+        {},
+        samsung::wasm::DecodingMode::kHardware,
+        samsung::wasm::SampleFormat::kS16,
+        channelLayout,
+        static_cast<uint32_t>(sampleRate),
+      }
+    );
+    if (!addAudioTrackResult) {
+      ClLogMessage("Native audio: AddTrack failed: result=%d, sampleRate=%d, channels=%d\n",
+        static_cast<int>(addAudioTrackResult.operation_result), sampleRate, channelCount);
+      PostToJs("ProgressMsg: Native audio is unavailable; switch Audio backend to Web Audio.");
+      return -1;
+    }
+
+    g_Instance->m_AudioTrack = std::move(*addAudioTrackResult);
+    auto listenerResult = g_Instance->m_AudioTrack.SetListener(&g_Instance->m_AudioTrackListener);
+    if (!listenerResult) {
+      ClLogMessage("Native audio: SetListener failed: result=%d\n",
+        static_cast<int>(listenerResult.operation_result));
+      return -1;
+    }
+    ClLogMessage("Native audio track configured: sampleRate=%d, channels=%d\n", sampleRate, channelCount);
+  }
 
   {
     std::vector<VideoProfileSelection> profiles = GetVideoProfileCandidates(videoFormat, width, height, redrawRate);
@@ -603,7 +695,18 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
     return -1;
   }
 
-  ClLogMessage("Video track started\n");
+  if (g_Instance->m_AudioBackend == AudioBackend::NativeEmss) {
+    ClLogMessage("Waiting for native audio track to open\n");
+    if (!g_Instance->WaitFor(&g_Instance->m_EmssAudioStateChanged, "audio track open", kEmssAudioTrackTimeoutMs, [] {
+      return g_Instance->m_AudioStarted.load();
+    })) {
+      PostToJs("ProgressMsg: Native audio track did not open; switch Audio backend to Web Audio.");
+      return -1;
+    }
+  }
+
+  ClLogMessage("Media tracks started: audioBackend=%s\n",
+    g_Instance->m_AudioBackend == AudioBackend::NativeEmss ? "emss" : "webaudio");
   return 0;
 }
 

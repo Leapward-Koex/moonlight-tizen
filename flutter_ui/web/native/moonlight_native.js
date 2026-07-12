@@ -5,7 +5,7 @@
     return;
   }
 
-  var BRIDGE_VERSION = 1;
+  var BRIDGE_VERSION = 2;
   var RUNTIME_SCRIPT = 'moonlight-wasm.js';
   var RUNTIME_SCRIPT_ID = 'moonlight-wasm-runtime';
   var RUNTIME_TIMEOUT_MS = 60000;
@@ -659,6 +659,7 @@
       !!readField(request, ['mouseEmulation'], false),
       !!readField(request, ['flipAbButtons', 'flipABfaceButtons'], false),
       !!readField(request, ['flipXyButtons', 'flipXYfaceButtons'], false),
+      readField(request, ['audioBackend'], 'webaudio'),
       readField(request, ['audioConfiguration', 'audioConfig'], 'Stereo'),
       Number(readField(request, ['audioPacketDurationMs', 'audioPacketDuration'], 0)),
       Number(readField(request, ['audioJitterBufferMs', 'audioJitterMs'], 100)),
@@ -741,15 +742,23 @@
     showStatistics('');
     showProgress('Starting stream…');
     setStreamSurface('loading');
+    var audioBackend = readField(request || {}, ['audioBackend'], 'webaudio');
+    var audioPreparation = Promise.resolve();
     if (root.MoonlightAudio) {
-      root.MoonlightAudio.start(Number(readField(
-        request || {},
-        ['audioJitterBufferMs', 'audioJitterMs'],
-        100
-      )));
+      if (audioBackend === 'webaudio') {
+        audioPreparation = Promise.resolve(root.MoonlightAudio.start(Number(readField(
+          request || {},
+          ['audioJitterBufferMs', 'audioJitterMs'],
+          100
+        ))));
+      } else {
+        root.MoonlightAudio.stop();
+      }
     }
     var args = streamRequestToArgs(request);
-    return callMessageResult('startStream', args).then(function(value) {
+    return audioPreparation.then(function() {
+      return callMessageResult('startStream', args);
+    }).then(function(value) {
       var attemptId = parseInt(value, 10);
       return waitForStreamStart(attemptId);
     }).catch(function(error) {

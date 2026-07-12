@@ -2,6 +2,7 @@ param(
   [switch]$Enable,
   [switch]$Disable,
   [string]$ProjectRoot = "",
+  [string]$ConfigRelativePath = "",
   [string]$ServerUrl = "",
   [string]$HostIp = "",
   [int]$Port = 49321,
@@ -162,9 +163,25 @@ if (-not (Test-IsInsidePath -Path $projectPath -Root $repoRoot)) {
   throw "ProjectRoot must be inside the repository: $projectPath"
 }
 
-$configPath = Join-Path $projectPath "platform\debug_bridge_config.js"
-if (-not (Test-Path -LiteralPath (Split-Path -Parent $configPath) -PathType Container)) {
-  throw "Missing platform directory: $(Split-Path -Parent $configPath)"
+$configCandidates = if ([string]::IsNullOrWhiteSpace($ConfigRelativePath)) {
+  @("native\debug_bridge_config.js", "platform\debug_bridge_config.js")
+} else {
+  @($ConfigRelativePath)
+}
+
+$configPath = $null
+foreach ($candidate in $configCandidates) {
+  $candidatePath = [System.IO.Path]::GetFullPath((Join-Path $projectPath $candidate))
+  if (-not (Test-IsInsidePath -Path $candidatePath -Root $projectPath)) {
+    throw "ConfigRelativePath must remain inside ProjectRoot: $candidatePath"
+  }
+  if (Test-Path -LiteralPath (Split-Path -Parent $candidatePath) -PathType Container) {
+    $configPath = $candidatePath
+    break
+  }
+}
+if ($null -eq $configPath) {
+  throw "Could not find a debug bridge directory under $projectPath. Expected native/ or platform/."
 }
 
 if ($Disable) {

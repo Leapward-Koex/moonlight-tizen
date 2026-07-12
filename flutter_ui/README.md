@@ -6,19 +6,20 @@ existing `MoonLightS` application unchanged.
 
 ## Development
 
-Use the workspace FVM SDK (Flutter 3.44.1):
+Use Flutter 3.44.1. A machine-local agent override can document the selected
+SDK when it is not already on `PATH`:
 
 ```powershell
-C:\Users\ScottM\fvm\default\bin\flutter.bat pub get
-C:\Users\ScottM\fvm\default\bin\dart.bat run build_runner build --delete-conflicting-outputs
-C:\Users\ScottM\fvm\default\bin\flutter.bat test
-C:\Users\ScottM\fvm\default\bin\flutter.bat analyze
+flutter pub get
+dart run build_runner build --delete-conflicting-outputs
+flutter test
+flutter analyze
 ```
 
 Run the deterministic browser backend for UI development:
 
 ```powershell
-C:\Users\ScottM\fvm\default\bin\flutter.bat run -d chrome -t lib/main_fake.dart
+flutter run -d chrome -t lib/main_fake.dart
 ```
 
 The browser backend does not load the Samsung-specific Moonlight WASM runtime.

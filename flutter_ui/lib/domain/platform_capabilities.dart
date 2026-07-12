@@ -15,6 +15,7 @@ final class PlatformCapabilities {
     this.supportsRumble = false,
     this.supportsPointerLock = true,
     this.supportsRestart = false,
+    this.supportsNativeAudio = false,
     this.supportedCodecs = const <VideoCodec>{VideoCodec.h264},
   });
 
@@ -28,6 +29,7 @@ final class PlatformCapabilities {
   final bool supportsRumble;
   final bool supportsPointerLock;
   final bool supportsRestart;
+  final bool supportsNativeAudio;
   final Set<VideoCodec> supportedCodecs;
 
   bool get isTizen => platform.toLowerCase() == 'tizen';
@@ -57,6 +59,7 @@ final class PlatformCapabilities {
     supportsRumble: supportsRumble,
     supportsPointerLock: true,
     supportsRestart: true,
+    supportsNativeAudio: true,
     supportedCodecs: const {VideoCodec.h264, VideoCodec.hevc, VideoCodec.av1},
   );
 
@@ -76,6 +79,7 @@ final class PlatformCapabilities {
       supportsRumble: jsonBool(json['supportsRumble']),
       supportsPointerLock: jsonBool(json['supportsPointerLock'], true),
       supportsRestart: jsonBool(json['supportsRestart']),
+      supportsNativeAudio: jsonBool(json['supportsNativeAudio']),
       supportedCodecs: codecs.isEmpty ? const {VideoCodec.h264} : codecs,
     );
   }
@@ -91,6 +95,7 @@ final class PlatformCapabilities {
     'supportsRumble': supportsRumble,
     'supportsPointerLock': supportsPointerLock,
     'supportsRestart': supportsRestart,
+    'supportsNativeAudio': supportsNativeAudio,
     'supportedCodecs': supportedCodecs.map((codec) => codec.wireName).toList(),
   };
 }

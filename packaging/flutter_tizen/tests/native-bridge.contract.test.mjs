@@ -40,6 +40,7 @@ for (const filename of ['audio.js', 'tizen_platform.js', 'input.js']) {
 }
 assert.equal(browserContext.MoonlightTizenPlatform.isTizen(), false);
 assert.equal(browserContext.MoonlightTizenPlatform.getPlatformInfo().supportsNativeStreaming, false);
+assert.equal(browserContext.MoonlightTizenPlatform.getPlatformInfo().supportsNativeAudio, false);
 assert.equal(browserContext.MoonlightAudio.unlock(), false);
 assert.equal(browserContext.MoonlightInput.setMode('ui'), 'ui');
 assert.equal(typeof browserKeyDownListener, 'function');
@@ -192,6 +193,7 @@ const request = {
   mouseEmulation: true,
   flipAbButtons: true,
   flipXyButtons: true,
+  audioBackend: 'emss',
   audioConfiguration: '51Surround',
   audioPacketDurationMs: 5,
   audioJitterBufferMs: 125,
@@ -205,10 +207,11 @@ const request = {
   disabledCodecMimeTypes: ['video/av1', 'video/hevc']
 };
 const mapped = bridge.__testing.streamRequestToArgs(request);
-assert.equal(mapped.length, 29, 'native startStream ABI must remain 29 positional arguments');
+assert.equal(mapped.length, 30, 'native startStream ABI must remain 30 positional arguments');
 assert.deepEqual(mapped.slice(0, 6), ['192.0.2.10', 47989, '1920', '1080', '120', '30000']);
 assert.deepEqual(mapped.slice(6, 12), ['key', 'key-id', '7.1.0', '3.27', 'rtsp://session', 7]);
-assert.equal(mapped[28], 'video/av1\nvideo/hevc');
+assert.equal(mapped[18], 'emss');
+assert.equal(mapped[29], 'video/av1\nvideo/hevc');
 
 assert.deepEqual(
   bridge.__testing.parseLifecycle('streamStartFailed: 4:-200:renderer failed'),
@@ -269,7 +272,7 @@ const streamResult = await bridge.startStream(request);
 assert.equal(streamResult.attemptId, 42);
 assert.equal(documentElement.dataset.streamState, 'active');
 assert.equal(MoonlightInput.mode, 'stream');
-assert.equal(calls.find((call) => call[0] === 'startStream').length, 30);
+assert.equal(calls.find((call) => call[0] === 'startStream').length, 31);
 
 await bridge.toggleStats();
 assert.deepEqual(await bridge.probeVideoCodecSupport(request), { selectedMimeType: 'video/hevc' });
@@ -308,6 +311,10 @@ assert.ok(
 assert.ok(
   index.indexOf('native/debug_bridge_config.js') < index.indexOf('native/debug_bridge.js'),
   'The debug bridge configuration must load before the bridge'
+);
+assert.match(
+  fs.readFileSync(path.join(workspace, 'flutter_ui', 'web', 'native', 'audio-worklet.js'), 'utf8'),
+  /registerProcessor\('moonlight-pcm-sink'/
 );
 
 const bootstrap = fs.readFileSync(
