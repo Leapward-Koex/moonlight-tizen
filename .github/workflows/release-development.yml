@@ -178,7 +178,7 @@ jobs:
           fi
       - name: Run runtime container
         run: |
-          docker run -d --name runtime_container $RUNTIME_IMAGE
+          docker run -d --name runtime_container "$RUNTIME_IMAGE" sleep infinity
       - name: Copy native runtime for Flutter packaging
         run: |
           mkdir -p build/flutter-runtime
