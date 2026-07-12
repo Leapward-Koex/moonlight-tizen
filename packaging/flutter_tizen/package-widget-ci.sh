@@ -12,9 +12,9 @@ for widget_dir in "$@"; do
     exit 1
   fi
 
-  expect -c '
+  WIDGET_DIR="$widget_dir" expect -c '
     set timeout -1
-    set widget_dir [lindex $argv 0]
+    set widget_dir $env(WIDGET_DIR)
     spawn tizen package -t wgt -- $widget_dir
     expect "Author password:"
     send -- "123456\r"
@@ -25,7 +25,7 @@ for widget_dir in "$@"; do
       }
       eof
     }
-  ' "$widget_dir"
+  '
 
   if [ ! -f "$widget_dir/MoonlightFlutter.wgt" ]; then
     echo "Tizen packaging did not create MoonlightFlutter.wgt in $widget_dir" >&2
