@@ -27,14 +27,14 @@ Future<void> main() async {
       'applicationId': 'MLFlutter1.MoonlightFlutter',
     });
     _installGlobalErrorLogging(runtime);
-    final storage = await IndexedDbPersistentStateStore.open();
+    final storage = await TizenPrivateFilePersistentStateStore.open();
     runtime.logDiagnostic('info', 'app.persistence.opened', {
-      'database': 'MoonlightFlutterState',
+      'backend': 'tizen-private-file',
     });
     final savedIdentity = await _readIdentity(storage);
     final native = await createNativeProductionBundle(
       identity: savedIdentity,
-      boxArtCache: PersistentBoxArtCache(storage.backend),
+      boxArtCache: await openPersistentBoxArtCache(),
       runtime: runtime,
     );
     native.runtime.logDiagnostic('info', 'app.bootstrap.native_ready', {

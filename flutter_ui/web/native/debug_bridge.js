@@ -93,17 +93,37 @@
   }
 
   function getClientId() {
-    var key = 'moonlightFlutterDebugBridgeClientId';
+    var path = 'wgt-private/state/debug-bridge-client-id.txt';
+    var handle = null;
     try {
-      var existing = window.localStorage && window.localStorage.getItem(key);
-      if (existing) {
-        return existing;
+      if (window.tizen && tizen.filesystem &&
+          typeof tizen.filesystem.openFile === 'function') {
+        try {
+          handle = tizen.filesystem.openFile(path, 'r');
+          if (typeof handle.readString === 'function') {
+            var existing = String(handle.readString() || '');
+            handle.close();
+            handle = null;
+            if (existing) {
+              return existing;
+            }
+          }
+        } catch (_) {
+          if (handle && typeof handle.close === 'function') handle.close();
+          handle = null;
+        }
       }
       var created = 'flutter-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
-      window.localStorage.setItem(key, created);
+      if (window.tizen && tizen.filesystem &&
+          typeof tizen.filesystem.openFile === 'function') {
+        handle = tizen.filesystem.openFile(path, 'w');
+        if (typeof handle.writeString === 'function') handle.writeString(created);
+      }
       return created;
     } catch (error) {
       return 'flutter-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+    } finally {
+      if (handle && typeof handle.close === 'function') handle.close();
     }
   }
 

@@ -84,34 +84,7 @@ RUN --mount=type=cache,target=/home/moonlight/.ccache,uid=1000,gid=1000 \
 	--mount=type=cache,target=/home/moonlight/.emscripten_ports,uid=1000,gid=1000 \
 	CCACHE_DIR=/home/moonlight/.ccache cmake --build build
 
-# Copy the remaining frontend files required for packaging the application
-COPY --chown=moonlight wasm/config.xml ./moonlight-tizen/wasm/
-COPY --chown=moonlight wasm/icon.png ./moonlight-tizen/wasm/
-COPY --chown=moonlight wasm/index.html ./moonlight-tizen/wasm/
-COPY --chown=moonlight wasm/platform.js ./moonlight-tizen/wasm/
-COPY --chown=moonlight wasm/platform/ ./moonlight-tizen/wasm/platform/
-COPY --chown=moonlight wasm/static/ ./moonlight-tizen/wasm/static/
-
-RUN cmake --install build --prefix build
-
-ARG FORCE_GAME_MODE=true
-
-# Remove the Samsung Game Mode metadata for standard builds
-RUN if [ "$FORCE_GAME_MODE" != "true" ]; then \
-	sed -i '/http:\/\/samsung.com\/tv\/metadata\/use.game.mode/d' build/widget/config.xml; \
-	fi
-
-# Sign and package the application into a WGT file using Expect to automate the interactive password prompts
-RUN echo \
-	'set timeout -1\n' \
-	'spawn tizen package -t wgt -- build/widget\n' \
-	'expect "Author password:"\n' \
-	'send -- "123456\\r"\n' \
-	'expect "Yes: (Y), No: (N) ?"\n' \
-	'send -- "N\\r"\n' \
-	'expect eof\n' \
-| expect
-RUN mv build/widget/Moonlight.wgt .
+RUN cmake --install build --prefix runtime
 
 # Clean up unnecessary files to reduce image size
 RUN rm -rf \

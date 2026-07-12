@@ -4,5 +4,4 @@
 - When investigating app runtime behavior, startup loading failures, missing logs, or emulator input issues, use the Remote Debug Bridge from the Tizen skill first. It can collect app logs and issue allowlisted commands such as `getState`, `nav`, and `addHost` without relying on `dlog`, inspector access, or emulator text entry.
 - Never print `.env` values or certificate passwords. Treat Samsung certificate files and generated `.pwd` files as secrets.
 - Generated WGTs, unpacked widgets, and signing scratch files belong under ignored `build/codex-tizen-run/`.
-- For the current Flutter preview, prefer the verified one-command workflow in `DEVELOPMENT.md`: `packaging/flutter_tizen/build-emulator.ps1`. Do not reconstruct staging or ZIP/signing commands by hand.
-- Treat `README.Samsung.md` as the legacy DOM-widget workflow. The current Flutter package uses package ID `MLFlutter1`; the legacy package uses `MoonLightS`.
+- For the Flutter app, prefer the verified one-command workflow in `DEVELOPMENT.md`: `packaging/flutter_tizen/build-emulator.ps1`. Do not reconstruct staging or ZIP/signing commands by hand.

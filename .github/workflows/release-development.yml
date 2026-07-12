@@ -18,8 +18,7 @@ jobs:
       issues: write
       actions: write
     outputs:
-      standard_image: ${{ steps.image_tags.outputs.standard }}
-      forcegm_image: ${{ steps.image_tags.outputs.forcegm }}
+      runtime_image: ${{ steps.image_tags.outputs.runtime }}
       short_sha: ${{ github.sha }}
     # This job checks out the code, logs into GitHub Container Registry, builds the Docker image with metadata, pushes it to the registry, and triggers the next workflow via repository dispatch.
     steps:
@@ -42,35 +41,17 @@ jobs:
         id: image_tags
         run: |
           IMAGE_NAME=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
-          echo "standard=${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}-standard" >> "$GITHUB_OUTPUT"
-          echo "forcegm=${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}-forcegm" >> "$GITHUB_OUTPUT"
-      # This step injects build metadata (build type and short commit SHA) into the system information field by replacing placeholders in the `wasm/platform/index.js` file. This allows the application to display build information on development builds.
-      - name: Inject build metadata into system information
-        run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          sed -i "s/__BUILD_TYPE__/development/g" wasm/platform/index.js
-          sed -i "s/__BUILD_COMMIT__/$SHORT_SHA/g" wasm/platform/index.js
+          echo "runtime=${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}-runtime" >> "$GITHUB_OUTPUT"
       # This step uses the `docker/build-push-action` action to build the image, based on your repository's `Dockerfile`. If the build succeeds, it pushes the image to GitHub Packages.
       # It uses the `context` parameter to define the build's context as the set of files located in the specified path. For more information, see "[Usage](https://github.com/docker/build-push-action#usage)" in the README of the `docker/build-push-action` repository.
       # It uses the `tags` and `labels` parameters to tag and label the image with the output from the "meta" step.
-      - name: Build and push standard Docker image
+      - name: Build and push runtime image
         uses: docker/build-push-action@v3
         with:
           context: .
           push: true
-          tags: ${{ steps.image_tags.outputs.standard }}
+          tags: ${{ steps.image_tags.outputs.runtime }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            FORCE_GAME_MODE=false
-      - name: Build and push Force Game Mode Docker image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.image_tags.outputs.forcegm }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            FORCE_GAME_MODE=true
   build-flutter-web:
     runs-on: ubuntu-latest
     permissions:
@@ -161,8 +142,7 @@ jobs:
       # Sets the full Docker image tags using the output from the 'build-and-push-image' job.
       - name: Set up image tags
         run: |
-          echo "STANDARD_IMAGE=${{ needs.build-and-push-image.outputs.standard_image }}" >> $GITHUB_ENV
-          echo "FORCEGM_IMAGE=${{ needs.build-and-push-image.outputs.forcegm_image }}" >> $GITHUB_ENV
+          echo "RUNTIME_IMAGE=${{ needs.build-and-push-image.outputs.runtime_image }}" >> $GITHUB_ENV
       # Deletes any existing GitHub pre-releases from the same branch to avoid duplicates.
       - name: Check and delete any existing GitHub pre-releases from the same branch
         env:
@@ -196,20 +176,13 @@ jobs:
             done
             echo "Cleanup completed."
           fi
-      # Runs the Docker containers in detached mode to extract the build artifacts.
-      - name: Run Docker containers
+      - name: Run runtime container
         run: |
-          docker run -d --name standard_container $STANDARD_IMAGE
-          docker run -d --name forcegm_container $FORCEGM_IMAGE
-      # Copies the built widget files from the Docker container.
-      - name: Copy artifacts from Docker container
-        run: |
-          docker cp standard_container:/home/moonlight/Moonlight.wgt ./Moonlight.wgt
-          docker cp forcegm_container:/home/moonlight/Moonlight.wgt ./Moonlight-ForceGM.wgt
-      - name: Extract native runtime for Flutter packaging
+          docker run -d --name runtime_container $RUNTIME_IMAGE
+      - name: Copy native runtime for Flutter packaging
         run: |
           mkdir -p build/flutter-runtime
-          unzip -j Moonlight.wgt 'moonlight-wasm*' -d build/flutter-runtime
+          docker cp runtime_container:/home/moonlight/runtime/. build/flutter-runtime
           test -f build/flutter-runtime/moonlight-wasm.js
           test -f build/flutter-runtime/moonlight-wasm.js.mem
           test -f build/flutter-runtime/moonlight-wasm.wasm
@@ -228,23 +201,22 @@ jobs:
             -ForceGameMode
       - name: Sign Flutter Tizen widgets
         run: |
-          docker cp build/flutter-tizen/widget-standard standard_container:/home/moonlight/flutter-widget-standard
-          docker cp build/flutter-tizen/widget-force-game-mode standard_container:/home/moonlight/flutter-widget-force-game-mode
-          docker cp packaging/flutter_tizen/package-widget-ci.sh standard_container:/home/moonlight/package-widget-ci.sh
-          docker exec -u root standard_container chown -R moonlight:moonlight \
+          docker cp build/flutter-tizen/widget-standard runtime_container:/home/moonlight/flutter-widget-standard
+          docker cp build/flutter-tizen/widget-force-game-mode runtime_container:/home/moonlight/flutter-widget-force-game-mode
+          docker cp packaging/flutter_tizen/package-widget-ci.sh runtime_container:/home/moonlight/package-widget-ci.sh
+          docker exec -u root runtime_container chown -R moonlight:moonlight \
             /home/moonlight/flutter-widget-standard \
             /home/moonlight/flutter-widget-force-game-mode \
             /home/moonlight/package-widget-ci.sh
-          docker exec standard_container bash /home/moonlight/package-widget-ci.sh \
+          docker exec runtime_container bash /home/moonlight/package-widget-ci.sh \
             /home/moonlight/flutter-widget-standard \
             /home/moonlight/flutter-widget-force-game-mode
-          docker cp standard_container:/home/moonlight/flutter-widget-standard/MoonlightFlutter.wgt ./MoonlightFlutter.wgt
-          docker cp standard_container:/home/moonlight/flutter-widget-force-game-mode/MoonlightFlutter.wgt ./MoonlightFlutter-ForceGM.wgt
-      # Stops and removes the temporary Docker container to clean up resources.
-      - name: Stop and remove Docker containers
+          docker cp runtime_container:/home/moonlight/flutter-widget-standard/MoonlightFlutter.wgt ./MoonlightFlutter.wgt
+          docker cp runtime_container:/home/moonlight/flutter-widget-force-game-mode/MoonlightFlutter.wgt ./MoonlightFlutter-ForceGM.wgt
+      - name: Stop and remove runtime container
         run: |
-          docker stop standard_container forcegm_container
-          docker rm standard_container forcegm_container
+          docker stop runtime_container
+          docker rm runtime_container
       # Creates a new GitHub pre-release using the extracted version and includes a detailed description.
       - name: Create GitHub pre-release
         id: create_prerelease
@@ -259,10 +231,8 @@ jobs:
 
             - Ensure your setup meets the necessary [requirements](https://github.com/brightcraft/moonlight-tizen#%EF%B8%8F-prerequisites) for the best possible streaming experience.
             - Choose the appropriate variant from the release assets:
-              - **Standard:** Download `Moonlight.wgt` (does not force Game Mode).
-              - **Force Game Mode:** Download `Moonlight-ForceGM.wgt`, which includes the Samsung Game Mode metadata.
-              - **Flutter preview:** Download `MoonlightFlutter.wgt` to install the side-by-side Flutter UI preview.
-              - **Flutter preview + Force Game Mode:** Download `MoonlightFlutter-ForceGM.wgt`.
+              - **Standard:** Download `MoonlightFlutter.wgt`.
+              - **Force Game Mode:** Download `MoonlightFlutter-ForceGM.wgt`, which includes the Samsung Game Mode metadata.
             - Follow the instructions from one of the recommended [installation methods](https://github.com/brightcraft/moonlight-tizen/wiki/Installation-Guide) to install the application on your TV.
 
             ## What's Changed:
@@ -277,27 +247,7 @@ jobs:
             > Please report any unexpected behavior and provide feedback to help improve future releases.
           draft: false
           prerelease: true
-      # Uploads the Moonlight.wgt file as a release asset in the newly created GitHub pre-release.
       - name: Upload the widget file to GitHub pre-release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_prerelease.outputs.upload_url }}
-          asset_path: ./Moonlight.wgt
-          asset_name: Moonlight.wgt
-          asset_content_type: application/octet-stream
-      # Uploads the Moonlight-ForceGM.wgt file as a release asset in the newly created GitHub pre-release.
-      - name: Upload the Force Game Mode widget file to GitHub pre-release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_prerelease.outputs.upload_url }}
-          asset_path: ./Moonlight-ForceGM.wgt
-          asset_name: Moonlight-ForceGM.wgt
-          asset_content_type: application/octet-stream
-      - name: Upload the Flutter widget file to GitHub pre-release
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -306,7 +256,7 @@ jobs:
           asset_path: ./MoonlightFlutter.wgt
           asset_name: MoonlightFlutter.wgt
           asset_content_type: application/octet-stream
-      - name: Upload the Flutter Force Game Mode widget file to GitHub pre-release
+      - name: Upload the Force Game Mode widget file to GitHub pre-release
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

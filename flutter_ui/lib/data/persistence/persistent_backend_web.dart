@@ -1,83 +1,58 @@
-import 'dart:async';
+import 'dart:convert';
 import 'dart:js_interop';
-
-import 'package:web/web.dart';
 
 import 'persistent_backend.dart';
 
-const _databaseName = 'MoonlightFlutterState';
-const _objectStoreName = 'riverpod';
+const _stateRoot = 'wgt-private/state';
 
-Future<PersistentBackend> openPersistentBackend() async {
-  final completer = Completer<IDBDatabase>();
-  final request = window.indexedDB.open(_databaseName, 1);
-  request.onupgradeneeded = ((Event _) {
-    final database = request.result as IDBDatabase;
-    if (!database.objectStoreNames.contains(_objectStoreName)) {
-      database.createObjectStore(_objectStoreName);
-    }
-  }).toJS;
-  request.onsuccess = ((Event _) {
-    completer.complete(request.result as IDBDatabase);
-  }).toJS;
-  request.onerror = ((Event _) {
-    completer.completeError(
-      StateError('Unable to open $_databaseName: ${request.error?.message}'),
-    );
-  }).toJS;
-  return IndexedDbBackend(await completer.future);
+@JS('MoonlightTizenPlatform')
+external JSObject? get _tizenPlatformObject;
+
+extension type _TizenPlatformFacade(JSObject _) implements JSObject {
+  external JSBoolean hasPrivateStateStorage();
+  external JSPromise<JSString?> readPrivateTextFile(JSString path);
+  external JSPromise<JSAny?> writePrivateTextFile(
+    JSString path,
+    JSString value,
+  );
+  external JSPromise<JSAny?> deletePrivateFile(JSString path);
 }
 
-final class IndexedDbBackend implements PersistentBackend {
-  IndexedDbBackend(this._database);
+Future<PersistentBackend> openPersistentBackend() async {
+  final object = _tizenPlatformObject;
+  if (object == null) {
+    throw StateError('window.MoonlightTizenPlatform is unavailable.');
+  }
+  final platform = _TizenPlatformFacade(object);
+  if (!platform.hasPrivateStateStorage().toDart) {
+    throw StateError('Tizen private state storage is unavailable.');
+  }
+  return _TizenPrivateFileBackend(platform);
+}
 
-  final IDBDatabase _database;
+final class _TizenPrivateFileBackend implements PersistentBackend {
+  _TizenPrivateFileBackend(this._platform);
 
-  @override
-  Future<String?> read(String key) {
-    final transaction = _database.transaction(
-      _objectStoreName.toJS,
-      'readonly',
-    );
-    final request = transaction.objectStore(_objectStoreName).get(key.toJS);
-    return _completeRequest(request, (result) => result?.dartify()?.toString());
+  final _TizenPlatformFacade _platform;
+
+  JSString _path(String key) {
+    final encoded = base64Url.encode(utf8.encode(key)).replaceAll('=', '');
+    return '$_stateRoot/$encoded.json'.toJS;
   }
 
   @override
-  Future<void> write(String key, String value) {
-    final transaction = _database.transaction(
-      _objectStoreName.toJS,
-      'readwrite',
-    );
-    final request = transaction
-        .objectStore(_objectStoreName)
-        .put(value.toJS, key.toJS);
-    return _completeRequest<void>(request, (_) {});
+  Future<String?> read(String key) async {
+    final result = await _platform.readPrivateTextFile(_path(key)).toDart;
+    return result?.toDart;
   }
 
   @override
-  Future<void> delete(String key) {
-    final transaction = _database.transaction(
-      _objectStoreName.toJS,
-      'readwrite',
-    );
-    final request = transaction.objectStore(_objectStoreName).delete(key.toJS);
-    return _completeRequest<void>(request, (_) {});
+  Future<void> write(String key, String value) async {
+    await _platform.writePrivateTextFile(_path(key), value.toJS).toDart;
   }
 
-  Future<T> _completeRequest<T>(
-    IDBRequest request,
-    T Function(JSAny? value) convert,
-  ) {
-    final completer = Completer<T>();
-    request.onsuccess = ((Event _) {
-      completer.complete(convert(request.result));
-    }).toJS;
-    request.onerror = ((Event _) {
-      completer.completeError(
-        StateError('IndexedDB request failed: ${request.error?.message}'),
-      );
-    }).toJS;
-    return completer.future;
+  @override
+  Future<void> delete(String key) async {
+    await _platform.deletePrivateFile(_path(key)).toDart;
   }
 }

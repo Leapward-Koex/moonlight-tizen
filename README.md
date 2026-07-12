@@ -1,7 +1,7 @@
 # Moonlight Tizen
 
 [![Release Version](https://img.shields.io/github/v/release/brightcraft/moonlight-tizen?style=for-the-badge&logo=github)](https://github.com/brightcraft/moonlight-tizen/releases/latest)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/brightcraft/moonlight-tizen/release-stable.yml?branch=master&style=for-the-badge&logo=docker)](https://github.com/brightcraft/moonlight-tizen/actions/workflows/release-stable.yml)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/brightcraft/moonlight-tizen/flutter-web-ui.yml?branch=master&style=for-the-badge&logo=flutter)](https://github.com/brightcraft/moonlight-tizen/actions/workflows/flutter-web-ui.yml)
 [![Total Downloads](https://img.shields.io/github/downloads/brightcraft/moonlight-tizen/total?style=for-the-badge&logo=github)](https://github.com/brightcraft/moonlight-tizen/releases)
 [![Discord Community](https://img.shields.io/badge/Discord-Community-7289DA?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/vr62ZDH236)
 
@@ -16,7 +16,7 @@ This application allows you to stream your collection of games, programs, or you
 
 ## ✨ Features
 
-- Compatible with all supported Tizen versions (5.5 or higher).
+- Targets Samsung TVs running Tizen 10.
 - Supports streaming using NVIDIA GameStream or Sunshine (including popular forks).
 - Modern UI & UX with a clean interface and smooth navigation.
 - Up to 4K 120 FPS HDR streaming with Stereo sound.
@@ -41,7 +41,7 @@ This application allows you to stream your collection of games, programs, or you
 ## ⚙️ Prerequisites
 
 Before proceeding with the installation, please take a moment to ensure that your current hardware, network, and input setup fully meet the necessary requirements described below:
-- **Client:** Samsung Smart TV running Tizen OS version 5.5 or newer (model year 2020 onwards).
+- **Client:** Samsung Smart TV running Tizen 10.
 - **Host:** Gaming PC with a GPU capable of hardware encoding that meets the [system requirements](https://docs.lizardbyte.dev/projects/sunshine/latest/index.html#%EF%B8%8F-system-requirements) for optimal streaming performance.
 - **Network:** Mid-range or high-end wireless router with a stable wireless connection (Wi-Fi 5/6) for the TV and a wired gigabit Ethernet connection (CAT5e or better) for the host PC are strongly recommended.
 - **Input:** [Supported gamepad](https://github.com/brightcraft/moonlight-tizen/wiki/Frequently-Asked-Questions#what-gamepad-controllers-are-supported-on-samsung-tv) connected to your TV or directly connected to a nearby PC is highly recommended for the best streaming experience.

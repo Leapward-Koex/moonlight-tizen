@@ -3,7 +3,7 @@
     <access origin="*"/>
     <tizen:application id="MLFlutter1.MoonlightFlutter" package="MLFlutter1" required_version="10.0" launch_mode="caller"/>
     <content src="index.html"/>
-    <description>Moonlight Game Streaming — Flutter preview (Force Game Mode)</description>
+    <description>Moonlight Game Streaming (Force Game Mode)</description>
     <feature name="http://tizen.org/feature/screen.size.all"/>
     <icon src="icons/Icon-512.png"/>
     <tizen:metadata key="http://samsung.com/tv/metadata/use.voiceguide" value="false"/>
@@ -19,7 +19,6 @@
     <tizen:privilege name="http://tizen.org/privilege/filesystem.read"/>
     <tizen:privilege name="http://tizen.org/privilege/filesystem.write"/>
     <tizen:privilege name="http://tizen.org/privilege/mediastorage"/>
-    <tizen:privilege name="http://tizen.org/privilege/unlimitedstorage"/>
     <tizen:privilege name="http://tizen.org/privilege/ime"/>
     <tizen:privilege name="http://tizen.org/privilege/tv.audio"/>
     <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>

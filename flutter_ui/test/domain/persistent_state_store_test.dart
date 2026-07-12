@@ -29,8 +29,7 @@ void main() {
   });
 
   test('box art cache round-trips bytes and clears a host', () async {
-    final store = InMemoryPersistentStateStore();
-    final cache = PersistentBoxArtCache(store.backend);
+    final cache = InMemoryBoxArtCache();
     const host = SavedHost(id: 'pc', hostname: 'PC', address: '10.0.0.2');
     final bytes = Uint8List.fromList([0, 1, 2, 254, 255]);
 

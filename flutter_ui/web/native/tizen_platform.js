@@ -169,6 +169,140 @@
     return tizen.filesystem.openFile(path, mode);
   }
 
+  function hasPrivateFileStorage() {
+    var tizen = getTizen();
+    return !!(tizen && tizen.filesystem &&
+      typeof tizen.filesystem.openFile === 'function' &&
+      typeof tizen.filesystem.deleteDirectory === 'function');
+  }
+
+  function hasPrivateStateStorage() {
+    var tizen = getTizen();
+    return !!(tizen && tizen.filesystem &&
+      typeof tizen.filesystem.openFile === 'function' &&
+      typeof tizen.filesystem.deleteFile === 'function');
+  }
+
+  function normalizePrivatePath(path) {
+    var normalized = String(path);
+    if (normalized !== 'wgt-private/cache/boxart' &&
+        normalized.indexOf('wgt-private/cache/boxart/') !== 0) {
+      throw new Error('Private cache path is outside the box-art root.');
+    }
+    return normalized;
+  }
+
+  function isNotFoundError(error) {
+    return !!error && (error.name === 'NotFoundError' || error.code === 8);
+  }
+
+  function normalizeStatePath(path) {
+    var normalized = String(path);
+    if (normalized.indexOf('wgt-private/state/') !== 0) {
+      throw new Error('Private state path is outside the state root.');
+    }
+    return normalized;
+  }
+
+  function readPrivateTextFile(path) {
+    return Promise.resolve().then(function() {
+      var handle;
+      try {
+        handle = openFile(normalizeStatePath(path), 'r');
+        if (typeof handle.readString !== 'function') {
+          throw new Error('This Tizen filesystem API cannot read text.');
+        }
+        return handle.readString() || '';
+      } catch (error) {
+        if (isNotFoundError(error)) {
+          return null;
+        }
+        throw error;
+      } finally {
+        closeFile(handle);
+      }
+    });
+  }
+
+  function writePrivateTextFile(path, value) {
+    return Promise.resolve().then(function() {
+      var handle = openFile(normalizeStatePath(path), 'w');
+      try {
+        if (typeof handle.writeString !== 'function') {
+          throw new Error('This Tizen filesystem API cannot write text.');
+        }
+        handle.writeString(String(value));
+      } finally {
+        closeFile(handle);
+      }
+    });
+  }
+
+  function deletePrivateFile(path) {
+    return Promise.resolve().then(function() {
+      var tizen = getTizen();
+      var normalized = normalizeStatePath(path);
+      try {
+        tizen.filesystem.deleteFile(normalized);
+      } catch (error) {
+        if (!isNotFoundError(error)) {
+          throw error;
+        }
+      }
+    });
+  }
+
+  function readPrivateFile(path) {
+    return Promise.resolve().then(function() {
+      var handle;
+      try {
+        handle = openFile(normalizePrivatePath(path), 'r');
+        if (typeof handle.readData !== 'function') {
+          throw new Error('This Tizen filesystem API cannot read binary data.');
+        }
+        return handle.readData();
+      } catch (error) {
+        if (isNotFoundError(error)) {
+          return null;
+        }
+        throw error;
+      } finally {
+        closeFile(handle);
+      }
+    });
+  }
+
+  function writePrivateFile(path, bytes) {
+    return Promise.resolve().then(function() {
+      var handle = openFile(normalizePrivatePath(path), 'w');
+      try {
+        if (typeof handle.writeData !== 'function') {
+          throw new Error('This Tizen filesystem API cannot write binary data.');
+        }
+        handle.writeData(bytes);
+      } finally {
+        closeFile(handle);
+      }
+    });
+  }
+
+  function deletePrivateDirectory(path) {
+    return Promise.resolve().then(function() {
+      var tizen = getTizen();
+      var normalized = normalizePrivatePath(path);
+      if (!tizen || !tizen.filesystem || typeof tizen.filesystem.deleteDirectory !== 'function') {
+        throw new Error('Tizen filesystem directory deletion is unavailable.');
+      }
+      try {
+        tizen.filesystem.deleteDirectory(normalized, true);
+      } catch (error) {
+        if (!isNotFoundError(error)) {
+          throw error;
+        }
+      }
+    });
+  }
+
   function closeFile(handle) {
     if (handle && typeof handle.close === 'function') {
       handle.close();
@@ -273,6 +407,14 @@
     restartApp: restartApp,
     exitApp: exitApp,
     getIpAddress: getIpAddress,
+    hasPrivateStateStorage: hasPrivateStateStorage,
+    readPrivateTextFile: readPrivateTextFile,
+    writePrivateTextFile: writePrivateTextFile,
+    deletePrivateFile: deletePrivateFile,
+    hasPrivateFileStorage: hasPrivateFileStorage,
+    readPrivateFile: readPrivateFile,
+    writePrivateFile: writePrivateFile,
+    deletePrivateDirectory: deletePrivateDirectory,
     writeTextFile: writeTextFile,
     readTextFile: readTextFile,
     fileUri: fileUri,

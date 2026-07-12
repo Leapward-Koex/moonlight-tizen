@@ -1,6 +1,6 @@
 # Moonlight Flutter Tizen packaging
 
-The Flutter preview uses an identity separate from the legacy widget:
+The Flutter Tizen app uses this identity:
 
 - package: `MLFlutter1`
 - application: `MLFlutter1.MoonlightFlutter`

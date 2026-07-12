@@ -13,7 +13,7 @@ part 'app_state.g.dart';
 
 @Riverpod(keepAlive: true)
 Future<PersistentStateStore> persistentStateStore(Ref ref) =>
-    IndexedDbPersistentStateStore.open();
+    TizenPrivateFilePersistentStateStore.open();
 
 @Riverpod(keepAlive: true)
 PlatformCapabilities platformCapabilities(Ref ref) =>

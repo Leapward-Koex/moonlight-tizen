@@ -1863,7 +1863,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
     showMoonlightDialog<void>(
       context: context,
       builder: (dialogContext) => SupportDialog(
-        version: '1.13.0 (Flutter preview)',
+        version: '1.13.0',
         onClose: () => Navigator.of(dialogContext).pop(),
       ),
     );

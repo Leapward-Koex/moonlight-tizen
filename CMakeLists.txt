@@ -293,11 +293,5 @@ set(EMSCRIPTEN_OUTPUT_FILES
   "${CMAKE_CURRENT_BINARY_DIR}/moonlight-wasm.worker.js"
 )
 
-install(TARGETS moonlight-wasm RUNTIME DESTINATION widget)
-install(FILES ${EMSCRIPTEN_OUTPUT_FILES} DESTINATION widget OPTIONAL)
-install(DIRECTORY wasm/static DESTINATION widget)
-install(DIRECTORY wasm/platform DESTINATION widget)
-install(FILES wasm/index.html DESTINATION widget)
-install(FILES wasm/config.xml DESTINATION widget)
-install(FILES wasm/icon.png DESTINATION widget)
-install(FILES wasm/platform.js DESTINATION widget)
+install(TARGETS moonlight-wasm RUNTIME DESTINATION .)
+install(FILES ${EMSCRIPTEN_OUTPUT_FILES} DESTINATION . OPTIONAL)

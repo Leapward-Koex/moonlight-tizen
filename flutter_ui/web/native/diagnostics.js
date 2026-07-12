@@ -1,11 +1,9 @@
 (function() {
   'use strict';
 
-  var LOG_LEVEL_KEY = 'moonlightFlutterLogLevel';
+  var LOG_LEVEL_PATH = 'wgt-private/state/diagnostics-level.txt';
   var LOG_FILE_PATH = 'wgt-private/logs/moonlight-flutter-log.ndjson';
-  var FALLBACK_LOG_KEY = 'moonlightFlutterLogFallback';
   var MAX_LOG_BYTES = 10 * 1024 * 1024;
-  var MAX_FALLBACK_BYTES = 1024 * 1024;
   var MAX_MEMORY_ENTRIES = 200;
   var MAX_QUEUE_ENTRIES = 500;
   var FLUSH_DELAY_MS = 500;
@@ -61,23 +59,37 @@
   }
 
   function readStoredLevel() {
+    var handle = null;
     try {
-      if (!window.localStorage) {
-        return 'off';
+      if (window.tizen && tizen.filesystem &&
+          typeof tizen.filesystem.openFile === 'function') {
+        handle = tizen.filesystem.openFile(LOG_LEVEL_PATH, 'r');
+        return typeof handle.readString === 'function'
+          ? String(handle.readString() || 'info')
+          : 'info';
       }
-      return window.localStorage.getItem(LOG_LEVEL_KEY) || 'info';
+      return 'info';
     } catch (error) {
-      return 'off';
+      return 'info';
+    } finally {
+      closeHandle(handle);
     }
   }
 
   function writeStoredLevel(level) {
+    var handle = null;
     try {
-      if (window.localStorage) {
-        window.localStorage.setItem(LOG_LEVEL_KEY, normalizeLevel(level));
+      if (window.tizen && tizen.filesystem &&
+          typeof tizen.filesystem.openFile === 'function') {
+        handle = tizen.filesystem.openFile(LOG_LEVEL_PATH, 'w');
+        if (typeof handle.writeString === 'function') {
+          handle.writeString(normalizeLevel(level));
+        }
       }
     } catch (error) {
-      // Ignore storage failures. The IndexedDB mirror in index.js is best effort too.
+      // The Riverpod settings provider also persists the selected level.
+    } finally {
+      closeHandle(handle);
     }
   }
 
@@ -234,33 +246,6 @@
     return !!(window.tizen && tizen.filesystem && typeof tizen.filesystem.openFile === 'function');
   }
 
-  function fallbackStorageAvailable() {
-    try {
-      return !!window.localStorage;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  function readFallbackText() {
-    try {
-      return window.localStorage.getItem(FALLBACK_LOG_KEY) || '';
-    } catch (error) {
-      return '';
-    }
-  }
-
-  function writeFallbackText(text) {
-    try {
-      var trimmed = trimTextToLimit(text, MAX_FALLBACK_BYTES);
-      window.localStorage.setItem(FALLBACK_LOG_KEY, trimmed);
-      lastKnownSize = byteLength(trimmed);
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
-
   function closeHandle(handle) {
     try {
       if (handle && typeof handle.close === 'function') {
@@ -288,7 +273,7 @@
   function readLogText() {
     return new Promise(function(resolve) {
       if (!filesystemAvailable()) {
-        resolve(readFallbackText());
+        resolve('');
         return;
       }
 
@@ -325,7 +310,7 @@
 
   function replaceLogText(text) {
     if (!filesystemAvailable()) {
-      return writeFallbackText(text);
+      return false;
     }
     var handle = null;
     try {
@@ -373,7 +358,7 @@
 
   function appendLogText(text) {
     if (!filesystemAvailable()) {
-      return writeFallbackText(readFallbackText() + text);
+      return false;
     }
     var handle = null;
     try {
@@ -549,8 +534,8 @@
         path: LOG_FILE_PATH,
         maxBytes: MAX_LOG_BYTES,
         sizeBytes: lastKnownSize,
-        available: filesystemAvailable() || fallbackStorageAvailable(),
-        storage: filesystemAvailable() ? 'tizen-private-file' : 'localStorage',
+        available: filesystemAvailable(),
+        storage: filesystemAvailable() ? 'tizen-private-file' : 'unavailable',
         pendingEntries: fileQueue.length,
         lastWriteFailed: lastWriteFailed
       };
@@ -564,8 +549,8 @@
       path: LOG_FILE_PATH,
       maxBytes: MAX_LOG_BYTES,
       sizeBytes: lastKnownSize,
-      available: filesystemAvailable() || fallbackStorageAvailable(),
-      storage: filesystemAvailable() ? 'tizen-private-file' : 'localStorage',
+      available: filesystemAvailable(),
+      storage: filesystemAvailable() ? 'tizen-private-file' : 'unavailable',
       pendingEntries: fileQueue.length,
       recentEntries: recentEntries.length,
       lastWriteFailed: lastWriteFailed
@@ -576,12 +561,7 @@
     fileQueue = [];
     lastKnownSize = 0;
     if (!filesystemAvailable()) {
-      try {
-        window.localStorage.removeItem(FALLBACK_LOG_KEY);
-        return Promise.resolve(true);
-      } catch (error) {
-        return Promise.resolve(false);
-      }
+      return Promise.resolve(false);
     }
 
     return new Promise(function(resolve) {
@@ -948,7 +928,7 @@
     },
     logPath: LOG_FILE_PATH,
     maxBytes: MAX_LOG_BYTES,
-    storageKey: LOG_LEVEL_KEY
+    storagePath: LOG_LEVEL_PATH
   };
   getStatus();
 })();

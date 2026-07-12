@@ -1,9 +1,9 @@
 # Local build and Tizen emulator workflow
 
-This is the canonical local workflow for the Flutter Tizen preview. It builds the
+This is the canonical local workflow for the Flutter Tizen app. It builds the
 Moonlight WebAssembly runtime, builds Flutter Web, stages a complete widget,
 signs it with the local Samsung profile, installs it, and launches it on the TV
-emulator. `README.Samsung.md` covers the legacy DOM widget only.
+emulator.
 
 ## Fast path on this workstation
 
@@ -156,6 +156,3 @@ This emulator has `log_enable:disabled` and `intershell_support:disabled`, so
 `sdb dlog` and ordinary interactive shell commands are poor diagnostics. Prefer
 the remote bridge for application state/logs. Secure commands such as
 `shell 0 applist`, `getduid`, and `app_launcher` still work.
-
-For the legacy widget or VS Code extension project sync, see
-`README.Samsung.md`.

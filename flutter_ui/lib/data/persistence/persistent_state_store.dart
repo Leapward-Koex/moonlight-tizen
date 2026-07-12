@@ -59,11 +59,11 @@ abstract base class PersistentStateStore extends Storage<String, String> {
   }
 }
 
-final class IndexedDbPersistentStateStore extends PersistentStateStore {
-  IndexedDbPersistentStateStore._(super.backend);
+final class TizenPrivateFilePersistentStateStore extends PersistentStateStore {
+  TizenPrivateFilePersistentStateStore._(super.backend);
 
-  static Future<IndexedDbPersistentStateStore> open() async =>
-      IndexedDbPersistentStateStore._(await openPersistentBackend());
+  static Future<TizenPrivateFilePersistentStateStore> open() async =>
+      TizenPrivateFilePersistentStateStore._(await openPersistentBackend());
 }
 
 final class InMemoryPersistentStateStore extends PersistentStateStore {

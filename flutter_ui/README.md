@@ -1,8 +1,7 @@
 # Moonlight Flutter UI
 
-This is the side-by-side Flutter Web rewrite of Moonlight Tizen's legacy DOM
-interface. It targets the Tizen 10 preview package `MLFlutter1` and leaves the
-existing `MoonLightS` application unchanged.
+This is the Flutter Web interface for Moonlight Tizen. It targets the Tizen 10
+package `MLFlutter1` and uses the shared Emscripten streaming runtime.
 
 ## Development
 
@@ -40,12 +39,15 @@ element placement are part of the native ABI and must not be changed.
 
 ## Diagnostics
 
+Application settings, saved hosts, client identity, and other small state are
+stored below `wgt-private/state/`. Box art is stored as binary files below
+`wgt-private/cache/boxart/`. Both use Tizen's private widget filesystem.
+
 New installs log at `Info` by default. The logger captures Flutter framework and
 Riverpod failures, native/WASM initialization, NvHTTP operations, pairing and
 stream lifecycle, input/gamepad state transitions, and uncaught JavaScript
 errors. It stores bounded NDJSON in Tizen private storage at
-`wgt-private/logs/moonlight-flutter-log.ndjson` (10 MB maximum); the browser
-backend uses a 1 MB `localStorage` fallback.
+`wgt-private/logs/moonlight-flutter-log.ndjson` (10 MB maximum).
 
 Use **Settings > Advanced > Diagnostic log storage** to change the level, view
 storage health, clear logs, or export a redacted bundle. Device exports show a

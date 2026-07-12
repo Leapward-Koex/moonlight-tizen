@@ -91,7 +91,7 @@ if ($application.id -ne 'MLFlutter1.MoonlightFlutter' -or $application.package -
     throw 'Staged Tizen identity is not the isolated Moonlight Flutter identity.'
 }
 if ($application.required_version -ne '10.0') {
-    throw 'Moonlight Flutter preview must require Tizen 10.0.'
+    throw 'Moonlight Flutter must require Tizen 10.0.'
 }
 
 Write-Host "Staged Moonlight Flutter widget at $outputRoot"

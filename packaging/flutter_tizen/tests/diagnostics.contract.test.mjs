@@ -15,22 +15,12 @@ const loggerPath = path.join(
 );
 const source = fs.readFileSync(loggerPath, 'utf8');
 
-function createStorage() {
-  const values = new Map();
-  return {
-    getItem(key) { return values.has(key) ? values.get(key) : null; },
-    setItem(key, value) { values.set(key, String(value)); },
-    removeItem(key) { values.delete(key); }
-  };
-}
-
 function createContext({ withTizenFile = false } = {}) {
   const listeners = {};
-  const localStorage = createStorage();
   let fileText = '';
+  let levelText = '';
   const context = vm.createContext({
     console: { log() {}, info() {}, warn() {}, error() {}, debug() {} },
-    localStorage,
     setTimeout,
     clearTimeout,
     TextEncoder,
@@ -42,7 +32,17 @@ function createContext({ withTizenFile = false } = {}) {
     context.tizen = {
       filesystem: {
         openFile(filePath, mode) {
-          assert.equal(filePath, 'wgt-private/logs/moonlight-flutter-log.ndjson');
+          if (filePath === 'wgt-private/state/diagnostics-level.txt') {
+            return {
+              readString() { return levelText; },
+              writeString(value) { levelText = String(value); },
+              close() {}
+            };
+          }
+          assert.equal(
+            filePath,
+            'wgt-private/logs/moonlight-flutter-log.ndjson'
+          );
           return {
             readString() { return fileText; },
             writeString(value) {
@@ -98,7 +98,9 @@ async function exerciseLogger(fixture, expectedStorage) {
   assert.equal(await logger.getExportText(), '');
 }
 
-await exerciseLogger(createContext(), 'localStorage');
+const browserFixture = createContext();
+assert.equal(browserFixture.context.MoonlightLogger.getStatusSync().available, false);
+assert.equal(browserFixture.context.MoonlightLogger.getStatusSync().storage, 'unavailable');
 const tizenFixture = createContext({ withTizenFile: true });
 await exerciseLogger(tizenFixture, 'tizen-private-file');
 assert.equal(tizenFixture.readFile(), '');
