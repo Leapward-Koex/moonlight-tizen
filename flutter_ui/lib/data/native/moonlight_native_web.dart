@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
@@ -31,6 +32,7 @@ extension type _MoonlightNativeFacade(JSObject _) implements JSObject {
   );
   external JSPromise<JSString> stun();
   external JSPromise<JSAny?> wakeOnLan(JSString macAddress);
+  external JSPromise<JSString> scanLocalSubnet(JSNumber timeoutMs);
   external JSPromise<JSAny?> startStream(JSAny request);
   external JSPromise<JSAny?> stopStream();
   external JSPromise<JSAny?> toggleStats();
@@ -275,6 +277,41 @@ final class WebMoonlightNativeRuntime implements MoonlightNativeRuntime {
         'error': error.toString(),
       });
       throw _transportException(uri, error);
+    }
+  }
+
+  @override
+  Future<List<String>> scanLocalSubnet({
+    Duration timeout = const Duration(milliseconds: 1800),
+  }) async {
+    final stopwatch = Stopwatch()..start();
+    logDiagnostic('info', 'native.subnet_scan.started', {
+      'timeoutMs': timeout.inMilliseconds,
+    });
+    try {
+      final source =
+          (await _native.scanLocalSubnet(timeout.inMilliseconds.toJS).toDart)
+              .toDart;
+      final decoded = jsonDecode(source);
+      final addresses = decoded is List
+          ? decoded
+                .whereType<String>()
+                .where(_isIpv4Address)
+                .toSet()
+                .toList(growable: false)
+          : const <String>[];
+      logDiagnostic('info', 'native.subnet_scan.completed', {
+        'durationMs': stopwatch.elapsedMilliseconds,
+        'responderCount': addresses.length,
+      });
+      return addresses;
+    } catch (error) {
+      logDiagnostic('warning', 'native.subnet_scan.failed', {
+        'durationMs': stopwatch.elapsedMilliseconds,
+        'errorType': error.runtimeType.toString(),
+        'error': error.toString(),
+      });
+      return const <String>[];
     }
   }
 
@@ -595,6 +632,15 @@ final class WebMoonlightNativeRuntime implements MoonlightNativeRuntime {
     unawaited(_events.close());
     unawaited(_inputEvents.close());
   }
+}
+
+bool _isIpv4Address(String value) {
+  final parts = value.split('.');
+  if (parts.length != 4) return false;
+  return parts.every((part) {
+    final octet = int.tryParse(part);
+    return octet != null && octet >= 0 && octet <= 255;
+  });
 }
 
 TransportException _transportException(Uri uri, Object error) {

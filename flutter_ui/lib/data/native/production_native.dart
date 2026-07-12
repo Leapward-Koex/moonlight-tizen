@@ -117,6 +117,7 @@ Future<NativeProductionBundle> createNativeProductionBundle({
       overrides: [
         moonlightNativeRuntimeProvider.overrideWithValue(native),
         moonlightRepositoryProvider.overrideWithValue(repository),
+        subnetDiscoveryGatewayProvider.overrideWithValue(native),
         platformCapabilitiesProvider.overrideWithValue(
           runtimeInfo.capabilities,
         ),

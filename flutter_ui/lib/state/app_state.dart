@@ -25,6 +25,10 @@ MoonlightRepository moonlightRepository(Ref ref) => throw UnsupportedError(
 );
 
 @Riverpod(keepAlive: true)
+SubnetDiscoveryGateway subnetDiscoveryGateway(Ref ref) =>
+    const NoopSubnetDiscoveryGateway();
+
+@Riverpod(keepAlive: true)
 DiagnosticLogger diagnosticLogger(Ref ref) => const NoopDiagnosticLogger();
 
 @Riverpod(keepAlive: true)
@@ -105,10 +109,12 @@ class SavedHosts extends _$SavedHosts {
 
   void upsert(SavedHost host) {
     final index = state.indexWhere((item) => item.id == host.id);
-    state = List.unmodifiable(
-      index < 0 ? [...state, host] : [...state]
-        ..[index] = host,
-    );
+    if (index < 0) {
+      state = List.unmodifiable([...state, host]);
+      return;
+    }
+    final updated = [...state]..[index] = host;
+    state = List.unmodifiable(updated);
   }
 
   void remove(String hostId) {
@@ -371,6 +377,18 @@ final class BootstrapState {
   final bool ready;
 }
 
+enum SubnetDiscoveryPhase { idle, waiting, scanning, complete, failed }
+
+final class SubnetDiscoveryState {
+  const SubnetDiscoveryState({
+    this.phase = SubnetDiscoveryPhase.idle,
+    this.summary = const SubnetDiscoverySummary(),
+  });
+
+  final SubnetDiscoveryPhase phase;
+  final SubnetDiscoverySummary summary;
+}
+
 @Riverpod(keepAlive: true)
 Future<BootstrapState> bootstrap(Ref ref) async {
   final logger = ref.read(diagnosticLoggerProvider);
@@ -390,6 +408,46 @@ Future<BootstrapState> bootstrap(Ref ref) async {
     'codecCacheEntries': ref.read(codecCapabilitiesProvider).entries.length,
   });
   return const BootstrapState(ready: true);
+}
+
+@Riverpod(keepAlive: true)
+class SubnetDiscovery extends _$SubnetDiscovery {
+  bool _started = false;
+
+  @override
+  SubnetDiscoveryState build() => const SubnetDiscoveryState();
+
+  Future<void> start({
+    Duration delay = const Duration(milliseconds: 1500),
+  }) async {
+    if (_started) return;
+    _started = true;
+    state = const SubnetDiscoveryState(phase: SubnetDiscoveryPhase.waiting);
+    await ref.read(bootstrapProvider.future);
+    await Future<void>.delayed(delay);
+    if (ref.read(streamSessionProvider).isActive) {
+      state = const SubnetDiscoveryState(phase: SubnetDiscoveryPhase.complete);
+      return;
+    }
+
+    state = const SubnetDiscoveryState(phase: SubnetDiscoveryPhase.scanning);
+    final logger = ref.read(diagnosticLoggerProvider);
+    try {
+      final addresses = await ref
+          .read(subnetDiscoveryGatewayProvider)
+          .scanLocalSubnet();
+      final summary = await ref
+          .read(appCoordinatorProvider)
+          .discoverHosts(addresses);
+      state = SubnetDiscoveryState(
+        phase: SubnetDiscoveryPhase.complete,
+        summary: summary,
+      );
+    } catch (error, stackTrace) {
+      logger.error('state.subnet_discovery.failed', error, stackTrace);
+      state = const SubnetDiscoveryState(phase: SubnetDiscoveryPhase.failed);
+    }
+  }
 }
 
 @Riverpod(keepAlive: true)
@@ -422,6 +480,130 @@ final class AppCoordinator {
       'paired': result.status.paired,
     });
     return result;
+  }
+
+  Future<SubnetDiscoverySummary> discoverHosts(
+    Iterable<String> responderAddresses,
+  ) async {
+    final addresses = responderAddresses
+        .map((address) => address.trim())
+        .where(_isIpv4Address)
+        .toSet()
+        .toList(growable: false);
+    final knownAddresses = ref
+        .read(savedHostsProvider)
+        .map((host) => host.address.trim())
+        .toSet();
+    final candidates = addresses
+        .where((address) => !knownAddresses.contains(address))
+        .toList(growable: false);
+    _logger.log('info', 'coordinator.subnet_discovery.started', {
+      'responderCount': addresses.length,
+      'candidateCount': candidates.length,
+    });
+
+    final refreshes = await Future.wait(
+      candidates.map(_refreshDiscoveredAddress),
+    );
+    var added = 0;
+    var updated = 0;
+    var ignored = addresses.length - candidates.length;
+
+    for (final refresh in refreshes) {
+      if (refresh == null || !refresh.status.online) {
+        ignored += 1;
+        continue;
+      }
+      final serverUid = refresh.host.serverUid.trim();
+      if (serverUid.isEmpty) {
+        ignored += 1;
+        continue;
+      }
+      final existing = ref.read(savedHostsProvider).where((host) {
+        return host.serverUid == serverUid || host.id == serverUid;
+      }).firstOrNull;
+
+      if (existing == null) {
+        final discovered = refresh.host.copyWith(
+          id: serverUid,
+          serverUid: serverUid,
+          userEnteredAddress: '',
+        );
+        ref.read(savedHostsProvider.notifier).upsert(discovered);
+        ref
+            .read(hostStatusesProvider.notifier)
+            .set(discovered.id, refresh.status);
+        added += 1;
+        continue;
+      }
+
+      final existingStatus =
+          ref.read(hostStatusesProvider)[existing.id] ?? const HostStatus();
+      if (!_isIpv4Address(existing.address) && existingStatus.online) {
+        ignored += 1;
+        continue;
+      }
+      if (existing.address == refresh.host.address) {
+        ignored += 1;
+        continue;
+      }
+
+      _hostGenerations[existing.id]?.cancel();
+      final discovered = refresh.host;
+      final reconciled = existing.copyWith(
+        serverUid: serverUid,
+        hostname: discovered.hostname,
+        address: discovered.address,
+        localAddress: discovered.localAddress.isEmpty
+            ? existing.localAddress
+            : discovered.localAddress,
+        externalAddress: discovered.externalAddress.isEmpty
+            ? existing.externalAddress
+            : discovered.externalAddress,
+        macAddress: discovered.macAddress.isEmpty
+            ? existing.macAddress
+            : discovered.macAddress,
+        httpsPort: discovered.httpsPort,
+        externalPort: discovered.externalPort,
+      );
+      ref.read(savedHostsProvider.notifier).upsert(reconciled);
+      ref.read(hostStatusesProvider.notifier).set(existing.id, refresh.status);
+      updated += 1;
+    }
+
+    final summary = SubnetDiscoverySummary(
+      responderCount: addresses.length,
+      addedHostCount: added,
+      updatedHostCount: updated,
+      ignoredHostCount: ignored,
+    );
+    _logger.log('info', 'coordinator.subnet_discovery.completed', {
+      'responderCount': summary.responderCount,
+      'addedHostCount': summary.addedHostCount,
+      'updatedHostCount': summary.updatedHostCount,
+      'ignoredHostCount': summary.ignoredHostCount,
+    });
+    return summary;
+  }
+
+  Future<HostRefreshResult?> _refreshDiscoveredAddress(String address) async {
+    final provisional = SavedHost(
+      id: 'discovered:$address',
+      hostname: address,
+      address: address,
+    );
+    try {
+      return await ref
+          .read(moonlightRepositoryProvider)
+          .refreshHost(provisional, const HostStatus());
+    } catch (error, stackTrace) {
+      _logger.error(
+        'coordinator.subnet_discovery.responder_rejected',
+        error,
+        stackTrace,
+      );
+      return null;
+    }
   }
 
   void removeHost(String hostId) {
@@ -593,4 +775,13 @@ final class AppCoordinator {
         (host) => host.id == hostId,
         orElse: () => throw StateError('Unknown host $hostId'),
       );
+}
+
+bool _isIpv4Address(String value) {
+  final parts = value.split('.');
+  if (parts.length != 4) return false;
+  return parts.every((part) {
+    final octet = int.tryParse(part);
+    return octet != null && octet >= 0 && octet <= 255;
+  });
 }

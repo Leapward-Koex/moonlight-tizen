@@ -34,7 +34,7 @@ void main() {
           (bundle.repository as NvHttpClient).requests.clientUid,
           identity.clientUid,
         );
-        expect(bundle.overrides, hasLength(4));
+        expect(bundle.overrides, hasLength(5));
 
         bundle.dispose();
         expect(runtime.disposed, isTrue);
@@ -131,6 +131,11 @@ final class _FakeNativeRuntime implements MoonlightNativeRuntime {
 
   @override
   Future<void> wakeOnLan(String macAddress) async {}
+
+  @override
+  Future<List<String>> scanLocalSubnet({
+    Duration timeout = const Duration(milliseconds: 1800),
+  }) async => const <String>[];
 
   @override
   bool unlockAudio() => true;

@@ -25,6 +25,22 @@ final class HostPollResult {
   final bool skippedForStream;
 }
 
+final class SubnetDiscoverySummary {
+  const SubnetDiscoverySummary({
+    this.responderCount = 0,
+    this.addedHostCount = 0,
+    this.updatedHostCount = 0,
+    this.ignoredHostCount = 0,
+  });
+
+  final int responderCount;
+  final int addedHostCount;
+  final int updatedHostCount;
+  final int ignoredHostCount;
+
+  int get changedHostCount => addedHostCount + updatedHostCount;
+}
+
 /// One-shot host polling with request coalescing and legacy failure semantics.
 /// The UI/state layer schedules this every [pollInterval].
 final class HostPoller {

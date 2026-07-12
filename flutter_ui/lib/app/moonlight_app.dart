@@ -195,6 +195,11 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
   @override
   void initState() {
     super.initState();
+    unawaited(
+      Future<void>.microtask(
+        () => ref.read(subnetDiscoveryProvider.notifier).start(),
+      ),
+    );
     _pollTimer = Timer.periodic(
       HostPoller.pollInterval,
       (_) => unawaited(_pollHosts()),
@@ -240,6 +245,23 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
         });
       }
     });
+    ref.listen(subnetDiscoveryProvider, (previous, next) {
+      if (widget.page != _Page.hosts || previous?.phase == next.phase) return;
+      final message = switch (next.phase) {
+        SubnetDiscoveryPhase.scanning =>
+          'Scanning the local network for Moonlight hosts…',
+        SubnetDiscoveryPhase.complete when next.summary.changedHostCount > 0 =>
+          _subnetDiscoveryMessage(next.summary),
+        _ => null,
+      };
+      if (message != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && widget.page == _Page.hosts) {
+            showMoonlightSnackBar(context, message);
+          }
+        });
+      }
+    });
     final bootstrap = ref.watch(bootstrapProvider);
     return bootstrap.when(
       loading: () => const StartupScreen(),
@@ -258,8 +280,11 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
 
   Widget _buildHosts() {
     final entries = ref.watch(hostsProvider);
+    final discovery = ref.watch(subnetDiscoveryProvider);
+    final refreshing =
+        _polling || discovery.phase == SubnetDiscoveryPhase.scanning;
     return HostsScreen(
-      loading: _polling,
+      loading: refreshing,
       hosts: entries.map(_hostViewModel).toList(growable: false),
       onAddHost: _showAddHost,
       onHostSelected: _openHost,
@@ -269,7 +294,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
           id: 'refresh',
           label: 'Refresh hosts',
           icon: Icons.refresh,
-          enabled: !_polling,
+          enabled: !refreshing,
           onPressed: () => unawaited(_pollHosts()),
         ),
         HeaderActionViewModel(
@@ -1935,4 +1960,19 @@ bool _isNewerVersion(String candidate, String current) {
     if (candidatePart != currentPart) return candidatePart > currentPart;
   }
   return false;
+}
+
+String _subnetDiscoveryMessage(SubnetDiscoverySummary summary) {
+  final parts = <String>[];
+  if (summary.addedHostCount > 0) {
+    parts.add(
+      '${summary.addedHostCount} new host${summary.addedHostCount == 1 ? '' : 's'}',
+    );
+  }
+  if (summary.updatedHostCount > 0) {
+    parts.add(
+      '${summary.updatedHostCount} updated address${summary.updatedHostCount == 1 ? '' : 'es'}',
+    );
+  }
+  return 'Local network scan found ${parts.join(' and ')}.';
 }

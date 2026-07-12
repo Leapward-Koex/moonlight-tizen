@@ -137,7 +137,11 @@ final class NativeInputDevice {
 /// The runtime also implements the three protocol gateways so one instance is
 /// shared by [NvHttpClient] and stream lifecycle orchestration.
 abstract interface class MoonlightNativeRuntime
-    implements MoonlightHttpTransport, PairingGateway, NetworkDiscoveryGateway {
+    implements
+        MoonlightHttpTransport,
+        PairingGateway,
+        NetworkDiscoveryGateway,
+        SubnetDiscoveryGateway {
   bool get isAvailable;
 
   Stream<StreamEvent> get events;

@@ -147,6 +147,54 @@ final class MoonlightRepositoryProvider
 String _$moonlightRepositoryHash() =>
     r'0b31f95acfb1f67bfd7869c764a1cda02e985ce7';
 
+@ProviderFor(subnetDiscoveryGateway)
+final subnetDiscoveryGatewayProvider = SubnetDiscoveryGatewayProvider._();
+
+final class SubnetDiscoveryGatewayProvider
+    extends
+        $FunctionalProvider<
+          SubnetDiscoveryGateway,
+          SubnetDiscoveryGateway,
+          SubnetDiscoveryGateway
+        >
+    with $Provider<SubnetDiscoveryGateway> {
+  SubnetDiscoveryGatewayProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'subnetDiscoveryGatewayProvider',
+        isAutoDispose: false,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$subnetDiscoveryGatewayHash();
+
+  @$internal
+  @override
+  $ProviderElement<SubnetDiscoveryGateway> $createElement(
+    $ProviderPointer pointer,
+  ) => $ProviderElement(pointer);
+
+  @override
+  SubnetDiscoveryGateway create(Ref ref) {
+    return subnetDiscoveryGateway(ref);
+  }
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(SubnetDiscoveryGateway value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<SubnetDiscoveryGateway>(value),
+    );
+  }
+}
+
+String _$subnetDiscoveryGatewayHash() =>
+    r'b87d1df189e77ab1f77ad7e5f6afb1a34039f73d';
+
 @ProviderFor(diagnosticLogger)
 final diagnosticLoggerProvider = DiagnosticLoggerProvider._();
 
@@ -854,6 +902,58 @@ final class BootstrapProvider
 }
 
 String _$bootstrapHash() => r'0b7900adbe38558d590ffbb1e0c5ed972afe7a06';
+
+@ProviderFor(SubnetDiscovery)
+final subnetDiscoveryProvider = SubnetDiscoveryProvider._();
+
+final class SubnetDiscoveryProvider
+    extends $NotifierProvider<SubnetDiscovery, SubnetDiscoveryState> {
+  SubnetDiscoveryProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'subnetDiscoveryProvider',
+        isAutoDispose: false,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$subnetDiscoveryHash();
+
+  @$internal
+  @override
+  SubnetDiscovery create() => SubnetDiscovery();
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(SubnetDiscoveryState value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<SubnetDiscoveryState>(value),
+    );
+  }
+}
+
+String _$subnetDiscoveryHash() => r'98fe617d5e446ebe7adfb94ce30e1b3fba0f8f31';
+
+abstract class _$SubnetDiscovery extends $Notifier<SubnetDiscoveryState> {
+  SubnetDiscoveryState build();
+  @$mustCallSuper
+  @override
+  WhenComplete runBuild() {
+    final ref = this.ref as $Ref<SubnetDiscoveryState, SubnetDiscoveryState>;
+    final element =
+        ref.element
+            as $ClassProviderElement<
+              AnyNotifier<SubnetDiscoveryState, SubnetDiscoveryState>,
+              SubnetDiscoveryState,
+              Object?,
+              Object?
+            >;
+    return element.handleCreate(ref, build);
+  }
+}
 
 @ProviderFor(appCoordinator)
 final appCoordinatorProvider = AppCoordinatorProvider._();

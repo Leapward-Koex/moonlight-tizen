@@ -777,6 +777,66 @@
     return callRaw('wakeOnLan', [0, macAddress]).then(function() { return true; });
   }
 
+  // Tizen does not expose mDNS replies to the WebAssembly sandbox. Probe the
+  // TV's /24 over HTTP instead so the TCP connection establishes firewall
+  // state and Sunshine's server-info response can reach the application.
+  function scanLocalSubnet(timeoutMs) {
+    var localIp = root.MoonlightTizenPlatform &&
+      typeof root.MoonlightTizenPlatform.getIpAddress === 'function'
+      ? String(root.MoonlightTizenPlatform.getIpAddress() || '')
+      : '';
+    var parts = localIp.split('.');
+    var validIpv4 = parts.length === 4 && parts.every(function(part) {
+      return /^\d{1,3}$/.test(part) && Number(part) >= 0 && Number(part) <= 255;
+    });
+    if (!validIpv4 || localIp === '0.0.0.0' || typeof root.fetch !== 'function') {
+      return Promise.resolve('[]');
+    }
+
+    var timeout = Number(timeoutMs);
+    if (!isFinite(timeout) || timeout <= 0) timeout = 1800;
+    var subnet = parts.slice(0, 3).join('.');
+    var probes = [];
+    debug('info', 'subnet scan started', { timeoutMs: timeout, candidateCount: 254 });
+
+    for (var host = 1; host <= 254; host += 1) {
+      (function(address) {
+        probes.push(new Promise(function(resolve) {
+          var settled = false;
+          var controller = typeof root.AbortController === 'function'
+            ? new root.AbortController()
+            : null;
+          var timer = root.setTimeout(function() {
+            if (controller) controller.abort();
+            if (!settled) {
+              settled = true;
+              resolve(null);
+            }
+          }, timeout);
+
+          var options = controller ? { signal: controller.signal } : {};
+          root.fetch('http://' + address + ':47989/serverinfo', options).then(function(response) {
+            if (settled) return;
+            settled = true;
+            root.clearTimeout(timer);
+            resolve(response && response.ok ? address : null);
+          }, function() {
+            if (settled) return;
+            settled = true;
+            root.clearTimeout(timer);
+            resolve(null);
+          });
+        }));
+      })(subnet + '.' + host);
+    }
+
+    return Promise.all(probes).then(function(results) {
+      var addresses = results.filter(function(address) { return !!address; });
+      debug('info', 'subnet scan completed', { responderCount: addresses.length });
+      return JSON.stringify(addresses);
+    });
+  }
+
   function unlockAudio() {
     return root.MoonlightAudio ? root.MoonlightAudio.unlock() : false;
   }
@@ -895,6 +955,7 @@
     pair: pair,
     stun: stun,
     wakeOnLan: wakeOnLan,
+    scanLocalSubnet: scanLocalSubnet,
     startStream: startStream,
     stopStream: stopStream,
     toggleStats: toggleStats,

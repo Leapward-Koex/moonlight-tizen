@@ -86,7 +86,11 @@ final class FakeMoonlightRepository implements MoonlightRepository {
       serverCodecModeSupport: next.serverCodecModeSupport,
       numberOfApps: appsByHost[host.id]?.length ?? 0,
     );
-    return HostRefreshResult(host: host, status: next, serverInfo: info);
+    return HostRefreshResult(
+      host: host.copyWith(serverUid: info.serverUid),
+      status: next,
+      serverInfo: info,
+    );
   }
 
   @override

@@ -60,6 +60,11 @@ final class UnsupportedMoonlightNativeRuntime
   Future<void> wakeOnLan(String macAddress) async => _unsupported();
 
   @override
+  Future<List<String>> scanLocalSubnet({
+    Duration timeout = const Duration(milliseconds: 1800),
+  }) async => const <String>[];
+
+  @override
   bool unlockAudio() => false;
 
   @override

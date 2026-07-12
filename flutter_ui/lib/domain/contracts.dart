@@ -23,6 +23,23 @@ abstract interface class NetworkDiscoveryGateway {
   Future<void> wakeOnLan(String macAddress);
 }
 
+/// Browser-backed local-network discovery used on Tizen where mDNS replies are
+/// not available to the WebAssembly sandbox.
+abstract interface class SubnetDiscoveryGateway {
+  Future<List<String>> scanLocalSubnet({
+    Duration timeout = const Duration(milliseconds: 1800),
+  });
+}
+
+final class NoopSubnetDiscoveryGateway implements SubnetDiscoveryGateway {
+  const NoopSubnetDiscoveryGateway();
+
+  @override
+  Future<List<String>> scanLocalSubnet({
+    Duration timeout = const Duration(milliseconds: 1800),
+  }) async => const <String>[];
+}
+
 abstract interface class BoxArtCache {
   Future<Uint8List?> read(SavedHost host, int appId);
   Future<void> write(SavedHost host, int appId, Uint8List bytes);

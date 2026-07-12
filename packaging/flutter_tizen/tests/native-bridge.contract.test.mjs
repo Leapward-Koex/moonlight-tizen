@@ -157,6 +157,7 @@ for (const method of [
   'pair',
   'stun',
   'wakeOnLan',
+  'scanLocalSubnet',
   'startStream',
   'stopStream',
   'toggleStats',
@@ -293,6 +294,12 @@ assert.equal(await bridge.pair('7', '192.0.2.10', 47989, '1234', 'unique-id'), '
 assert.equal(await bridge.stun(), '198.51.100.4');
 assert.equal(await bridge.wakeOnLan('00:11:22:33:44:55'), true);
 
+const originalFetch = globalThis.fetch;
+globalThis.MoonlightTizenPlatform.getIpAddress = () => '192.0.2.25';
+globalThis.fetch = async (url) => ({ ok: url === 'http://192.0.2.10:47989/serverinfo' });
+assert.deepEqual(JSON.parse(await bridge.scanLocalSubnet(25)), ['192.0.2.10']);
+globalThis.fetch = originalFetch;
+
 const streamResult = await bridge.startStream(request);
 assert.equal(streamResult.attemptId, 42);
 assert.equal(documentElement.dataset.streamState, 'active');
@@ -363,6 +370,7 @@ for (const config of [standardConfig, forceGameModeConfig]) {
   assert.match(config, /package="MLFlutter1"/);
   assert.match(config, /required_version="10\.0"/);
   assert.match(config, /id="http:\/\/samsung\.tv\/MoonlightFlutter"/);
+  assert.match(config, /http:\/\/developer\.samsung\.com\/privilege\/network\.public/);
 }
 assert.doesNotMatch(standardConfig, /metadata\/use\.game\.mode/);
 assert.match(forceGameModeConfig, /metadata\/use\.game\.mode" value="true"/);
