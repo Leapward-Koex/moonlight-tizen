@@ -719,11 +719,13 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
     return [
       SettingsCategoryViewModel(
         id: 'basic',
-        label: 'Video',
+        label: 'Basic Settings',
         icon: Icons.tv,
         options: [
           MoonlightSettingOption(
             title: 'Video resolution',
+            description:
+                'Increase for a clearer image, or decrease for better performance on lower-end devices and slower networks.',
             control: TvChoiceControl<StreamResolution>(
               value: settings.resolution,
               choices: StreamResolution.known
@@ -748,7 +750,9 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
             ),
           ),
           MoonlightSettingOption(
-            title: 'Frame rate',
+            title: 'Video frame rate',
+            description:
+                'Increase for smoother video, or decrease for better performance on lower-end devices.',
             control: TvChoiceControl<int>(
               value: settings.frameRate,
               choices:
@@ -770,7 +774,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
           MoonlightSettingOption(
             title: 'Video bitrate',
             description:
-                'Increase image quality or reduce it for slower networks.',
+                'Increase for better image quality, or decrease to improve performance on slower connections.',
             control: TvSliderControl(
               value: settings.bitrateMbps,
               min: .5,
@@ -782,19 +786,47 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
             ),
           ),
           _toggle(
+            'Video frame pacing',
+            settings.framePacing,
+            (value) {
+              update(settings.copyWith(framePacing: value));
+            },
+            description:
+                'Helps reduce micro-stutter by delaying frames that arrive too early while streaming.',
+            controlLabel:
+                'Balance video latency and smoothness with frame pacing',
+          ),
+        ],
+      ),
+      SettingsCategoryViewModel(
+        id: 'host',
+        label: 'Host Settings',
+        icon: Icons.desktop_windows,
+        options: [
+          _toggle(
             'IP address field mode',
             settings.showIpAddressField,
             (value) => update(settings.copyWith(showIpAddressField: value)),
+            description:
+                'Recommended for devices that have trouble using the TV keyboard to enter a host IP address.',
+            controlLabel: 'Use a numeric input field for host IP addresses',
           ),
           _toggle(
-            'Sort applications',
+            'Sort the list of apps',
             settings.sortApps,
             (value) => update(settings.copyWith(sortApps: value)),
+            description:
+                'Sorts host apps and games by title. Enable for descending order (Z to A).',
+            controlLabel: 'Sort apps and games in descending order',
           ),
           _toggle(
             'Optimize game settings',
             settings.optimizeGameSettings,
             (value) => update(settings.copyWith(optimizeGameSettings: value)),
+            description:
+                'Adjusts the host resolution to match the client resolution when the display device is configured in Sunshine.',
+            controlLabel:
+                'Allow the host to modify game settings for optimal streaming',
           ),
           MoonlightSettingOption(
             title: 'Remove all hosts',
@@ -809,35 +841,53 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
       ),
       SettingsCategoryViewModel(
         id: 'input',
-        label: 'Input',
+        label: 'Input Settings',
         icon: Icons.sports_esports,
         options: [
           _toggle(
-            'Gamepad rumble',
+            'Rumble feedback',
             settings.rumbleFeedback,
             (value) {
               update(settings.copyWith(rumbleFeedback: value));
             },
             enabled: capabilities.supportsRumble,
+            controlLabel: 'Allow gamepad rumble feedback while streaming',
           ),
-          _toggle('Mouse emulation', settings.mouseEmulation, (value) {
-            update(settings.copyWith(mouseEmulation: value));
-          }),
-          _toggle('Swap A/B buttons', settings.flipAbButtons, (value) {
-            update(settings.copyWith(flipAbButtons: value));
-          }),
-          _toggle('Swap X/Y buttons', settings.flipXyButtons, (value) {
-            update(settings.copyWith(flipXyButtons: value));
-          }),
+          _toggle(
+            'Mouse emulation',
+            settings.mouseEmulation,
+            (value) {
+              update(settings.copyWith(mouseEmulation: value));
+            },
+            controlLabel: 'Hold Start to switch the gamepad to mouse mode',
+          ),
+          _toggle(
+            'Flip A/B face buttons',
+            settings.flipAbButtons,
+            (value) {
+              update(settings.copyWith(flipAbButtons: value));
+            },
+            controlLabel: 'Swap the A and B face buttons while streaming',
+          ),
+          _toggle(
+            'Flip X/Y face buttons',
+            settings.flipXyButtons,
+            (value) {
+              update(settings.copyWith(flipXyButtons: value));
+            },
+            controlLabel: 'Swap the X and Y face buttons while streaming',
+          ),
         ],
       ),
       SettingsCategoryViewModel(
         id: 'audio',
-        label: 'Audio & host',
+        label: 'Audio Settings',
         icon: Icons.volume_up,
         options: [
           MoonlightSettingOption(
             title: 'Audio backend',
+            description:
+                'Choose the audio output implementation. Web Audio is recommended; Native EMSS is experimental.',
             control: TvChoiceControl<AudioBackend>(
               value: settings.audioBackend,
               choices: [
@@ -856,7 +906,9 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
             ),
           ),
           MoonlightSettingOption(
-            title: 'Speaker configuration',
+            title: 'Audio configuration',
+            description:
+                'Choose 5.1 or 7.1 surround sound for home-theater systems, or Stereo for general compatibility.',
             control: TvChoiceControl<AudioConfiguration>(
               value: settings.audioConfiguration,
               choices: AudioConfiguration.values
@@ -868,6 +920,8 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
           ),
           MoonlightSettingOption(
             title: 'Audio packet duration',
+            description:
+                'Controls the size of each Opus packet. Smaller packets reduce latency but increase network overhead. Auto uses 10 ms.',
             control: TvChoiceControl<int>(
               value: settings.audioPacketDurationMs,
               choices: AppSettings.packetDurationsMs
@@ -884,7 +938,9 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
           ),
           if (settings.audioBackend == AudioBackend.webAudio)
             MoonlightSettingOption(
-              title: 'Maximum Web Audio buffer',
+              title: 'Audio jitter buffer',
+              description:
+                  'Controls how far ahead audio is scheduled. A larger buffer smooths network gaps but adds audio delay. The default is 100 ms.',
               control: TvSliderControl(
                 value: settings.audioJitterBufferMs.toDouble(),
                 min: 10,
@@ -896,18 +952,25 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
                 ),
               ),
             ),
-          _toggle('Play audio on host', settings.playAudioOnHost, (value) {
-            update(settings.copyWith(playAudioOnHost: value));
-          }),
+          _toggle(
+            'Play audio on host',
+            settings.playAudioOnHost,
+            (value) {
+              update(settings.copyWith(playAudioOnHost: value));
+            },
+            controlLabel: 'Play audio on both the computer and this device',
+          ),
         ],
       ),
       SettingsCategoryViewModel(
         id: 'video',
-        label: 'Codec & display',
+        label: 'Video Settings',
         icon: Icons.high_quality,
         options: [
           MoonlightSettingOption(
             title: 'Video codec',
+            description:
+                'Newer codecs improve compression and quality, but may perform worse on lower-end devices.',
             control: TvChoiceControl<VideoCodec>(
               value: settings.videoCodec,
               choices: VideoCodec.values
@@ -928,7 +991,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
             ),
           ),
           _toggle(
-            'HDR',
+            'Video HDR',
             settings.hdr,
             (value) {
               update(
@@ -941,52 +1004,90 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
             enabled:
                 capabilities.supportsHdr &&
                 settings.videoCodec != VideoCodec.h264,
+            description:
+                'Requires an HDR10-capable display, a GPU that can encode HEVC Main 10, and an HDR10-enabled game.',
+            controlLabel:
+                'Use high dynamic range for richer colors and enhanced contrast',
           ),
-          _toggle('Full color range', settings.fullColorRange, (value) {
-            update(settings.copyWith(fullColorRange: value));
-          }),
-          _toggle('Video frame pacing', settings.framePacing, (value) {
-            update(settings.copyWith(framePacing: value));
-          }),
-          _toggle('Optimize bitrate preset', settings.optimizeBitrate, (value) {
-            update(
-              settings.withPresetInputs(
-                optimizeBitrate: value,
-                capabilities: capabilities,
-              ),
-            );
-          }),
+          _toggle(
+            'Color range',
+            settings.fullColorRange,
+            (value) {
+              update(settings.copyWith(fullColorRange: value));
+            },
+            description:
+                'May lose detail in bright and dark areas if your TV does not properly display full-range video.',
+            controlLabel:
+                'Use full color range for more detail in dark and bright areas',
+          ),
+          _toggle(
+            'Game mode',
+            settings.gameMode,
+            (value) {
+              update(settings.copyWith(gameMode: value));
+            },
+            enabled: capabilities.supportsGameMode,
+            description:
+                'Enable for ultra-low latency, or disable to retain post-processing video enhancements.',
+            controlLabel:
+                'Use game mode for optimal streaming latency and performance',
+          ),
         ],
       ),
       SettingsCategoryViewModel(
         id: 'advanced',
-        label: 'Advanced',
+        label: 'Advanced Settings',
         icon: Icons.build,
         options: [
-          _toggle('Game Mode', settings.gameMode, (value) {
-            update(settings.copyWith(gameMode: value));
-          }, enabled: capabilities.supportsGameMode),
-          _toggle('Unlock all frame rates', settings.unlockAllFrameRates, (
-            value,
-          ) {
-            update(settings.copyWith(unlockAllFrameRates: value));
-          }),
           _toggle(
-            'Disable connection warnings',
+            'Unlock all frame rates',
+            settings.unlockAllFrameRates,
+            (value) {
+              update(settings.copyWith(unlockAllFrameRates: value));
+            },
+            description:
+                'Higher frame rates can reduce latency on high-end devices, but may cause lag or instability on unsupported devices.',
+            controlLabel:
+                'Unlock all possible frame-rate options for this device',
+          ),
+          _toggle(
+            'Optimize bitrate presets',
+            settings.optimizeBitrate,
+            (value) {
+              update(
+                settings.withPresetInputs(
+                  optimizeBitrate: value,
+                  capabilities: capabilities,
+                ),
+              );
+            },
+            description:
+                'Calculates a bitrate from the selected resolution, frame rate, codec, and HDR settings.',
+            controlLabel:
+                'Balance stream quality, performance, and bandwidth usage',
+          ),
+          _toggle(
+            'Connection warnings',
             settings.disableConnectionWarnings,
             (value) {
               update(settings.copyWith(disableConnectionWarnings: value));
             },
+            controlLabel:
+                'Disable on-screen connection warnings while streaming',
           ),
           _toggle(
-            'Show performance statistics',
+            'Performance statistics',
             settings.showPerformanceStats,
             (value) {
               update(settings.copyWith(showPerformanceStats: value));
             },
+            controlLabel:
+                'Display real-time stream performance information while streaming',
           ),
           MoonlightSettingOption(
             title: 'TV codec profile cache',
+            description:
+                'Tracks codec profiles this TV has accepted or rejected during stream startup.',
             fullWidthControl: true,
             control: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1026,6 +1127,8 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
           ),
           MoonlightSettingOption(
             title: 'Diagnostic log level',
+            description:
+                'Controls how much diagnostic information Moonlight stores on this TV.',
             control: TvChoiceControl<DiagnosticLogLevel>(
               value: settings.diagnosticLogLevel,
               choices: DiagnosticLogLevel.values
@@ -1081,6 +1184,8 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
           ),
           MoonlightSettingOption(
             title: 'Navigation guide',
+            description:
+                'Useful if you need help navigating Moonlight with a remote, gamepad, keyboard, or mouse.',
             control: TvActionButton(
               label: 'Open navigation guide',
               icon: Icons.tv,
@@ -1089,6 +1194,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
           ),
           MoonlightSettingOption(
             title: 'Check for updates',
+            description: 'Find out if a new application update is available.',
             control: TvActionButton(
               label: 'Check for new Moonlight updates',
               icon: Icons.system_update_alt,
@@ -1097,6 +1203,8 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
           ),
           MoonlightSettingOption(
             title: 'Restart the application',
+            description:
+                'Restart Moonlight if you encounter an issue that may be resolved by reloading the app.',
             control: TvActionButton(
               label: 'Restart Moonlight Flutter',
               icon: Icons.restart_alt,
@@ -1113,11 +1221,14 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
     bool value,
     ValueChanged<bool> onChanged, {
     bool enabled = true,
+    String? description,
+    String? controlLabel,
   }) => MoonlightSettingOption(
     title: title,
+    description: description,
     control: TvToggleControl(
       value: value,
-      label: title,
+      label: controlLabel ?? title,
       enabled: enabled,
       onChanged: onChanged,
     ),
