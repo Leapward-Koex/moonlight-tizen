@@ -43,6 +43,7 @@ if (Test-Path -LiteralPath $unsignedPath) {
     Remove-Item -LiteralPath $unsignedPath -Force
 }
 
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [IO.Compression.ZipFile]::Open($unsignedPath, [IO.Compression.ZipArchiveMode]::Create)
 try {

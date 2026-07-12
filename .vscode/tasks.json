@@ -1,0 +1,75 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "moonlight: build + deploy Flutter to attached emulator",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\vscode-launch-emulator.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "moonlight: rebuild Flutter/JS + deploy (skip C++/Wasm)",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\vscode-launch-emulator.ps1",
+        "-SkipWasm"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "moonlight: prepare Tizen debug bridge",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\sync-tizen-extension-project.ps1",
+        "-EnableDebugBridge",
+        "-DebugBridgeHostIp",
+        "192.168.50.2"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "moonlight: disable Tizen debug bridge",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\write-debug-bridge-config.ps1",
+        "-Disable"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

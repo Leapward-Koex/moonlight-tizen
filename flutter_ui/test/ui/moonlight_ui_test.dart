@@ -17,7 +17,7 @@ void main() {
     });
   }
 
-  testWidgets('hosts use five columns at the TV reference width', (
+  testWidgets('hosts use four TV-scale columns at the reference width', (
     tester,
   ) async {
     setViewport(tester, const Size(1920, 1080));
@@ -42,14 +42,17 @@ void main() {
     final grid = tester.widget<GridView>(find.byType(GridView));
     final delegate =
         grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
-    expect(delegate.crossAxisCount, 5);
-    expect(find.text('ADD HOST'), findsOneWidget);
+    expect(delegate.crossAxisCount, 4);
+    expect(find.text('Add host'), findsOneWidget);
+    final addHostSize = tester.getSize(find.byType(AddHostCard));
+    expect(addHostSize.width, greaterThan(350));
+    expect(addHostSize.height, greaterThan(350));
 
     await tester.tap(find.text('Gaming PC'));
     expect(selected?.id, 'one');
   });
 
-  testWidgets('apps use six columns and preserve the running state', (
+  testWidgets('apps use five TV-scale columns and preserve the running state', (
     tester,
   ) async {
     setViewport(tester, const Size(1920, 1080));
@@ -69,7 +72,7 @@ void main() {
     final grid = tester.widget<GridView>(find.byType(GridView));
     final delegate =
         grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
-    expect(delegate.crossAxisCount, 6);
+    expect(delegate.crossAxisCount, 5);
     expect(find.bySemanticsLabel('Desktop, running'), findsOneWidget);
   });
 
@@ -111,6 +114,7 @@ void main() {
     );
     await tester.pump();
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'First');
+    expect(tester.getSize(find.byType(TvActionButton).first).height, 64);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
@@ -122,6 +126,41 @@ void main() {
     activated = '';
     expect(TvFocusable.activate(FocusManager.instance.primaryFocus), isTrue);
     expect(activated, 'second');
+  });
+
+  testWidgets('dialog actions remain activatable by normalized gamepad input', (
+    tester,
+  ) async {
+    var cancelled = false;
+    await tester.pumpWidget(
+      themed(
+        ConfirmationDialog(
+          title: 'Remove host?',
+          message: 'This host will be removed.',
+          onConfirm: () {},
+          onCancel: () => cancelled = true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Cancel');
+    expect(TvFocusable.activate(FocusManager.instance.primaryFocus), isTrue);
+    expect(cancelled, isTrue);
+  });
+
+  testWidgets('add-host field releases vertical remote focus to actions', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      themed(AddHostDialog(onSubmit: (_) {}, onCancel: () {})),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('add-host-address')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Cancel');
   });
 
   testWidgets('narrow settings open options on a separate page', (
@@ -209,6 +248,14 @@ void main() {
               setState(() => selected = value);
             },
             onBack: () {},
+            headerActions: [
+              HeaderActionViewModel(
+                id: 'refresh',
+                label: 'Refresh settings',
+                icon: Icons.refresh,
+                onPressed: () {},
+              ),
+            ],
           ),
         ),
       ),

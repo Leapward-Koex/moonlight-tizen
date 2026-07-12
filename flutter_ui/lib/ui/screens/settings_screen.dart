@@ -56,7 +56,7 @@ class SettingsScreen extends StatelessWidget {
                 Material(
                   color: MoonlightColors.header.withValues(alpha: .55),
                   child: SizedBox(
-                    height: 64,
+                    height: 80,
                     child: Row(
                       children: [
                         const SizedBox(width: 20),
@@ -65,7 +65,6 @@ class SettingsScreen extends StatelessWidget {
                           label: 'Settings categories',
                           onPressed: () => onCategorySelected(null),
                           autofocus: true,
-                          size: 46,
                         ),
                         const SizedBox(width: 18),
                         Icon(selected.icon, color: MoonlightColors.textMuted),
@@ -86,20 +85,37 @@ class SettingsScreen extends StatelessWidget {
           }
 
           final selected = _selectedCategory!;
+          final optionsFocusKey = GlobalKey();
+          void focusFirstOption() {
+            final optionsContext = optionsFocusKey.currentContext;
+            if (optionsContext != null) {
+              FocusScope.of(optionsContext).nextFocus();
+            }
+          }
+
           return TvFocusTraversalGroup(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 SizedBox(
-                  width: constraints.maxWidth * .3,
+                  width: 330,
                   child: SettingsCategoryList(
                     categories: categories,
                     selectedCategoryId: selected.id,
                     onSelected: (category) => onCategorySelected(category.id),
+                    onMoveRight: focusFirstOption,
                   ),
                 ),
-                const VerticalDivider(width: 4, thickness: 4),
-                Expanded(child: SettingsOptionsPane(category: selected)),
+                const VerticalDivider(width: 1, thickness: 1),
+                Expanded(
+                  child: FocusScope(
+                    child: Builder(
+                      key: optionsFocusKey,
+                      builder: (context) =>
+                          SettingsOptionsPane(category: selected),
+                    ),
+                  ),
+                ),
               ],
             ),
           );
@@ -115,19 +131,21 @@ class SettingsCategoryList extends StatelessWidget {
     required this.selectedCategoryId,
     required this.onSelected,
     super.key,
+    this.onMoveRight,
   });
 
   final List<SettingsCategoryViewModel> categories;
   final String? selectedCategoryId;
   final ValueChanged<SettingsCategoryViewModel> onSelected;
+  final VoidCallback? onMoveRight;
 
   @override
   Widget build(BuildContext context) {
     return ListView.separated(
       key: const PageStorageKey('settings-categories'),
-      padding: const EdgeInsets.symmetric(horizontal: 42, vertical: 28),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
       itemCount: categories.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 16),
+      separatorBuilder: (context, index) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
         final category = categories[index];
         return SettingsCategoryTile(
@@ -141,6 +159,7 @@ class SettingsCategoryList extends StatelessWidget {
               category.id == selectedCategoryId ||
               (selectedCategoryId == null && index == 0),
           onPressed: () => onSelected(category),
+          onMoveRight: onMoveRight,
         );
       },
     );
@@ -154,38 +173,42 @@ class SettingsCategoryTile extends StatelessWidget {
     required this.onPressed,
     super.key,
     this.autofocus = false,
+    this.onMoveRight,
   });
 
   final SettingsCategoryViewModel category;
   final bool selected;
   final VoidCallback onPressed;
   final bool autofocus;
+  final VoidCallback? onMoveRight;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 78,
+      height: 76,
       child: TvFocusable(
         autofocus: autofocus,
         semanticLabel: category.label,
         onActivate: onPressed,
-        builder: (context, focused) => DecoratedBox(
-          decoration: BoxDecoration(
-            color: selected
-                ? MoonlightColors.cyan.withValues(alpha: .8)
-                : focused
-                ? MoonlightColors.controlFocused
-                : Colors.transparent,
-            border: const Border(
-              bottom: BorderSide(color: Color(0xFF666666), width: 2),
-            ),
-          ),
+        onDirection: (direction) {
+          if (direction == TraversalDirection.right && onMoveRight != null) {
+            onMoveRight!();
+            return true;
+          }
+          return false;
+        },
+        builder: (context, focused) => Card(
+          color: selected
+              ? MoonlightColors.controlFocused
+              : focused
+              ? MoonlightColors.control
+              : MoonlightColors.surface,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
               children: [
-                Icon(category.icon, size: 32, color: MoonlightColors.textMuted),
-                const SizedBox(width: 28),
+                Icon(category.icon, size: 28, color: MoonlightColors.text),
+                const SizedBox(width: 18),
                 Expanded(
                   child: Text(
                     category.label,
@@ -194,7 +217,7 @@ class SettingsCategoryTile extends StatelessWidget {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
-                if (selected) const Icon(Icons.chevron_right),
+                if (selected) const Icon(Icons.chevron_right, size: 28),
               ],
             ),
           ),
@@ -216,9 +239,42 @@ class SettingsOptionsPane extends StatelessWidget {
     }
     return ListView.builder(
       key: PageStorageKey('settings-options-${category.id}'),
-      padding: const EdgeInsets.symmetric(horizontal: 34, vertical: 12),
-      itemCount: category.options.length,
-      itemBuilder: (context, index) => category.options[index],
+      padding: const EdgeInsets.fromLTRB(28, 28, 28, 40),
+      itemCount: category.options.length + 1,
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  category.label,
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _categoryDescription(category.id),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: MoonlightColors.textMuted,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        return category.options[index - 1];
+      },
     );
   }
+
+  static String _categoryDescription(String id) => switch (id) {
+    'basic' => 'Picture quality, frame rate, and common streaming behavior.',
+    'video' => 'Codec, HDR, color, and frame pacing.',
+    'audio' => 'Speaker layout, buffering, and host audio.',
+    'input' => 'Controller feedback and button mapping.',
+    'advanced' => 'Compatibility, diagnostics, and developer options.',
+    'about' => 'Version, system information, and support.',
+    _ => 'Moonlight preferences.',
+  };
 }

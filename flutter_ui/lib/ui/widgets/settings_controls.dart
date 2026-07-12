@@ -12,6 +12,7 @@ class MoonlightSettingOption extends StatelessWidget {
     this.description,
     this.badge,
     this.visible = true,
+    this.fullWidthControl = false,
   });
 
   final String title;
@@ -19,31 +20,67 @@ class MoonlightSettingOption extends StatelessWidget {
   final String? badge;
   final Widget control;
   final bool visible;
+  final bool fullWidthControl;
 
   @override
   Widget build(BuildContext context) {
     if (!visible) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(25, 24, 25, 28),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 12,
-            runSpacing: 6,
-            children: [
-              Text(title, style: Theme.of(context).textTheme.titleLarge),
-              if (badge != null) SettingBadge(label: badge!),
-            ],
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Card(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 104),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final narrow = constraints.maxWidth < 680;
+                final details = Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 12,
+                      runSpacing: 6,
+                      children: [
+                        Text(
+                          title,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        if (badge != null) SettingBadge(label: badge!),
+                      ],
+                    ),
+                    if (description != null && description!.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        description!,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
+                  ],
+                );
+                if (narrow || fullWidthControl) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [details, const SizedBox(height: 16), control],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(child: details),
+                    const SizedBox(width: 32),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 440),
+                      child: control,
+                    ),
+                  ],
+                );
+              },
+            ),
           ),
-          if (description != null && description!.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Text(description!, style: Theme.of(context).textTheme.bodyMedium),
-          ],
-          const SizedBox(height: 16),
-          control,
-        ],
+        ),
       ),
     );
   }
@@ -67,7 +104,7 @@ class SettingBadge extends StatelessWidget {
       BadgeKind.experimental => const Color(0xFFFFA620),
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       decoration: BoxDecoration(
         color: MoonlightColors.control,
         border: Border.all(color: color),
@@ -77,7 +114,7 @@ class SettingBadge extends StatelessWidget {
         label.toUpperCase(),
         style: TextStyle(
           color: color,
-          fontSize: 13,
+          fontSize: 14,
           fontWeight: FontWeight.w700,
           letterSpacing: 1.2,
         ),
@@ -106,48 +143,30 @@ class TvToggleControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 60,
-      child: TvFocusable(
-        autofocus: autofocus,
-        enabled: enabled,
-        semanticLabel: '$label, ${value ? 'on' : 'off'}',
-        onActivate: () => onChanged(!value),
-        onDirection: (direction) {
-          if (direction == TraversalDirection.left && value) {
-            onChanged(false);
-            return true;
-          }
-          if (direction == TraversalDirection.right && !value) {
-            onChanged(true);
-            return true;
-          }
-          return false;
-        },
-        builder: (context, focused) => ColoredBox(
-          color: enabled
-              ? MoonlightColors.control
-              : MoonlightColors.control.withValues(alpha: .45),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    label,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                ),
-                const SizedBox(width: 18),
-                IgnorePointer(
-                  child: Switch(
-                    value: value,
-                    onChanged: enabled ? (_) {} : null,
-                  ),
-                ),
-              ],
+    return Align(
+      alignment: Alignment.centerRight,
+      child: SizedBox(
+        width: 96,
+        height: MoonlightMetrics.minHitTarget,
+        child: TvFocusable(
+          autofocus: autofocus,
+          enabled: enabled,
+          semanticLabel: '$label, ${value ? 'on' : 'off'}',
+          onActivate: () => onChanged(!value),
+          onDirection: (direction) {
+            if (direction == TraversalDirection.left && value) {
+              onChanged(false);
+              return true;
+            }
+            if (direction == TraversalDirection.right && !value) {
+              onChanged(true);
+              return true;
+            }
+            return false;
+          },
+          builder: (context, focused) => Center(
+            child: IgnorePointer(
+              child: Switch(value: value, onChanged: enabled ? (_) {} : null),
             ),
           ),
         ),
@@ -195,50 +214,32 @@ class TvChoiceControl<T> extends StatelessWidget {
   Future<void> _showChoices(BuildContext context) async {
     final selected = await showDialog<T>(
       context: context,
-      builder: (context) => Dialog(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 700, maxHeight: 760),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: TvFocusTraversalGroup(
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: choices.length,
-                separatorBuilder: (context, index) =>
-                    const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  final choice = choices[index];
-                  final selected = choice.value == value;
-                  return SizedBox(
-                    height: 58,
-                    child: TvFocusable(
-                      autofocus: selected || index == 0,
-                      enabled: choice.enabled,
-                      semanticLabel: choice.label,
-                      onActivate: () => Navigator.of(context).pop(choice.value),
-                      builder: (context, focused) => ColoredBox(
-                        color: selected
-                            ? MoonlightColors.cyan.withValues(alpha: .7)
-                            : MoonlightColors.control,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  choice.label,
-                                  style: Theme.of(context).textTheme.bodyLarge,
-                                ),
-                              ),
-                              if (selected) const Icon(Icons.check),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
+      builder: (context) => AlertDialog(
+        title: const Text('Choose an option'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640, maxHeight: 640),
+          child: TvFocusTraversalGroup(
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: choices.length,
+              separatorBuilder: (context, index) => const SizedBox(height: 6),
+              itemBuilder: (context, index) {
+                final choice = choices[index];
+                final selected = choice.value == value;
+                return TvFocusable(
+                  autofocus: selected || index == 0,
+                  enabled: choice.enabled,
+                  semanticLabel: choice.label,
+                  onActivate: () => Navigator.of(context).pop(choice.value),
+                  builder: (context, focused) => ListTile(
+                    selected: selected || focused,
+                    selectedTileColor: MoonlightColors.controlFocused,
+                    minTileHeight: 72,
+                    title: Text(choice.label),
+                    trailing: selected ? const Icon(Icons.check) : null,
+                  ),
+                );
+              },
             ),
           ),
         ),
@@ -251,39 +252,33 @@ class TvChoiceControl<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final label = _selected?.label ?? value.toString();
     return SizedBox(
-      height: 60,
+      width: 320,
+      height: MoonlightMetrics.minHitTarget,
       child: TvFocusable(
         autofocus: autofocus,
         enabled: enabled && choices.any((choice) => choice.enabled),
         semanticLabel: semanticLabel == null ? label : '$semanticLabel, $label',
         onActivate: () => _showChoices(context),
         onDirection: (direction) {
-          if (direction == TraversalDirection.left) {
-            return _step(-1);
-          }
-          if (direction == TraversalDirection.right) {
-            return _step(1);
-          }
+          if (direction == TraversalDirection.left) return _step(-1);
+          if (direction == TraversalDirection.right) return _step(1);
           return false;
         },
-        builder: (context, focused) => ColoredBox(
-          color: enabled
-              ? MoonlightColors.control
-              : MoonlightColors.control.withValues(alpha: .45),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 36),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
-                ),
-                const Icon(Icons.arrow_drop_down, size: 36),
-              ],
+        builder: (context, focused) => ExcludeFocus(
+          child: IgnorePointer(
+            child: TextButton(
+              onPressed: enabled ? () => _showChoices(context) : null,
+              style: TextButton.styleFrom(
+                foregroundColor: MoonlightColors.cyan,
+                alignment: Alignment.centerRight,
+              ),
+              child: Row(
+                children: [
+                  Expanded(child: Text(label, overflow: TextOverflow.ellipsis)),
+                  const SizedBox(width: 12),
+                  const Icon(Icons.chevron_right, size: 28),
+                ],
+              ),
             ),
           ),
         ),
@@ -339,15 +334,10 @@ class TvSliderControl extends StatelessWidget {
           }
           return false;
         },
-        builder: (context, focused) => ColoredBox(
-          color: enabled
-              ? MoonlightColors.control
-              : MoonlightColors.control.withValues(alpha: .45),
-          child: Row(
-            children: [
-              const SizedBox(width: 18),
-              Text(min.toStringAsFixed(0)),
-              Expanded(
+        builder: (context, focused) => Row(
+          children: [
+            Expanded(
+              child: ExcludeFocus(
                 child: Slider(
                   value: value.clamp(min, max),
                   min: min,
@@ -357,20 +347,17 @@ class TvSliderControl extends StatelessWidget {
                   onChanged: enabled ? _change : null,
                 ),
               ),
-              Text(max.toStringAsFixed(0)),
-              const SizedBox(width: 18),
-              Container(
-                constraints: const BoxConstraints(minWidth: 100),
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                alignment: Alignment.center,
-                child: Text(
-                  label,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 128,
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -384,45 +371,17 @@ class SettingInfoPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: MoonlightColors.control,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final entry in entries)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: 220,
-                      child: Text(
-                        entry.label,
-                        style: const TextStyle(
-                          color: MoonlightColors.textMuted,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 18,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: SelectableText(
-                        entry.value,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-      ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final entry in entries)
+          ListTile(
+            dense: false,
+            contentPadding: EdgeInsets.zero,
+            title: Text(entry.label),
+            subtitle: SelectableText(entry.value),
+          ),
+      ],
     );
   }
 }

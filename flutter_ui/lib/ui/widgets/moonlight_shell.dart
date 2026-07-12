@@ -28,24 +28,20 @@ class MoonlightShell extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: MoonlightColors.background,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          Column(
-            children: [
-              if (showHeader)
-                MoonlightHeader(
-                  title: title,
-                  actions: actions,
-                  onBack: onBack,
-                  logo: logo,
-                ),
-              Expanded(child: body),
-            ],
-          ),
-          ?overlay,
-        ],
-      ),
+      appBar: showHeader
+          ? PreferredSize(
+              preferredSize: const Size.fromHeight(
+                MoonlightMetrics.headerHeight,
+              ),
+              child: MoonlightHeader(
+                title: title,
+                actions: actions,
+                onBack: onBack,
+                logo: logo,
+              ),
+            )
+          : null,
+      body: Stack(fit: StackFit.expand, children: [body, ?overlay]),
     );
   }
 }
@@ -66,62 +62,56 @@ class MoonlightHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: MoonlightColors.header,
-      elevation: 4,
-      shadowColor: Colors.black,
-      child: SafeArea(
-        bottom: false,
-        child: SizedBox(
-          height: MoonlightMetrics.headerHeight,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final gutter = MoonlightMetrics.horizontalGutter(
-                constraints.maxWidth,
-              );
-              return Padding(
-                padding: EdgeInsets.symmetric(horizontal: gutter),
-                child: TvFocusTraversalGroup(
-                  child: Row(
-                    children: [
-                      if (onBack != null) ...[
-                        TvIconButton(
-                          icon: Icons.keyboard_arrow_left,
-                          label: 'Back',
-                          onPressed: onBack!,
-                        ),
-                        const SizedBox(width: 28),
-                      ],
-                      logo ?? const MoonlightLogo(),
-                      const SizedBox(width: 30),
-                      Expanded(
-                        child: Text(
-                          title.toUpperCase(),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.displaySmall,
-                        ),
-                      ),
-                      for (final action in actions) ...[
-                        const SizedBox(width: 20),
-                        TvIconButton(
-                          key: ValueKey('header-${action.id}'),
-                          icon: action.icon,
-                          label: action.label,
-                          onPressed: action.onPressed,
-                          enabled: action.enabled,
-                          autofocus: action.autofocus,
-                          badge: action.badge,
-                        ),
-                      ],
-                    ],
+    return AppBar(
+      automaticallyImplyLeading: false,
+      leadingWidth: onBack == null ? 0 : 80,
+      leading: onBack == null
+          ? null
+          : Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: TvIconButton(
+                icon: Icons.arrow_back,
+                label: 'Back',
+                onPressed: onBack!,
+              ),
+            ),
+      titleSpacing: onBack == null ? 24 : 8,
+      title: Row(
+        children: [
+          if (logo != null) ...[logo!, const SizedBox(width: 16)],
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.displaySmall,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TvFocusTraversalGroup(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final action in actions)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: TvIconButton(
+                    key: ValueKey('header-${action.id}'),
+                    icon: action.icon,
+                    label: action.label,
+                    onPressed: action.onPressed,
+                    enabled: action.enabled,
+                    autofocus: action.autofocus,
+                    badge: action.badge,
                   ),
                 ),
-              );
-            },
+            ],
           ),
         ),
-      ),
+        const SizedBox(width: 12),
+      ],
     );
   }
 }

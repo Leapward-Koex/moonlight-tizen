@@ -27,6 +27,7 @@ class MoonlightDialogAction {
     this.enabled = true,
     this.autofocus = false,
     this.destructive = false,
+    this.focusNode,
   });
 
   final String label;
@@ -35,6 +36,7 @@ class MoonlightDialogAction {
   final bool enabled;
   final bool autofocus;
   final bool destructive;
+  final FocusNode? focusNode;
 }
 
 class MoonlightDialog extends StatelessWidget {
@@ -43,7 +45,7 @@ class MoonlightDialog extends StatelessWidget {
     required this.child,
     super.key,
     this.actions = const [],
-    this.maxWidth = 720,
+    this.maxWidth = 840,
     this.maxHeightFactor = .84,
     this.icon,
   });
@@ -58,73 +60,72 @@ class MoonlightDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final screen = MediaQuery.sizeOf(context);
-    return Dialog(
-      insetPadding: const EdgeInsets.all(48),
-      child: ConstrainedBox(
+    return AlertDialog(
+      insetPadding: const EdgeInsets.all(64),
+      titlePadding: const EdgeInsets.fromLTRB(32, 28, 32, 16),
+      contentPadding: const EdgeInsets.fromLTRB(32, 8, 32, 24),
+      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+      title: Row(
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 32, color: MoonlightColors.cyan),
+            const SizedBox(width: 16),
+          ],
+          Expanded(child: Text(title)),
+        ],
+      ),
+      content: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: maxWidth,
           maxHeight: screen.height * maxHeightFactor,
         ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(26, 26, 26, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  if (icon != null) ...[
-                    Icon(icon, size: 38, color: MoonlightColors.textMuted),
-                    const SizedBox(width: 18),
-                  ],
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: Theme.of(context).textTheme.headlineMedium,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Flexible(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(2, 0, 2, 8),
-                  child: DefaultTextStyle.merge(
-                    style: Theme.of(context).textTheme.bodyLarge,
-                    child: child,
-                  ),
-                ),
-              ),
-              if (actions.isNotEmpty) ...[
-                const SizedBox(height: 20),
-                TvFocusTraversalGroup(
-                  child: Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: 14,
-                    runSpacing: 12,
-                    children: [
-                      for (final action in actions)
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(minWidth: 160),
-                          child: TvActionButton(
-                            label: action.label,
-                            icon: action.icon,
-                            enabled: action.enabled,
-                            autofocus: action.autofocus,
-                            destructive: action.destructive,
-                            onPressed: action.onPressed,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
+        child: SingleChildScrollView(
+          child: DefaultTextStyle.merge(
+            style: Theme.of(context).textTheme.bodyLarge,
+            child: child,
           ),
         ),
       ),
+      actions: [
+        for (final action in actions) _TvDialogActionButton(action: action),
+      ],
     );
   }
+}
+
+class _TvDialogActionButton extends StatelessWidget {
+  const _TvDialogActionButton({required this.action});
+
+  final MoonlightDialogAction action;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: MoonlightMetrics.minHitTarget,
+    child: TvFocusable(
+      autofocus: action.autofocus,
+      focusNode: action.focusNode,
+      enabled: action.enabled,
+      semanticLabel: action.label,
+      focusColor: action.destructive
+          ? const Color(0xFFFFB4AB)
+          : MoonlightColors.cyan,
+      onActivate: action.onPressed,
+      builder: (context, focused) => ExcludeFocus(
+        child: IgnorePointer(
+          child: TextButton.icon(
+            onPressed: action.enabled ? action.onPressed : null,
+            style: action.destructive
+                ? TextButton.styleFrom(foregroundColor: const Color(0xFFFFB4AB))
+                : null,
+            icon: action.icon == null
+                ? const SizedBox.shrink()
+                : Icon(action.icon),
+            label: Text(action.label),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class ConfirmationDialog extends StatelessWidget {
@@ -196,16 +197,19 @@ class AddHostDialog extends StatefulWidget {
 
 class _AddHostDialogState extends State<AddHostDialog> {
   late final TextEditingController _controller;
+  late final FocusNode _cancelFocus;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialAddress);
+    _cancelFocus = FocusNode(debugLabel: 'Cancel');
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _cancelFocus.dispose();
     super.dispose();
   }
 
@@ -227,35 +231,46 @@ class _AddHostDialogState extends State<AddHostDialog> {
             'Enter the IP address or hostname of a PC running Sunshine.',
           ),
           const SizedBox(height: 22),
-          TextField(
-            key: const ValueKey('add-host-address'),
-            controller: _controller,
-            autofocus: true,
-            enabled: !widget.busy,
-            keyboardType: widget.numericInput
-                ? const TextInputType.numberWithOptions(decimal: true)
-                : TextInputType.url,
-            inputFormatters: widget.numericInput
-                ? [FilteringTextInputFormatter.allow(RegExp(r'[0-9.:]'))]
-                : null,
-            textInputAction: TextInputAction.done,
-            decoration: InputDecoration(
-              labelText: 'Host address',
-              hintText: '192.168.1.100',
-              errorText: widget.error,
-              suffixIcon: widget.busy
-                  ? const Padding(
-                      padding: EdgeInsets.all(13),
-                      child: CircularProgressIndicator(strokeWidth: 3),
-                    )
+          CallbackShortcuts(
+            bindings: {
+              const SingleActivator(LogicalKeyboardKey.arrowDown): () {
+                _cancelFocus.requestFocus();
+              },
+            },
+            child: TextField(
+              key: const ValueKey('add-host-address'),
+              controller: _controller,
+              autofocus: true,
+              enabled: !widget.busy,
+              keyboardType: widget.numericInput
+                  ? const TextInputType.numberWithOptions(decimal: true)
+                  : TextInputType.url,
+              inputFormatters: widget.numericInput
+                  ? [FilteringTextInputFormatter.allow(RegExp(r'[0-9.:]'))]
                   : null,
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                labelText: 'Host address',
+                hintText: '192.168.1.100',
+                errorText: widget.error,
+                suffixIcon: widget.busy
+                    ? const Padding(
+                        padding: EdgeInsets.all(13),
+                        child: CircularProgressIndicator(strokeWidth: 3),
+                      )
+                    : null,
+              ),
+              onSubmitted: (_) => _submit(),
             ),
-            onSubmitted: (_) => _submit(),
           ),
         ],
       ),
       actions: [
-        MoonlightDialogAction(label: 'Cancel', onPressed: widget.onCancel),
+        MoonlightDialogAction(
+          label: 'Cancel',
+          onPressed: widget.onCancel,
+          focusNode: _cancelFocus,
+        ),
         MoonlightDialogAction(
           label: widget.busy ? 'Connecting…' : 'Continue',
           onPressed: _submit,
@@ -368,23 +383,23 @@ class HostMenuDialog extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            TvActionButton(
-              label: 'Wake host',
+            _DialogListTile(
               icon: Icons.power_settings_new,
+              label: 'Wake host',
               enabled: wakeEnabled,
               autofocus: true,
               onPressed: onWake,
             ),
-            const SizedBox(height: 12),
-            TvActionButton(
-              label: 'Host details',
+            const Divider(height: 1),
+            _DialogListTile(
               icon: Icons.info_outline,
+              label: 'Host details',
               onPressed: onDetails,
             ),
-            const SizedBox(height: 12),
-            TvActionButton(
-              label: 'Remove host',
+            const Divider(height: 1),
+            _DialogListTile(
               icon: Icons.remove_circle_outline,
+              label: 'Remove host',
               destructive: true,
               onPressed: onDelete,
             ),
@@ -418,24 +433,10 @@ class HostDetailsDialog extends StatelessWidget {
       child: Column(
         children: [
           for (final detail in details)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 7),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    width: 240,
-                    child: Text(
-                      detail.label,
-                      style: const TextStyle(
-                        color: MoonlightColors.textMuted,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  Expanded(child: SelectableText(detail.value)),
-                ],
-              ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(detail.label),
+              subtitle: SelectableText(detail.value),
             ),
         ],
       ),
@@ -448,4 +449,51 @@ class HostDetailsDialog extends StatelessWidget {
       ],
     );
   }
+}
+
+class _DialogListTile extends StatelessWidget {
+  const _DialogListTile({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.enabled = true,
+    this.autofocus = false,
+    this.destructive = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+  final bool enabled;
+  final bool autofocus;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) => TvFocusable(
+    autofocus: autofocus,
+    enabled: enabled,
+    semanticLabel: label,
+    focusColor: destructive ? const Color(0xFFFFB4AB) : MoonlightColors.cyan,
+    onActivate: onPressed,
+    builder: (context, focused) => ExcludeFocus(
+      child: IgnorePointer(
+        child: ListTile(
+          enabled: enabled,
+          selected: focused,
+          selectedTileColor: MoonlightColors.cyan.withValues(alpha: .10),
+          leading: Icon(
+            icon,
+            color: destructive ? const Color(0xFFFFB4AB) : null,
+          ),
+          title: Text(
+            label,
+            style: destructive
+                ? const TextStyle(color: Color(0xFFFFB4AB))
+                : null,
+          ),
+          onTap: enabled ? onPressed : null,
+        ),
+      ),
+    ),
+  );
 }

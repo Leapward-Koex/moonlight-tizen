@@ -719,8 +719,8 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
     return [
       SettingsCategoryViewModel(
         id: 'basic',
-        label: 'Basic Settings',
-        icon: Icons.tune,
+        label: 'Video',
+        icon: Icons.tv,
         options: [
           MoonlightSettingOption(
             title: 'Video resolution',
@@ -809,7 +809,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
       ),
       SettingsCategoryViewModel(
         id: 'input',
-        label: 'Input Settings',
+        label: 'Input',
         icon: Icons.sports_esports,
         options: [
           _toggle(
@@ -833,7 +833,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
       ),
       SettingsCategoryViewModel(
         id: 'audio',
-        label: 'Audio Settings',
+        label: 'Audio & host',
         icon: Icons.volume_up,
         options: [
           MoonlightSettingOption(
@@ -903,7 +903,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
       ),
       SettingsCategoryViewModel(
         id: 'video',
-        label: 'Video Settings',
+        label: 'Codec & display',
         icon: Icons.high_quality,
         options: [
           MoonlightSettingOption(
@@ -960,7 +960,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
       ),
       SettingsCategoryViewModel(
         id: 'advanced',
-        label: 'Advanced Settings',
+        label: 'Advanced',
         icon: Icons.build,
         options: [
           _toggle('Game Mode', settings.gameMode, (value) {
@@ -987,6 +987,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
           ),
           MoonlightSettingOption(
             title: 'TV codec profile cache',
+            fullWidthControl: true,
             control: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1041,6 +1042,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
           ),
           MoonlightSettingOption(
             title: 'Diagnostic log storage',
+            fullWidthControl: true,
             control: DiagnosticsActionPanel(
               status: _diagnosticStatusLabel(),
               actions: [
@@ -1067,6 +1069,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
         options: [
           const MoonlightSettingOption(
             title: 'System information',
+            fullWidthControl: true,
             control: SettingInfoPanel(
               entries: [
                 SystemInfoEntry('Application', 'Moonlight Flutter 1.13.0'),

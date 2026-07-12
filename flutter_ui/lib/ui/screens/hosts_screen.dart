@@ -28,7 +28,7 @@ class HostsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MoonlightShell(
-      title: 'Hosts',
+      title: 'Moonlight',
       actions: headerActions,
       body: LayoutBuilder(
         builder: (context, constraints) {
@@ -44,12 +44,12 @@ class HostsScreen extends StatelessWidget {
               TvFocusTraversalGroup(
                 child: GridView.builder(
                   key: const PageStorageKey('hosts-grid'),
-                  padding: EdgeInsets.fromLTRB(gutter, 34, gutter, 56),
+                  padding: EdgeInsets.fromLTRB(gutter, 28, gutter, 48),
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: columns,
-                    childAspectRatio: 285 / 235,
-                    crossAxisSpacing: 42,
-                    mainAxisSpacing: 48,
+                    childAspectRatio: 1.02,
+                    crossAxisSpacing: 24,
+                    mainAxisSpacing: 24,
                   ),
                   itemCount: items,
                   itemBuilder: (context, index) {
@@ -110,7 +110,7 @@ class AddHostCard extends StatelessWidget {
       scaleOnFocus: MoonlightMetrics.cardFocusScale,
       onActivate: onPressed,
       builder: (context, focused) =>
-          const _HostCardSurface(title: 'Add Host', icon: Icons.add_to_queue),
+          const _HostCardSurface(title: 'Add host', icon: Icons.add),
     );
   }
 }
@@ -131,10 +131,9 @@ class HostCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final offline = host.availability == HostAvailability.offline;
-    final focusColor = offline ? MoonlightColors.offline : MoonlightColors.cyan;
+    const focusColor = MoonlightColors.cyan;
     final status = switch (host.availability) {
-      HostAvailability.online => host.isPaired ? 'Online' : 'Not paired',
+      HostAvailability.online => host.isPaired ? 'Online' : 'Pair required',
       HostAvailability.offline => 'Offline',
       HostAvailability.connecting => 'Connecting',
       HostAvailability.unknown => 'Status unknown',
@@ -147,19 +146,29 @@ class HostCard extends StatelessWidget {
       focusColor: focusColor,
       onActivate: onPressed,
       onSecondaryActivate: onMenu,
-      builder: (context, focused) => DecoratedBox(
-        decoration: BoxDecoration(
-          color: MoonlightColors.surface,
-          border: !focused && offline
-              ? Border.all(color: MoonlightColors.offline, width: 2)
-              : null,
-        ),
+      builder: (context, focused) => Card(
+        clipBehavior: Clip.antiAlias,
+        color: MoonlightColors.surface,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            const Center(
-              child: Icon(Icons.tv, size: 64, color: Color(0xCCFFFFFF)),
+            Center(
+              child: Icon(
+                Icons.desktop_windows_rounded,
+                size: 128,
+                color: host.isPaired
+                    ? MoonlightColors.cyan
+                    : MoonlightColors.cyan.withValues(alpha: .88),
+              ),
             ),
+            if (!host.isPaired)
+              const Center(
+                child: CircleAvatar(
+                  radius: 38,
+                  backgroundColor: Color(0xFF30343A),
+                  child: Icon(Icons.lock_outline_rounded, size: 40),
+                ),
+              ),
             if (host.availability == HostAvailability.connecting)
               const Center(
                 child: SizedBox.square(
@@ -177,11 +186,7 @@ class HostCard extends StatelessWidget {
               alignment: Alignment.bottomCenter,
               child: Container(
                 width: double.infinity,
-                color: const Color(0xA6000000),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 15,
-                  vertical: 10,
-                ),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -190,25 +195,10 @@ class HostCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w300,
-                        letterSpacing: .5,
-                      ),
+                      style: Theme.of(context).textTheme.titleLarge,
                     ),
-                    if (host.subtitle != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        host.subtitle!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: MoonlightColors.textMuted,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
+                    const SizedBox(height: 12),
+                    _HostStatusChip(host: host, status: status),
                   ],
                 ),
               ),
@@ -228,33 +218,58 @@ class _HostCardSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: MoonlightColors.surface,
+    return Card(
+      clipBehavior: Clip.antiAlias,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          Center(child: Icon(icon, size: 64, color: const Color(0xCCFFFFFF))),
+          Center(child: Icon(icon, size: 96, color: MoonlightColors.cyan)),
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
               width: double.infinity,
-              color: const Color(0xA6000000),
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 15),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
               child: Text(
-                title.toUpperCase(),
+                title,
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w300,
-                  letterSpacing: .5,
-                ),
+                style: Theme.of(context).textTheme.titleLarge,
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _HostStatusChip extends StatelessWidget {
+  const _HostStatusChip({required this.host, required this.status});
+
+  final HostTileViewModel host;
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final online =
+        host.availability == HostAvailability.online && host.isPaired;
+    final color = online ? MoonlightColors.cyan : MoonlightColors.textMuted;
+    final icon = online
+        ? Icons.circle
+        : host.isPaired
+        ? Icons.cloud_off_outlined
+        : Icons.lock_outline_rounded;
+    return Chip(
+      avatar: Icon(icon, size: online ? 12 : 16, color: color),
+      label: Text(status),
+      side: BorderSide(color: color.withValues(alpha: .45)),
+      backgroundColor: Colors.transparent,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      labelStyle: TextStyle(
+        color: color,
+        fontSize: 17,
+        fontWeight: FontWeight.w600,
       ),
     );
   }
@@ -267,18 +282,10 @@ class _HostMenuButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox.square(
-      dimension: 44,
-      child: TvFocusable(
-        semanticLabel: 'Host menu',
-        onActivate: onPressed,
-        builder: (context, focused) => ColoredBox(
-          color: focused
-              ? MoonlightColors.cyan.withValues(alpha: .8)
-              : const Color(0xA6000000),
-          child: const Icon(Icons.menu, size: 25),
-        ),
-      ),
+    return TvIconButton(
+      icon: Icons.more_vert,
+      label: 'Host menu',
+      onPressed: onPressed,
     );
   }
 }

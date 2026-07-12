@@ -13,6 +13,27 @@ Start the Tizen 10 TV emulator, then run from the repository root:
 .\packaging\flutter_tizen\build-emulator.ps1
 ```
 
+## VS Code one-click build and launch
+
+Start the Tizen TV emulator, open **Run and Debug**, select
+**Moonlight: build + run on attached Tizen emulator**, and press F5 (or click
+the green launch button). This performs the complete C++/WebAssembly and
+Flutter/JavaScript build, stages and signs the WGT, installs it on the single
+attached emulator, and launches package `MLFlutter1`.
+
+The same workflow is the default VS Code build task, so Ctrl+Shift+B also runs
+it. For Flutter/JavaScript-only changes, run the task
+**moonlight: rebuild Flutter/JS + deploy (skip C++/Wasm)** to save the native
+rebuild time.
+
+On first use, the launcher reads the local Samsung certificate name and
+password from `.env` and creates an ignored, per-Windows-user signing profile
+under `build/codex-tizen-run/vscode-signing/`. This is necessary because
+Tizen's encrypted `.pwd` files cannot be shared between Windows identities.
+Existing setups can instead set both `MOONLIGHT_TIZEN_SIGN_PROFILE` and
+`MOONLIGHT_TIZEN_PROFILES_PATH`. If multiple devices are attached, set
+`MOONLIGHT_TIZEN_SERIAL` as well.
+
 The script uses these stable local defaults:
 
 - Emscripten tree: `build/codex-wasm-proxy-pthread`

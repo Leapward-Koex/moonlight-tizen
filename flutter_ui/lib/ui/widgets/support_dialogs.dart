@@ -99,59 +99,27 @@ class NavigationGuideDialog extends StatelessWidget {
           const SizedBox(height: 18),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 1100),
-              child: Table(
-                columnWidths: const {
-                  0: FlexColumnWidth(1.4),
-                  1: FlexColumnWidth(1.5),
-                  2: FlexColumnWidth(1.5),
-                  3: FlexColumnWidth(1.5),
-                },
-                border: const TableBorder(
-                  horizontalInside: BorderSide(color: MoonlightColors.divider),
-                ),
-                children: [
-                  const TableRow(
-                    decoration: BoxDecoration(
-                      color: MoonlightColors.background,
-                    ),
-                    children: [
-                      _GuideCell('Action', header: true),
-                      _GuideCell(
-                        'Remote',
-                        header: true,
-                        color: MoonlightColors.cyan,
-                      ),
-                      _GuideCell(
-                        'Keyboard',
-                        header: true,
-                        color: MoonlightColors.offline,
-                      ),
-                      _GuideCell(
-                        'Gamepad',
-                        header: true,
-                        color: MoonlightColors.running,
-                      ),
+            child: DataTable(
+              headingRowHeight: 64,
+              dataRowMinHeight: 64,
+              dataRowMaxHeight: 88,
+              columns: const [
+                DataColumn(label: Text('Action')),
+                DataColumn(label: Text('Remote')),
+                DataColumn(label: Text('Keyboard')),
+                DataColumn(label: Text('Gamepad')),
+              ],
+              rows: [
+                for (final binding in bindings)
+                  DataRow(
+                    cells: [
+                      DataCell(Text(binding.action)),
+                      DataCell(Text(binding.remote)),
+                      DataCell(Text(binding.keyboard)),
+                      DataCell(Text(binding.gamepad)),
                     ],
                   ),
-                  for (final binding in bindings)
-                    TableRow(
-                      children: [
-                        _GuideCell(binding.action),
-                        _GuideCell(binding.remote, color: MoonlightColors.cyan),
-                        _GuideCell(
-                          binding.keyboard,
-                          color: MoonlightColors.offline,
-                        ),
-                        _GuideCell(
-                          binding.gamepad,
-                          color: MoonlightColors.running,
-                        ),
-                      ],
-                    ),
-                ],
-              ),
+              ],
             ),
           ),
         ],
@@ -174,72 +142,13 @@ class _GuideLegend extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Wrap(
       alignment: WrapAlignment.center,
-      spacing: 30,
+      spacing: 16,
       runSpacing: 12,
       children: [
-        _LegendItem('Remote', MoonlightColors.cyan),
-        _LegendItem('Keyboard', MoonlightColors.offline),
-        _LegendItem('Gamepad', MoonlightColors.running),
+        Chip(avatar: Icon(Icons.tv), label: Text('Remote')),
+        Chip(avatar: Icon(Icons.keyboard), label: Text('Keyboard')),
+        Chip(avatar: Icon(Icons.gamepad), label: Text('Gamepad')),
       ],
-    );
-  }
-}
-
-class _LegendItem extends StatelessWidget {
-  const _LegendItem(this.label, this.color);
-
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 20,
-          height: 20,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-            boxShadow: const [
-              BoxShadow(color: Color(0x66000000), blurRadius: 4),
-            ],
-          ),
-        ),
-        const SizedBox(width: 10),
-        Text(
-          label.toUpperCase(),
-          style: const TextStyle(
-            color: MoonlightColors.textBody,
-            fontSize: 18,
-            letterSpacing: .5,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _GuideCell extends StatelessWidget {
-  const _GuideCell(this.text, {this.header = false, this.color});
-
-  final String text;
-  final bool header;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: color ?? MoonlightColors.textBody,
-          fontSize: header ? 19 : 17,
-          fontWeight: header ? FontWeight.w700 : FontWeight.w400,
-        ),
-      ),
     );
   }
 }

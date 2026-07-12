@@ -183,26 +183,24 @@ class _TvFocusableState extends State<TvFocusable> {
                 duration: const Duration(milliseconds: 140),
                 curve: Curves.easeOut,
                 decoration: BoxDecoration(
-                  borderRadius: focused
-                      ? BorderRadius.zero
-                      : widget.borderRadius,
-                  border: focused
-                      ? Border.all(color: widget.focusColor, width: 3)
-                      : null,
+                  borderRadius: widget.borderRadius,
+                  border: Border.all(
+                    color: focused ? widget.focusColor : Colors.transparent,
+                    width: MoonlightMetrics.focusStroke,
+                  ),
                   boxShadow: focused
                       ? [
                           BoxShadow(
-                            color: widget.focusColor.withValues(alpha: .42),
-                            blurRadius: 8,
-                            spreadRadius: 1,
+                            color: widget.focusColor.withValues(alpha: .28),
+                            blurRadius: 10,
+                            spreadRadius: 2,
                           ),
                         ]
                       : null,
                 ),
+                padding: const EdgeInsets.all(MoonlightMetrics.focusStroke),
                 child: ClipRRect(
-                  borderRadius: focused
-                      ? BorderRadius.zero
-                      : widget.borderRadius,
+                  borderRadius: widget.borderRadius,
                   child: widget.builder(context, focused),
                 ),
               ),
@@ -223,7 +221,7 @@ class TvIconButton extends StatelessWidget {
     this.enabled = true,
     this.autofocus = false,
     this.badge,
-    this.size = 50,
+    this.size = MoonlightMetrics.minHitTarget,
   });
 
   final IconData icon;
@@ -239,7 +237,7 @@ class TvIconButton extends StatelessWidget {
     return Tooltip(
       message: label,
       preferBelow: true,
-      textStyle: const TextStyle(color: Colors.white, fontSize: 18),
+      textStyle: const TextStyle(color: Colors.white, fontSize: 16),
       decoration: BoxDecoration(
         color: MoonlightColors.surface,
         borderRadius: BorderRadius.circular(8),
@@ -250,43 +248,30 @@ class TvIconButton extends StatelessWidget {
           autofocus: autofocus,
           enabled: enabled,
           semanticLabel: label,
+          borderRadius: BorderRadius.circular(size / 2),
           onActivate: onPressed,
-          builder: (context, focused) => ColoredBox(
-            color: enabled
-                ? MoonlightColors.control
-                : MoonlightColors.control.withValues(alpha: .45),
-            child: Stack(
-              alignment: Alignment.center,
-              clipBehavior: Clip.none,
-              children: [
-                Icon(icon, size: 32, color: MoonlightColors.text),
-                if (badge != null)
-                  Positioned(
-                    top: -5,
-                    right: -5,
-                    child: Container(
-                      constraints: const BoxConstraints(minWidth: 23),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: const BoxDecoration(
-                        color: MoonlightColors.warning,
-                        borderRadius: BorderRadius.all(Radius.circular(12)),
-                      ),
-                      child: Text(
-                        badge!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                        ),
-                      ),
+          builder: (context, focused) => Stack(
+            alignment: Alignment.center,
+            clipBehavior: Clip.none,
+            children: [
+              ExcludeFocus(
+                child: IgnorePointer(
+                  child: IconButton(
+                    onPressed: enabled ? onPressed : null,
+                    icon: Icon(icon, size: 30),
+                    style: IconButton.styleFrom(
+                      minimumSize: Size.square(size),
+                      foregroundColor: MoonlightColors.text,
+                      backgroundColor: focused
+                          ? MoonlightColors.cyan.withValues(alpha: .16)
+                          : Colors.transparent,
                     ),
                   ),
-              ],
-            ),
+                ),
+              ),
+              if (badge != null)
+                Positioned(top: 0, right: 0, child: Badge(label: Text(badge!))),
+            ],
           ),
         ),
       ),
@@ -303,7 +288,7 @@ class TvActionButton extends StatelessWidget {
     this.enabled = true,
     this.autofocus = false,
     this.destructive = false,
-    this.height = 54,
+    this.height = MoonlightMetrics.minHitTarget,
   });
 
   final String label;
@@ -326,29 +311,19 @@ class TvActionButton extends StatelessWidget {
             ? MoonlightColors.offline
             : MoonlightColors.cyan,
         onActivate: onPressed,
-        builder: (context, focused) => ColoredBox(
-          color: enabled
-              ? MoonlightColors.control
-              : MoonlightColors.control.withValues(alpha: .48),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 22),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (icon != null) ...[
-                  Icon(icon, size: 27),
-                  const SizedBox(width: 12),
-                ],
-                Flexible(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                ),
-              ],
+        builder: (context, focused) => ExcludeFocus(
+          child: IgnorePointer(
+            child: FilledButton.tonalIcon(
+              onPressed: enabled ? onPressed : null,
+              style: FilledButton.styleFrom(
+                minimumSize: Size(double.infinity, height),
+                backgroundColor: destructive
+                    ? MoonlightColors.offline.withValues(alpha: .18)
+                    : null,
+                foregroundColor: destructive ? const Color(0xFFFFB4AB) : null,
+              ),
+              icon: icon == null ? const SizedBox.shrink() : Icon(icon),
+              label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
             ),
           ),
         ),

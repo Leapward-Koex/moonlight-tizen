@@ -72,12 +72,12 @@ class AppsScreen extends StatelessWidget {
               TvFocusTraversalGroup(
                 child: GridView.builder(
                   key: const PageStorageKey('apps-grid'),
-                  padding: EdgeInsets.fromLTRB(gutter, 34, gutter, 50),
+                  padding: EdgeInsets.fromLTRB(gutter, 28, gutter, 48),
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: columns,
-                    childAspectRatio: 215 / 275,
-                    crossAxisSpacing: 38,
-                    mainAxisSpacing: 38,
+                    childAspectRatio: .78,
+                    crossAxisSpacing: 28,
+                    mainAxisSpacing: 28,
                   ),
                   itemCount: apps.length,
                   itemBuilder: (context, index) {
@@ -135,13 +135,8 @@ class AppCard extends StatelessWidget {
       scaleOnFocus: MoonlightMetrics.cardFocusScale,
       focusColor: focusColor,
       onActivate: onPressed,
-      builder: (context, focused) => DecoratedBox(
-        decoration: BoxDecoration(
-          color: const Color(0xFF1D1D1D),
-          border: !focused && app.isRunning
-              ? Border.all(color: MoonlightColors.running, width: 2)
-              : null,
-        ),
+      builder: (context, focused) => Card(
+        clipBehavior: Clip.antiAlias,
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -165,26 +160,37 @@ class AppCard extends StatelessWidget {
                   ),
                 ),
               ),
+            if (app.isRunning)
+              const Positioned(
+                top: 16,
+                left: 16,
+                child: Chip(
+                  avatar: Icon(
+                    Icons.play_arrow_rounded,
+                    size: 20,
+                    color: MoonlightColors.running,
+                  ),
+                  label: Text('Running'),
+                ),
+              ),
             Align(
               alignment: Alignment.bottomCenter,
               child: Container(
                 width: double.infinity,
-                color: const Color(0xA6000000),
-                padding: const EdgeInsets.symmetric(
-                  vertical: 10,
-                  horizontal: 15,
+                padding: const EdgeInsets.fromLTRB(20, 48, 20, 22),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Color(0xE6000000)],
+                  ),
                 ),
                 child: Text(
                   app.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w300,
-                    letterSpacing: .5,
-                  ),
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
               ),
             ),
@@ -200,16 +206,14 @@ class _ArtworkPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF313440), Color(0xFF181A20)],
-        ),
-      ),
+    return const ColoredBox(
+      color: MoonlightColors.surfaceRaised,
       child: Center(
-        child: Icon(Icons.sports_esports, size: 64, color: Color(0x99FFFFFF)),
+        child: Icon(
+          Icons.sports_esports_rounded,
+          size: 96,
+          color: MoonlightColors.textMuted,
+        ),
       ),
     );
   }

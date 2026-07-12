@@ -1,0 +1,12 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Moonlight: build + run on attached Tizen emulator",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}\\tools\\vscode-launch-emulator.ps1\"",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

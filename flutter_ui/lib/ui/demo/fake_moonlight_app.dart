@@ -276,8 +276,8 @@ class _FakeMoonlightExperienceState extends State<FakeMoonlightExperience> {
   List<SettingsCategoryViewModel> _settingsCategories() => [
     SettingsCategoryViewModel(
       id: 'basic',
-      label: 'Basic Settings',
-      icon: Icons.tune,
+      label: 'Video',
+      icon: Icons.tv,
       options: [
         MoonlightSettingOption(
           title: 'Video resolution',
@@ -324,7 +324,7 @@ class _FakeMoonlightExperienceState extends State<FakeMoonlightExperience> {
     ),
     SettingsCategoryViewModel(
       id: 'input',
-      label: 'Input Settings',
+      label: 'Input',
       icon: Icons.sports_esports,
       options: [
         MoonlightSettingOption(

@@ -6,8 +6,8 @@ void main() {
     await tester.pumpWidget(const FakeMoonlightApp());
     await tester.pump();
 
-    expect(find.text('HOSTS'), findsOneWidget);
-    expect(find.text('ADD HOST'), findsOneWidget);
+    expect(find.text('Moonlight'), findsOneWidget);
+    expect(find.text('Add host'), findsOneWidget);
     expect(find.text('Living Room PC'), findsOneWidget);
   });
 }

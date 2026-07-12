@@ -21,59 +21,39 @@ class CodecCapabilityTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (capabilities.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: MoonlightColors.header,
-          border: Border.all(color: MoonlightColors.divider),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(emptyMessage),
+      return ListTile(
+        leading: const Icon(Icons.info_outline),
+        title: Text(emptyMessage),
       );
     }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: MoonlightColors.header,
-          border: Border.all(color: MoonlightColors.divider),
-        ),
-        child: Table(
-          columnWidths: const {
-            0: FixedColumnWidth(86),
-            1: FlexColumnWidth(1.2),
-            2: FlexColumnWidth(2.2),
-            3: FlexColumnWidth(1.2),
-          },
-          border: const TableBorder(
-            horizontalInside: BorderSide(color: MoonlightColors.divider),
-          ),
-          children: [
-            const TableRow(
-              decoration: BoxDecoration(color: MoonlightColors.background),
-              children: [
-                _CapabilityCell('Use', center: true, header: true),
-                _CapabilityCell('Codec', header: true),
-                _CapabilityCell('Profile', header: true),
-                _CapabilityCell('Status', header: true),
-              ],
-            ),
-            for (final capability in capabilities)
-              TableRow(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Center(
-                      child: SizedBox.square(
-                        dimension: 40,
-                        child: TvFocusable(
-                          semanticLabel:
-                              '${capability.codec} ${capability.profile}, '
-                              '${capability.enabled ? 'enabled' : 'disabled'}',
-                          onActivate: () =>
-                              onEnabledChanged(capability, !capability.enabled),
-                          builder: (context, focused) => Checkbox(
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        headingRowHeight: 64,
+        dataRowMinHeight: 72,
+        dataRowMaxHeight: 88,
+        columns: const [
+          DataColumn(label: Text('Use')),
+          DataColumn(label: Text('Codec')),
+          DataColumn(label: Text('Profile')),
+          DataColumn(label: Text('Status')),
+        ],
+        rows: [
+          for (final capability in capabilities)
+            DataRow(
+              cells: [
+                DataCell(
+                  SizedBox.square(
+                    dimension: MoonlightMetrics.minHitTarget,
+                    child: TvFocusable(
+                      semanticLabel:
+                          '${capability.codec} ${capability.profile}, '
+                          '${capability.enabled ? 'enabled' : 'disabled'}',
+                      onActivate: () =>
+                          onEnabledChanged(capability, !capability.enabled),
+                      builder: (context, focused) => ExcludeFocus(
+                        child: IgnorePointer(
+                          child: Checkbox(
                             value: capability.enabled,
                             onChanged: (value) {
                               if (value != null) {
@@ -85,16 +65,18 @@ class CodecCapabilityTable extends StatelessWidget {
                       ),
                     ),
                   ),
-                  _CapabilityCell(capability.codec),
-                  _CapabilityCell(capability.profile),
-                  _CapabilityCell(
+                ),
+                DataCell(Text(capability.codec)),
+                DataCell(Text(capability.profile)),
+                DataCell(
+                  Text(
                     _statusLabel(capability.status),
-                    color: _statusColor(capability.status),
+                    style: TextStyle(color: _statusColor(capability.status)),
                   ),
-                ],
-              ),
-          ],
-        ),
+                ),
+              ],
+            ),
+        ],
       ),
     );
   }
@@ -112,40 +94,6 @@ class CodecCapabilityTable extends StatelessWidget {
         DiagnosticCapabilityStatus.unsupported => const Color(0xFFFF9B9B),
         DiagnosticCapabilityStatus.unknown => const Color(0xFFFFC046),
       };
-}
-
-class _CapabilityCell extends StatelessWidget {
-  const _CapabilityCell(
-    this.text, {
-    this.center = false,
-    this.header = false,
-    this.color,
-  });
-
-  final String text;
-  final bool center;
-  final bool header;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      child: Text(
-        text,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        textAlign: center ? TextAlign.center : TextAlign.left,
-        style: TextStyle(
-          color:
-              color ??
-              (header ? MoonlightColors.textMuted : MoonlightColors.textBody),
-          fontSize: 16,
-          fontWeight: header ? FontWeight.w600 : FontWeight.w400,
-        ),
-      ),
-    );
-  }
 }
 
 class DiagnosticsActionPanel extends StatelessWidget {
