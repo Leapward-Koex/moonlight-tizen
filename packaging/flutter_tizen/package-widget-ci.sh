@@ -27,8 +27,12 @@ for widget_dir in "$@"; do
     }
   '
 
-  if [ ! -f "$widget_dir/MoonlightFlutter.wgt" ]; then
-    echo "Tizen packaging did not create MoonlightFlutter.wgt in $widget_dir" >&2
+  generated_wgt="$widget_dir/Moonlight Flutter.wgt"
+  artifact_wgt="$widget_dir/MoonlightFlutter.wgt"
+  if [ -f "$generated_wgt" ]; then
+    mv -- "$generated_wgt" "$artifact_wgt"
+  elif [ ! -f "$artifact_wgt" ]; then
+    echo "Tizen packaging did not create the expected widget in $widget_dir" >&2
     exit 1
   fi
 done
