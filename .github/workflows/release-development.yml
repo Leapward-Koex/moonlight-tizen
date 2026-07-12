@@ -202,16 +202,23 @@ jobs:
       - name: Sign Flutter Tizen widgets
         run: |
           docker cp build/flutter-tizen/widget-standard runtime_container:/home/moonlight/flutter-widget-standard
-          docker cp build/flutter-tizen/widget-force-game-mode runtime_container:/home/moonlight/flutter-widget-force-game-mode
           docker cp packaging/flutter_tizen/package-widget-ci.sh runtime_container:/home/moonlight/package-widget-ci.sh
           docker exec -u root runtime_container chown -R moonlight:moonlight \
             /home/moonlight/flutter-widget-standard \
+            /home/moonlight/package-widget-ci.sh
+          docker exec runtime_container bash /home/moonlight/package-widget-ci.sh \
+            /home/moonlight/flutter-widget-standard
+          docker cp runtime_container:/home/moonlight/flutter-widget-standard/MoonlightFlutter.wgt ./MoonlightFlutter.wgt
+
+          docker rm -f runtime_container
+          docker run -d --name runtime_container "$RUNTIME_IMAGE" sleep infinity
+          docker cp build/flutter-tizen/widget-force-game-mode runtime_container:/home/moonlight/flutter-widget-force-game-mode
+          docker cp packaging/flutter_tizen/package-widget-ci.sh runtime_container:/home/moonlight/package-widget-ci.sh
+          docker exec -u root runtime_container chown -R moonlight:moonlight \
             /home/moonlight/flutter-widget-force-game-mode \
             /home/moonlight/package-widget-ci.sh
           docker exec runtime_container bash /home/moonlight/package-widget-ci.sh \
-            /home/moonlight/flutter-widget-standard \
             /home/moonlight/flutter-widget-force-game-mode
-          docker cp runtime_container:/home/moonlight/flutter-widget-standard/MoonlightFlutter.wgt ./MoonlightFlutter.wgt
           docker cp runtime_container:/home/moonlight/flutter-widget-force-game-mode/MoonlightFlutter.wgt ./MoonlightFlutter-ForceGM.wgt
       - name: Stop and remove runtime container
         run: |
