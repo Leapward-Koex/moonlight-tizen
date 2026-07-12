@@ -348,6 +348,10 @@ void* MoonlightInstance::StopThreadFunc(void* context) {
     ClLogMessage("Stop thread skipped input join because no input thread was created\n");
   }
 
+  // Flush every tracked input after polling has stopped so the host cannot
+  // retain held controller, mouse, or keyboard state across sessions.
+  g_Instance->ReleaseAllInput();
+
   // Stop the connection
   ClLogMessage("Stop thread calling LiStopConnection\n");
   LiStopConnection();
@@ -811,6 +815,7 @@ int main(int argc, char** argv) {
   static const char* kDocument = reinterpret_cast<const char*>(0x1);
   emscripten_set_pointerlockchange_callback(kDocument, NULL, EM_TRUE, handlePointerLockChange);
   emscripten_set_pointerlockerror_callback(kDocument, NULL, EM_TRUE, handlePointerLockError);
+  emscripten_set_blur_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, EM_TRUE, handleWindowBlur);
   EM_ASM(Module['noExitRuntime'] = true);
   unsigned char buffer[128];
   int rc = RAND_bytes(buffer, sizeof(buffer));
@@ -832,6 +837,10 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
   return g_Instance->StartStream(host, httpPort, width, height, fps, bitrate, rikey, rikeyid, appversion, gfeversion, rtspurl, serverCodecModeSupport,
   framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons, audioBackend, audioConfig,
   audioPacketDuration, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats, disabledVideoMimeTypes);
+}
+
+void configureInput(std::string inputConfiguration) {
+  g_Instance->ConfigureInput(inputConfiguration);
 }
 
 std::string probeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes) {
@@ -899,6 +908,7 @@ void PostPromiseMessage(int callbackId, const std::string& type, const std::vect
 EMSCRIPTEN_BINDINGS(handle_message) {
   emscripten::value_object<MessageResult>("MessageResult").field("type", &MessageResult::type).field("ret", &MessageResult::ret);
   emscripten::function("startStream", &startStream);
+  emscripten::function("configureInput", &configureInput);
   emscripten::function("probeVideoCodecSupport", &probeVideoCodecSupport);
   emscripten::function("stopStream", &stopStream);
   emscripten::function("toggleStats", &toggleStats);

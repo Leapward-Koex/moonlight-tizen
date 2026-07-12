@@ -12,8 +12,8 @@
   var inputSink = null;
   var gamepadFrame = null;
   var gamepadStates = {};
-  var repeatTimer = null;
-  var repeatAction = null;
+  var repeatTimers = {};
+  var streamConfiguration = {};
 
   function emit(event) {
     if (typeof inputSink === 'function') {
@@ -30,29 +30,34 @@
     }
   }
 
-  function clearRepeat() {
-    if (repeatTimer !== null) {
-      root.clearTimeout(repeatTimer);
-      repeatTimer = null;
+  function clearRepeat(key) {
+    if (key != null) {
+      if (repeatTimers[key]) root.clearTimeout(repeatTimers[key].timer);
+      delete repeatTimers[key];
+      return;
     }
-    repeatAction = null;
+    Object.keys(repeatTimers).forEach(function(item) {
+      root.clearTimeout(repeatTimers[item].timer);
+    });
+    repeatTimers = {};
   }
 
-  function scheduleRepeat(action, source, detail) {
-    clearRepeat();
-    repeatAction = { action: action, source: source, detail: detail || {} };
-    repeatTimer = root.setTimeout(function repeat() {
-      if (!repeatAction || inputMode !== 'ui') {
-        clearRepeat();
+  function scheduleRepeat(key, action, source, detail) {
+    clearRepeat(key);
+    var state = { action: action, source: source, detail: detail || {}, timer: null };
+    repeatTimers[key] = state;
+    state.timer = root.setTimeout(function repeat() {
+      if (repeatTimers[key] !== state || inputMode !== 'ui') {
+        clearRepeat(key);
         return;
       }
       emit(Object.assign({
         type: 'action',
-        action: repeatAction.action,
+        action: state.action,
         phase: 'repeat',
-        source: repeatAction.source
-      }, repeatAction.detail));
-      repeatTimer = root.setTimeout(repeat, REPEAT_INTERVAL_MS);
+        source: state.source
+      }, state.detail));
+      state.timer = root.setTimeout(repeat, REPEAT_INTERVAL_MS);
     }, REPEAT_DELAY_MS);
   }
 
@@ -191,6 +196,68 @@
     return mask;
   }
 
+  function fingerprint(value) {
+    var hash = 0x811c9dc5;
+    var text = String(value || '');
+    for (var index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index) & 0xff;
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return ('00000000' + hash.toString(16)).slice(-8);
+  }
+
+  function inputDevices() {
+    var devices = [];
+    var gamepads = readGamepads();
+    for (var index = 0; index < gamepads.length && devices.length < 4; index += 1) {
+      var gamepad = gamepads[index];
+      if (!isRealGamepad(gamepad)) continue;
+      var actuator = gamepad.vibrationActuator ||
+        (gamepad.hapticActuators && gamepad.hapticActuators[0]);
+      devices.push({
+        slot: devices.length,
+        browserIndex: gamepad.index,
+        fingerprint: fingerprint(gamepad.id),
+        id: gamepad.id || ('Controller ' + (devices.length + 1)),
+        mapping: gamepad.mapping || 'unknown',
+        buttonCount: (gamepad.buttons || []).length,
+        axisCount: (gamepad.axes || []).length,
+        supportsRumble: !!actuator,
+        pressedButtons: Array.prototype.map.call(gamepad.buttons || [], function(button, buttonIndex) {
+          return button.pressed ? buttonIndex : -1;
+        }).filter(function(buttonIndex) { return buttonIndex >= 0; }),
+        axes: Array.prototype.map.call(gamepad.axes || [], function(axis) {
+          return Math.round(Number(axis || 0) * 100) / 100;
+        })
+      });
+    }
+    return devices;
+  }
+
+  function testRumble(browserIndex) {
+    var gamepads = readGamepads();
+    var gamepad = gamepads[browserIndex];
+    var actuator = gamepad && (gamepad.vibrationActuator ||
+      (gamepad.hapticActuators && gamepad.hapticActuators[0]));
+    if (!actuator) return false;
+    try {
+      if (typeof actuator.playEffect === 'function') {
+        Promise.resolve(actuator.playEffect('dual-rumble', {
+          startDelay: 0,
+          duration: 350,
+          weakMagnitude: 0.5,
+          strongMagnitude: 0.8
+        })).catch(function() {});
+        return true;
+      }
+      if (typeof actuator.pulse === 'function') {
+        actuator.pulse(0.8, 350);
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   function buttonAction(index) {
     return {
       0: 'accept',
@@ -260,7 +327,7 @@
               gamepadIndex: gamepad.index,
               controlIndex: buttonIndex
             });
-            scheduleRepeat(action, 'gamepad', {
+            scheduleRepeat('b' + gamepad.index + ':' + buttonIndex, action, 'gamepad', {
               gamepadIndex: gamepad.index,
               controlIndex: buttonIndex
             });
@@ -269,7 +336,7 @@
               gamepadIndex: gamepad.index,
               controlIndex: buttonIndex
             });
-            clearRepeat();
+            clearRepeat('b' + gamepad.index + ':' + buttonIndex);
           }
         }
 
@@ -285,13 +352,13 @@
               controlIndex: axisIndex,
               value: current.axes[axisIndex]
             });
-            scheduleRepeat(currentAction, 'gamepad', {
+            scheduleRepeat('a' + gamepad.index + ':' + axisIndex, currentAction, 'gamepad', {
               gamepadIndex: gamepad.index,
               controlIndex: axisIndex,
               value: current.axes[axisIndex]
             });
           } else {
-            clearRepeat();
+            clearRepeat('a' + gamepad.index + ':' + axisIndex);
           }
         }
       }
@@ -324,12 +391,26 @@
     var video = root.document.getElementById('wasm_module');
     if (mode === 'stream' && video) {
       video.focus();
+      if (streamConfiguration.pointerCaptureMode === 'streamStart' &&
+          typeof video.requestPointerLock === 'function') {
+        try {
+          var result = video.requestPointerLock();
+          if (result && typeof result.catch === 'function') result.catch(function() {});
+        } catch (_) {}
+      }
     }
     return inputMode;
   }
 
   function setInputSink(sink) {
     inputSink = typeof sink === 'function' ? sink : null;
+  }
+
+  function setConfiguration(configuration) {
+    streamConfiguration = configuration && typeof configuration === 'object'
+      ? configuration
+      : {};
+    return streamConfiguration;
   }
 
   root.document.addEventListener('keydown', onKeyDown, true);
@@ -343,6 +424,9 @@
     getMode: function() { return inputMode; },
     setSink: setInputSink,
     connectedGamepadMask: connectedGamepadMask,
+    inputDevices: inputDevices,
+    testRumble: testRumble,
+    setConfiguration: setConfiguration,
     sendEscapeToHost: sendEscapeToHost,
     stop: function() {
       clearRepeat();

@@ -157,6 +157,12 @@ final class _FakeNativeRuntime implements MoonlightNativeRuntime {
   int connectedGamepadMask() => 0;
 
   @override
+  List<NativeInputDevice> inputDevices() => const <NativeInputDevice>[];
+
+  @override
+  bool testRumble(int browserIndex) => false;
+
+  @override
   bool sendEscape() => true;
 
   @override

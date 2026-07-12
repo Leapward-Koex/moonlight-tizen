@@ -45,7 +45,17 @@
         wasm: typeof WebAssembly !== 'undefined',
         sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
         gamepads: !!navigator.getGamepads
-      }
+      },
+      input: window.MoonlightInput ? {
+        mode: window.MoonlightInput.getMode(),
+        devices: window.MoonlightInput.inputDevices()
+      } : null,
+      activeElement: document.activeElement ? {
+        tagName: document.activeElement.tagName || '',
+        id: document.activeElement.id || '',
+        ariaLabel: document.activeElement.getAttribute &&
+          document.activeElement.getAttribute('aria-label') || ''
+      } : null
     };
   }
 
@@ -199,6 +209,51 @@
         throw new Error('Diagnostic logger is unavailable');
       }
       return logger.clear().then(function(cleared) { return { cleared: cleared }; });
+    }
+    if (type === 'nav') {
+      var keys = {
+        up: ['ArrowUp', 38],
+        down: ['ArrowDown', 40],
+        left: ['ArrowLeft', 37],
+        right: ['ArrowRight', 39],
+        accept: ['Enter', 13],
+        back: ['XF86Back', 10009]
+      };
+      var key = keys[String(args.action || '')];
+      if (!key) throw new Error('Unsupported nav action: ' + args.action);
+      var event = new KeyboardEvent('keydown', {
+        key: key[0],
+        code: key[0],
+        bubbles: true,
+        cancelable: true
+      });
+      try { Object.defineProperty(event, 'keyCode', { value: key[1] }); } catch (_) {}
+      document.dispatchEvent(event);
+      document.dispatchEvent(new KeyboardEvent('keyup', {
+        key: key[0],
+        code: key[0],
+        bubbles: true,
+        cancelable: true
+      }));
+      return Promise.resolve({ action: args.action, dispatched: true });
+    }
+    if (type === 'click') {
+      var target = document.querySelector(String(args.selector || ''));
+      if (!target || typeof target.click !== 'function') {
+        throw new Error('Clickable selector not found: ' + args.selector);
+      }
+      target.click();
+      return Promise.resolve({ selector: args.selector, clicked: true });
+    }
+    if (type === 'setValue') {
+      var input = document.querySelector(String(args.selector || ''));
+      if (!input || !('value' in input)) {
+        throw new Error('Input selector not found: ' + args.selector);
+      }
+      input.value = args.value == null ? '' : String(args.value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return Promise.resolve({ selector: args.selector, changed: true });
     }
     if (type === 'reload') {
       window.setTimeout(function() { window.location.reload(); }, Math.max(0, Number(args.delayMs) || 0));

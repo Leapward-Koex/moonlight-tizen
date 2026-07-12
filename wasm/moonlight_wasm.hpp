@@ -1,10 +1,12 @@
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <unordered_map>
 
 #include <emscripten/bind.h>
 #include <emscripten/html5.h>
@@ -98,6 +100,27 @@ enum class AudioBackend {
   NativeEmss
 };
 
+struct InputConfiguration {
+  std::string controllerLayout = "automatic";
+  std::unordered_map<uint32_t, std::string> controllerProfiles;
+  float stickDeadzone = 0.12f;
+  float triggerThreshold = 0.05f;
+  float controllerSensitivity = 1.0f;
+  bool invertControllerYAxis = false;
+  float mouseEmulationSpeed = 1.0f;
+  float mouseAcceleration = 1.0f;
+  float mouseScrollSpeed = 1.0f;
+  std::string mouseActivationButton = "start";
+  float physicalMouseSensitivity = 1.0f;
+  bool invertMouseScroll = false;
+  bool keyboardCaptureWithoutPointerLock = true;
+  std::string pointerCaptureMode = "firstClick";
+  std::string stopControllerShortcut = "standard";
+  std::string statsControllerShortcut = "standard";
+  std::string stopKeyboardShortcut = "full";
+  std::string statsKeyboardShortcut = "full";
+};
+
 constexpr const char* kCanvasName = "#wasm_module";
 
 class MoonlightInstance {
@@ -130,7 +153,12 @@ class MoonlightInstance {
   void ReportMouseMovement();
 
   void HandleGamepadInputState(bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons);
+  void ConfigureInput(const std::string& inputConfiguration);
   void PollGamepads();
+  void ReleaseAllInput();
+  void ReleaseKeyboardAndMouse();
+  void SetEmulatedMouseButton(int index, bool pressed);
+  void DeactivateMouseEmulation();
 
   void MouseLockLost();
   void DidLockMouse(int32_t result);
@@ -261,6 +289,7 @@ class MoonlightInstance {
   bool m_MouseEmulationEnabled;
   bool m_FlipABfaceButtonsEnabled;
   bool m_FlipXYfaceButtonsEnabled;
+  InputConfiguration m_InputConfig;
   AudioBackend m_AudioBackend;
   int m_AudioConfig;
   int m_AudioPacketDuration;
@@ -297,7 +326,21 @@ class MoonlightInstance {
   long m_MouseLastPosY;
   bool m_WaitingForAllModifiersUp;
   float m_AccumulatedTicks;
-  int32_t m_MouseDeltaX, m_MouseDeltaY;
+  float m_MouseDeltaX, m_MouseDeltaY;
+  std::array<bool, 256> m_PressedKeys{};
+  std::array<bool, 256> m_ConsumedKeys{};
+  std::array<int, 4> m_GamepadBrowserIndices{{-1, -1, -1, -1}};
+  std::array<short, 4> m_LastControllerButtons{};
+  std::array<bool, 4> m_MouseToggleHeld{};
+  std::array<bool, 4> m_MouseToggleConsumed{};
+  std::array<bool, 4> m_StatsComboLatched{};
+  std::array<std::chrono::steady_clock::time_point, 4> m_MouseToggleStarted{};
+  std::array<bool, 3> m_EmulatedMouseButtons{};
+  std::array<bool, 3> m_PhysicalMouseButtons{};
+  int m_MouseEmulationControllerSlot = -1;
+  float m_MouseScrollRemainderX = 0;
+  float m_MouseScrollRemainderY = 0;
+  std::chrono::steady_clock::time_point m_LastGamepadPoll{};
   uint32_t m_HttpThreadPoolSequence;
 
   Dispatcher m_Dispatcher;
@@ -344,6 +387,7 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioBackend, std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes);
+void configureInput(std::string inputConfiguration);
 std::string probeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
 MessageResult stopStream();
 
@@ -360,6 +404,7 @@ EM_BOOL handleMouseDown(int eventType, const EmscriptenMouseEvent* keyEvent, voi
 EM_BOOL handleWheel(int eventType, const EmscriptenWheelEvent* keyEvent, void* userData);
 EM_BOOL handlePointerLockChange(int eventType, const EmscriptenPointerlockChangeEvent *pointerlockChangeEvent, void *userData);
 EM_BOOL handlePointerLockError(int eventType, const void *reserved, void *userData);
+EM_BOOL handleWindowBlur(int eventType, const EmscriptenFocusEvent *event, void *userData);
 
 void onConnectionStarted();
 void onConnectionStopped(int errorCode);

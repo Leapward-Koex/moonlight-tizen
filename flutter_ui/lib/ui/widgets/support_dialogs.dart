@@ -178,4 +178,40 @@ const defaultNavigationBindings = <NavigationBindingViewModel>[
     keyboard: 'M or context menu',
     gamepad: 'X / Square',
   ),
+  NavigationBindingViewModel(
+    action: 'Mouse pointer',
+    remote: '—',
+    keyboard: 'Physical mouse',
+    gamepad: 'Left stick in mouse mode',
+  ),
+  NavigationBindingViewModel(
+    action: 'Mouse scroll',
+    remote: '—',
+    keyboard: 'Mouse wheel',
+    gamepad: 'Right stick in mouse mode',
+  ),
+  NavigationBindingViewModel(
+    action: 'Mouse buttons',
+    remote: '—',
+    keyboard: 'Mouse buttons',
+    gamepad: 'A/LB left, B/RB right, X/Y middle',
+  ),
+  NavigationBindingViewModel(
+    action: 'Toggle mouse mode',
+    remote: '—',
+    keyboard: '—',
+    gamepad: 'Hold Start for 1 second (configurable)',
+  ),
+  NavigationBindingViewModel(
+    action: 'Stop stream',
+    remote: 'Red',
+    keyboard: 'Ctrl + Alt + Shift + Q (configurable)',
+    gamepad: 'Back + Start + LB + RB (configurable)',
+  ),
+  NavigationBindingViewModel(
+    action: 'Toggle statistics',
+    remote: 'Yellow',
+    keyboard: 'Ctrl + Alt + Shift + S (configurable)',
+    gamepad: 'Back + LB + RB + X (configurable)',
+  ),
 ];

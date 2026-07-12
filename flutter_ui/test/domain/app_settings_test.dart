@@ -82,6 +82,14 @@ void main() {
         videoCodec: VideoCodec.hevc,
         hdr: true,
         audioBackend: AudioBackend.nativeEmss,
+        controllerLayout: ControllerLayout.nintendo,
+        controllerProfiles: {'deadbeef': ControllerLayout.xbox},
+        stickDeadzone: .2,
+        triggerThreshold: .15,
+        controllerSensitivity: 1.4,
+        mouseEmulationSpeed: 1.6,
+        pointerCaptureMode: PointerCaptureMode.streamStart,
+        stopKeyboardShortcut: KeyboardShortcutPreset.compact,
       );
       final restored = AppSettings.fromJson(
         source.toJson(),
@@ -92,8 +100,52 @@ void main() {
       expect(restored.bitrateMbps, source.bitrateMbps);
       expect(restored.videoCodec, source.videoCodec);
       expect(restored.audioBackend, AudioBackend.nativeEmss);
-      expect(restored.toJson()['schemaVersion'], 2);
+      expect(restored.toJson()['schemaVersion'], 3);
       expect(restored.hdr, isTrue);
+      expect(restored.controllerLayout, ControllerLayout.nintendo);
+      expect(restored.controllerProfiles['deadbeef'], ControllerLayout.xbox);
+      expect(restored.stickDeadzone, .2);
+      expect(restored.triggerThreshold, .15);
+      expect(restored.controllerSensitivity, 1.4);
+      expect(restored.mouseEmulationSpeed, 1.6);
+      expect(restored.pointerCaptureMode, PointerCaptureMode.streamStart);
+      expect(restored.stopKeyboardShortcut, KeyboardShortcutPreset.compact);
+    });
+
+    test('normalizes input calibration ranges', () {
+      final settings = const AppSettings(
+        stickDeadzone: 2,
+        triggerThreshold: -1,
+        controllerSensitivity: 4,
+        mouseEmulationSpeed: 9,
+        mouseAcceleration: .1,
+        mouseScrollSpeed: 10,
+        physicalMouseSensitivity: 0,
+      ).normalized(PlatformCapabilities.tizen10());
+
+      expect(settings.stickDeadzone, .5);
+      expect(settings.triggerThreshold, 0);
+      expect(settings.controllerSensitivity, 2);
+      expect(settings.mouseEmulationSpeed, 3);
+      expect(settings.mouseAcceleration, .5);
+      expect(settings.mouseScrollSpeed, 5);
+      expect(settings.physicalMouseSensitivity, .25);
+    });
+
+    test('resetting input preserves unrelated streaming settings', () {
+      final settings = const AppSettings(
+        bitrateMbps: 42,
+        mouseEmulation: true,
+        controllerLayout: ControllerLayout.nintendo,
+        controllerProfiles: {'deadbeef': ControllerLayout.xbox},
+        stickDeadzone: .3,
+      ).withDefaultInputSettings();
+
+      expect(settings.bitrateMbps, 42);
+      expect(settings.mouseEmulation, isFalse);
+      expect(settings.controllerLayout, ControllerLayout.automatic);
+      expect(settings.controllerProfiles, isEmpty);
+      expect(settings.stickDeadzone, .12);
     });
 
     test(

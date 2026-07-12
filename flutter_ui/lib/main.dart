@@ -82,6 +82,8 @@ Future<void> main() async {
         child: MoonlightFlutterApp(
           unlockAudio: native.runtime.unlockAudio,
           connectedGamepadMask: native.runtime.connectedGamepadMask,
+          inputDevices: native.runtime.inputDevices,
+          testRumble: native.runtime.testRumble,
           navigationActions: native.runtime.inputEvents
               .where(
                 (event) => event.type == 'action' && event.phase != 'released',

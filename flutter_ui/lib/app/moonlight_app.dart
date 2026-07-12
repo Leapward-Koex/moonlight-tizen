@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/host_workflows.dart';
+import '../data/native/native_runtime.dart';
 import '../domain/domain.dart';
 import '../state/state.dart';
 import '../ui/moonlight_ui.dart';
@@ -15,6 +16,8 @@ typedef StopNativeStream = Future<void> Function();
 typedef NativeAction = void Function();
 typedef NativeBoolAction = bool Function();
 typedef GamepadMaskReader = int Function();
+typedef InputDevicesReader = List<NativeInputDevice> Function();
+typedef TestRumble = bool Function(int browserIndex);
 typedef CheckForUpdates = Future<({String version, String notes})> Function();
 typedef DiagnosticStatusReader = Map<String, Object?> Function();
 typedef StartLogExport = Future<String> Function();
@@ -29,6 +32,8 @@ class MoonlightFlutterApp extends StatefulWidget {
     required this.stopNativeStream,
     required this.unlockAudio,
     required this.connectedGamepadMask,
+    required this.inputDevices,
+    required this.testRumble,
     required this.navigationActions,
     required this.checkForUpdates,
     required this.restartApp,
@@ -46,6 +51,8 @@ class MoonlightFlutterApp extends StatefulWidget {
   final StopNativeStream stopNativeStream;
   final NativeAction unlockAudio;
   final GamepadMaskReader connectedGamepadMask;
+  final InputDevicesReader inputDevices;
+  final TestRumble testRumble;
   final Stream<String> navigationActions;
   final CheckForUpdates checkForUpdates;
   final NativeBoolAction restartApp;
@@ -95,6 +102,8 @@ class _MoonlightFlutterAppState extends State<MoonlightFlutterApp> {
           stopNativeStream: widget.stopNativeStream,
           unlockAudio: widget.unlockAudio,
           connectedGamepadMask: widget.connectedGamepadMask,
+          inputDevices: widget.inputDevices,
+          testRumble: widget.testRumble,
           navigationActions: widget.navigationActions,
           checkForUpdates: widget.checkForUpdates,
           restartApp: widget.restartApp,
@@ -132,6 +141,8 @@ class _MoonlightExperience extends ConsumerStatefulWidget {
     required this.stopNativeStream,
     required this.unlockAudio,
     required this.connectedGamepadMask,
+    required this.inputDevices,
+    required this.testRumble,
     required this.navigationActions,
     required this.checkForUpdates,
     required this.restartApp,
@@ -151,6 +162,8 @@ class _MoonlightExperience extends ConsumerStatefulWidget {
   final StopNativeStream stopNativeStream;
   final NativeAction unlockAudio;
   final GamepadMaskReader connectedGamepadMask;
+  final InputDevicesReader inputDevices;
+  final TestRumble testRumble;
   final Stream<String> navigationActions;
   final CheckForUpdates checkForUpdates;
   final NativeBoolAction restartApp;
@@ -844,6 +857,65 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
         label: 'Input Settings',
         icon: Icons.sports_esports,
         options: [
+          MoonlightSettingOption(
+            title: 'Connected controllers',
+            description:
+                'Live device status, input testing, per-device layouts, and rumble capability.',
+            fullWidthControl: true,
+            control: InputDevicesControl(
+              devicesReader: widget.inputDevices,
+              defaultLayout: settings.controllerLayout,
+              profiles: settings.controllerProfiles,
+              onLayoutChanged: (fingerprint, layout) {
+                final profiles = Map<String, ControllerLayout>.of(
+                  settings.controllerProfiles,
+                );
+                if (layout == ControllerLayout.automatic) {
+                  profiles.remove(fingerprint);
+                } else {
+                  profiles[fingerprint] = layout;
+                }
+                update(settings.copyWith(controllerProfiles: profiles));
+              },
+              onResetDevice: (fingerprint) {
+                final profiles = Map<String, ControllerLayout>.of(
+                  settings.controllerProfiles,
+                )..remove(fingerprint);
+                update(settings.copyWith(controllerProfiles: profiles));
+              },
+              onTestRumble: (browserIndex) {
+                if (!widget.testRumble(browserIndex)) {
+                  showMoonlightSnackBar(context, 'Rumble is unavailable.');
+                }
+              },
+            ),
+          ),
+          MoonlightSettingOption(
+            title: 'Default controller layout',
+            description:
+                'Used by controllers without a device-specific override. Automatic preserves the legacy face-button swaps.',
+            control: TvChoiceControl<ControllerLayout>(
+              value: settings.controllerLayout,
+              choices: const [
+                ChoiceItem(
+                  value: ControllerLayout.automatic,
+                  label: 'Automatic',
+                ),
+                ChoiceItem(value: ControllerLayout.xbox, label: 'Xbox'),
+                ChoiceItem(value: ControllerLayout.nintendo, label: 'Nintendo'),
+                ChoiceItem(
+                  value: ControllerLayout.playStation,
+                  label: 'PlayStation',
+                ),
+                ChoiceItem(
+                  value: ControllerLayout.custom,
+                  label: 'Custom swaps',
+                ),
+              ],
+              onChanged: (value) =>
+                  update(settings.copyWith(controllerLayout: value)),
+            ),
+          ),
           _toggle(
             'Rumble feedback',
             settings.rumbleFeedback,
@@ -851,7 +923,58 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
               update(settings.copyWith(rumbleFeedback: value));
             },
             enabled: capabilities.supportsRumble,
+            description: capabilities.supportsRumble
+                ? 'Forwards host force feedback to controllers with a supported vibration actuator.'
+                : 'Rumble is unavailable on this platform.',
             controlLabel: 'Allow gamepad rumble feedback while streaming',
+          ),
+          MoonlightSettingOption(
+            title: 'Stick deadzone',
+            description:
+                'Ignores small stick movement to prevent drift. Increase only as much as your controller needs.',
+            control: TvSliderControl(
+              value: settings.stickDeadzone,
+              min: 0,
+              max: .5,
+              step: .01,
+              valueLabel: (value) => '${(value * 100).round()}%',
+              onChanged: (value) =>
+                  update(settings.copyWith(stickDeadzone: value)),
+            ),
+          ),
+          MoonlightSettingOption(
+            title: 'Trigger threshold',
+            description:
+                'Ignores light trigger pressure and rescales the remaining analog range.',
+            control: TvSliderControl(
+              value: settings.triggerThreshold,
+              min: 0,
+              max: .5,
+              step: .01,
+              valueLabel: (value) => '${(value * 100).round()}%',
+              onChanged: (value) =>
+                  update(settings.copyWith(triggerThreshold: value)),
+            ),
+          ),
+          MoonlightSettingOption(
+            title: 'Controller sensitivity',
+            description:
+                'Changes the response curve after the deadzone without reducing the maximum range.',
+            control: TvSliderControl(
+              value: settings.controllerSensitivity,
+              min: .5,
+              max: 2,
+              step: .05,
+              valueLabel: (value) => '${value.toStringAsFixed(2)}×',
+              onChanged: (value) =>
+                  update(settings.copyWith(controllerSensitivity: value)),
+            ),
+          ),
+          _toggle(
+            'Invert controller Y axis',
+            settings.invertControllerYAxis,
+            (value) => update(settings.copyWith(invertControllerYAxis: value)),
+            description: 'Inverts both vertical stick axes while streaming.',
           ),
           _toggle(
             'Mouse emulation',
@@ -859,7 +982,214 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
             (value) {
               update(settings.copyWith(mouseEmulation: value));
             },
+            description:
+                'Turns one controller into a mouse without affecting other connected controllers.',
             controlLabel: 'Hold Start to switch the gamepad to mouse mode',
+          ),
+          MoonlightSettingOption(
+            title: 'Mouse-mode activation button',
+            description:
+                'Hold the selected button for one second. The mode toggles once per press.',
+            control: TvChoiceControl<MouseActivationButton>(
+              value: settings.mouseActivationButton,
+              choices: const [
+                ChoiceItem(value: MouseActivationButton.start, label: 'Start'),
+                ChoiceItem(value: MouseActivationButton.back, label: 'Back'),
+                ChoiceItem(
+                  value: MouseActivationButton.leftStick,
+                  label: 'Left stick click',
+                ),
+                ChoiceItem(
+                  value: MouseActivationButton.rightStick,
+                  label: 'Right stick click',
+                ),
+              ],
+              onChanged: (value) =>
+                  update(settings.copyWith(mouseActivationButton: value)),
+            ),
+          ),
+          MoonlightSettingOption(
+            title: 'Mouse-emulation speed',
+            description: 'Controls pointer speed for the left stick.',
+            control: TvSliderControl(
+              value: settings.mouseEmulationSpeed,
+              min: .25,
+              max: 3,
+              step: .05,
+              valueLabel: (value) => '${value.toStringAsFixed(2)}×',
+              onChanged: (value) =>
+                  update(settings.copyWith(mouseEmulationSpeed: value)),
+            ),
+          ),
+          MoonlightSettingOption(
+            title: 'Mouse-emulation acceleration',
+            description:
+                'Adjusts fine control near the center while retaining full-stick speed.',
+            control: TvSliderControl(
+              value: settings.mouseAcceleration,
+              min: .5,
+              max: 2.5,
+              step: .05,
+              valueLabel: (value) => value.toStringAsFixed(2),
+              onChanged: (value) =>
+                  update(settings.copyWith(mouseAcceleration: value)),
+            ),
+          ),
+          MoonlightSettingOption(
+            title: 'Mouse-emulation scroll speed',
+            description:
+                'Controls continuous horizontal and vertical scrolling for the right stick.',
+            control: TvSliderControl(
+              value: settings.mouseScrollSpeed,
+              min: .25,
+              max: 5,
+              step: .25,
+              valueLabel: (value) => '${value.toStringAsFixed(2)}×',
+              onChanged: (value) =>
+                  update(settings.copyWith(mouseScrollSpeed: value)),
+            ),
+          ),
+          MoonlightSettingOption(
+            title: 'Physical mouse sensitivity',
+            description:
+                'Scales relative mouse movement before it is sent to the host.',
+            control: TvSliderControl(
+              value: settings.physicalMouseSensitivity,
+              min: .25,
+              max: 3,
+              step: .05,
+              valueLabel: (value) => '${value.toStringAsFixed(2)}×',
+              onChanged: (value) =>
+                  update(settings.copyWith(physicalMouseSensitivity: value)),
+            ),
+          ),
+          _toggle(
+            'Invert physical mouse scrolling',
+            settings.invertMouseScroll,
+            (value) => update(settings.copyWith(invertMouseScroll: value)),
+            description: 'Reverses vertical wheel direction on the host.',
+          ),
+          MoonlightSettingOption(
+            title: 'Pointer capture',
+            description:
+                'Capture on stream start is best effort because some platforms require a click.',
+            control: TvChoiceControl<PointerCaptureMode>(
+              value: settings.pointerCaptureMode,
+              choices: const [
+                ChoiceItem(
+                  value: PointerCaptureMode.firstClick,
+                  label: 'First click',
+                ),
+                ChoiceItem(
+                  value: PointerCaptureMode.streamStart,
+                  label: 'Stream start',
+                ),
+                ChoiceItem(
+                  value: PointerCaptureMode.disabled,
+                  label: 'Disabled',
+                ),
+              ],
+              onChanged: (value) =>
+                  update(settings.copyWith(pointerCaptureMode: value)),
+            ),
+          ),
+          _toggle(
+            'Keyboard capture without pointer lock',
+            settings.keyboardCaptureWithoutPointerLock,
+            (value) => update(
+              settings.copyWith(keyboardCaptureWithoutPointerLock: value),
+            ),
+            description:
+                'Lets a physical keyboard control the host even when no mouse is captured.',
+          ),
+          MoonlightSettingOption(
+            title: 'Stop-stream controller shortcut',
+            description:
+                'Standard: Back + Start + LB + RB. Simplified: Back + Start.',
+            control: TvChoiceControl<ControllerShortcutPreset>(
+              value: settings.stopControllerShortcut,
+              choices: const [
+                ChoiceItem(
+                  value: ControllerShortcutPreset.standard,
+                  label: 'Standard',
+                ),
+                ChoiceItem(
+                  value: ControllerShortcutPreset.simplified,
+                  label: 'Simplified',
+                ),
+                ChoiceItem(
+                  value: ControllerShortcutPreset.disabled,
+                  label: 'Disabled',
+                ),
+              ],
+              onChanged: (value) =>
+                  update(settings.copyWith(stopControllerShortcut: value)),
+            ),
+          ),
+          MoonlightSettingOption(
+            title: 'Statistics controller shortcut',
+            description: 'Standard: Back + LB + RB + X. Simplified: Back + X.',
+            control: TvChoiceControl<ControllerShortcutPreset>(
+              value: settings.statsControllerShortcut,
+              choices: const [
+                ChoiceItem(
+                  value: ControllerShortcutPreset.standard,
+                  label: 'Standard',
+                ),
+                ChoiceItem(
+                  value: ControllerShortcutPreset.simplified,
+                  label: 'Simplified',
+                ),
+                ChoiceItem(
+                  value: ControllerShortcutPreset.disabled,
+                  label: 'Disabled',
+                ),
+              ],
+              onChanged: (value) =>
+                  update(settings.copyWith(statsControllerShortcut: value)),
+            ),
+          ),
+          MoonlightSettingOption(
+            title: 'Stop-stream keyboard shortcut',
+            description:
+                'Full: Ctrl + Alt + Shift + Q. Compact: Ctrl + Shift + Q.',
+            control: TvChoiceControl<KeyboardShortcutPreset>(
+              value: settings.stopKeyboardShortcut,
+              choices: const [
+                ChoiceItem(value: KeyboardShortcutPreset.full, label: 'Full'),
+                ChoiceItem(
+                  value: KeyboardShortcutPreset.compact,
+                  label: 'Compact',
+                ),
+                ChoiceItem(
+                  value: KeyboardShortcutPreset.disabled,
+                  label: 'Disabled',
+                ),
+              ],
+              onChanged: (value) =>
+                  update(settings.copyWith(stopKeyboardShortcut: value)),
+            ),
+          ),
+          MoonlightSettingOption(
+            title: 'Statistics keyboard shortcut',
+            description:
+                'Full: Ctrl + Alt + Shift + S. Compact: Ctrl + Shift + S.',
+            control: TvChoiceControl<KeyboardShortcutPreset>(
+              value: settings.statsKeyboardShortcut,
+              choices: const [
+                ChoiceItem(value: KeyboardShortcutPreset.full, label: 'Full'),
+                ChoiceItem(
+                  value: KeyboardShortcutPreset.compact,
+                  label: 'Compact',
+                ),
+                ChoiceItem(
+                  value: KeyboardShortcutPreset.disabled,
+                  label: 'Disabled',
+                ),
+              ],
+              onChanged: (value) =>
+                  update(settings.copyWith(statsKeyboardShortcut: value)),
+            ),
           ),
           _toggle(
             'Flip A/B face buttons',
@@ -867,6 +1197,8 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
             (value) {
               update(settings.copyWith(flipAbButtons: value));
             },
+            description:
+                'Used by Automatic and Custom layouts. Device-specific layout profiles take precedence.',
             controlLabel: 'Swap the A and B face buttons while streaming',
           ),
           _toggle(
@@ -875,7 +1207,19 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
             (value) {
               update(settings.copyWith(flipXyButtons: value));
             },
+            description:
+                'Used by Automatic and Custom layouts. Device-specific layout profiles take precedence.',
             controlLabel: 'Swap the X and Y face buttons while streaming',
+          ),
+          MoonlightSettingOption(
+            title: 'Reset input settings',
+            description:
+                'Restores controller, keyboard, mouse, shortcut, and device-profile defaults.',
+            control: TvActionButton(
+              label: 'Reset input settings',
+              icon: Icons.settings_backup_restore,
+              onPressed: () => update(settings.withDefaultInputSettings()),
+            ),
           ),
         ],
       ),

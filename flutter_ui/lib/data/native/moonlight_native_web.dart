@@ -38,6 +38,8 @@ extension type _MoonlightNativeFacade(JSObject _) implements JSObject {
   external JSBoolean unlockAudio();
   external JSString setInputMode(JSString mode);
   external JSNumber connectedGamepadMask();
+  external JSAny? inputDevices();
+  external JSBoolean testRumble(JSNumber browserIndex);
   external JSBoolean sendEscape();
   external JSBoolean restartApp();
   external JSString setDiagnosticLogLevel(JSString level);
@@ -480,6 +482,30 @@ final class WebMoonlightNativeRuntime implements MoonlightNativeRuntime {
       return _native.connectedGamepadMask().toDartInt;
     } catch (_) {
       return 0;
+    }
+  }
+
+  @override
+  List<NativeInputDevice> inputDevices() {
+    try {
+      final values = _facade?.inputDevices().dartify();
+      if (values is! List) return const <NativeInputDevice>[];
+      return values
+          .map(_stringKeyedMap)
+          .where((value) => value.isNotEmpty)
+          .map(NativeInputDevice.fromJson)
+          .toList(growable: false);
+    } catch (_) {
+      return const <NativeInputDevice>[];
+    }
+  }
+
+  @override
+  bool testRumble(int browserIndex) {
+    try {
+      return _native.testRumble(browserIndex.toJS).toDart;
+    } catch (_) {
+      return false;
     }
   }
 

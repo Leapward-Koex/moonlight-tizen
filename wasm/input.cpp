@@ -35,13 +35,23 @@ static char GetModifierFlags(const EmscriptenKeyboardEvent &event) {
 
 EM_BOOL MoonlightInstance::HandleMouseDown(const EmscriptenMouseEvent &event) {
   if (!m_MouseLocked) {
+    if (m_InputConfig.pointerCaptureMode == "disabled") {
+      return EM_FALSE;
+    }
     LockMouse();
     m_MouseLastPosX = event.screenX;
     m_MouseLastPosY = event.screenY;
     return EM_TRUE;
   }
 
-  LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, ConvertButtonToLiButton(event.button));
+  const int button = ConvertButtonToLiButton(event.button);
+  if (button == 0 || event.button >= m_PhysicalMouseButtons.size()) {
+    return EM_FALSE;
+  }
+  if (!m_PhysicalMouseButtons[event.button]) {
+    LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, button);
+    m_PhysicalMouseButtons[event.button] = true;
+  }
   return EM_TRUE;
 }
 
@@ -50,8 +60,8 @@ EM_BOOL MoonlightInstance::HandleMouseMove(const EmscriptenMouseEvent &event) {
     return EM_FALSE;
   }
 
-  m_MouseDeltaX += event.movementX;
-  m_MouseDeltaY += event.movementY;
+  m_MouseDeltaX += event.movementX * m_InputConfig.physicalMouseSensitivity;
+  m_MouseDeltaY += event.movementY * m_InputConfig.physicalMouseSensitivity;
 
   m_MouseLastPosX = event.screenX;
   m_MouseLastPosY = event.screenY;
@@ -64,7 +74,14 @@ EM_BOOL MoonlightInstance::HandleMouseUp(const EmscriptenMouseEvent &event) {
     return EM_FALSE;
   }
 
-  LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, ConvertButtonToLiButton(event.button));
+  const int button = ConvertButtonToLiButton(event.button);
+  if (button == 0 || event.button >= m_PhysicalMouseButtons.size()) {
+    return EM_FALSE;
+  }
+  if (m_PhysicalMouseButtons[event.button]) {
+    LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, button);
+    m_PhysicalMouseButtons[event.button] = false;
+  }
   return EM_TRUE;
 }
 
@@ -73,46 +90,57 @@ EM_BOOL MoonlightInstance::HandleWheel(const EmscriptenWheelEvent &event) {
     return EM_FALSE;
   }
 
-  // Inverted delta y-axis to restore correct wheel direction
-  m_AccumulatedTicks -= event.deltaY;
+  const float direction = m_InputConfig.invertMouseScroll ? 1.0f : -1.0f;
+  m_AccumulatedTicks += event.deltaY * direction;
   return EM_TRUE;
 }
 
 EM_BOOL MoonlightInstance::HandleKeyDown(const EmscriptenKeyboardEvent &event) {
-  if (!m_MouseLocked) {
+  if (!m_MouseLocked && !m_InputConfig.keyboardCaptureWithoutPointerLock) {
     return EM_FALSE;
   }
 
   char modifiers = GetModifierFlags(event);
   uint32_t keyCode = event.keyCode;
 
-  // Check if the current modifier flags match the defined key combination on the keyboard
+  const auto matchesShortcut = [&](const std::string& preset) {
+    if (preset == "disabled") return false;
+    const char required = preset == "compact"
+      ? MODIFIER_CTRL | MODIFIER_SHIFT
+      : MODIFIER_CTRL | MODIFIER_ALT | MODIFIER_SHIFT;
+    return modifiers == required;
+  };
+  if (matchesShortcut(m_InputConfig.stopKeyboardShortcut) && keyCode == 0x51) {
+    if (keyCode < m_ConsumedKeys.size()) m_ConsumedKeys[keyCode] = true;
+    stopStream();
+    return EM_TRUE;
+  }
+  if (matchesShortcut(m_InputConfig.statsKeyboardShortcut) && keyCode == 0x53) {
+    if (keyCode < m_ConsumedKeys.size()) m_ConsumedKeys[keyCode] = true;
+    toggleStats();
+    return EM_TRUE;
+  }
   if (modifiers == (MODIFIER_CTRL | MODIFIER_ALT | MODIFIER_SHIFT)) {
-    if (keyCode == 0x51) { // Q key
-      // Terminate the connection
-      stopStream();
-      return EM_TRUE;
-    } else if (keyCode == 0x53) { // S key
-      // Toggle performance stats overlay
-      toggleStats();
-      return EM_TRUE;
-    } else {
-      // Wait until these keys come up to unlock the mouse
-      m_WaitingForAllModifiersUp = true;
-    }
+    m_WaitingForAllModifiersUp = true;
   }
 
   LiSendKeyboardEvent(KEY_PREFIX << 8 | keyCode, KEY_ACTION_DOWN, modifiers);
+  if (keyCode < m_PressedKeys.size()) m_PressedKeys[keyCode] = true;
   return EM_TRUE;
 }
 
 EM_BOOL MoonlightInstance::HandleKeyUp(const EmscriptenKeyboardEvent &event) {
-  if (!m_MouseLocked) {
+  if (!m_MouseLocked && !m_InputConfig.keyboardCaptureWithoutPointerLock) {
     return EM_FALSE;
   }
 
   char modifiers = GetModifierFlags(event);
   uint32_t keyCode = event.keyCode;
+
+  if (keyCode < m_ConsumedKeys.size() && m_ConsumedKeys[keyCode]) {
+    m_ConsumedKeys[keyCode] = false;
+    return EM_TRUE;
+  }
 
   // Check if all modifiers are up now
   if (m_WaitingForAllModifiersUp && modifiers == 0) {
@@ -121,6 +149,7 @@ EM_BOOL MoonlightInstance::HandleKeyUp(const EmscriptenKeyboardEvent &event) {
   }
 
   LiSendKeyboardEvent(KEY_PREFIX << 8 | keyCode, KEY_ACTION_UP, modifiers);
+  if (keyCode < m_PressedKeys.size()) m_PressedKeys[keyCode] = false;
   return EM_TRUE;
 }
 
@@ -167,10 +196,18 @@ EM_BOOL handlePointerLockError(int eventType, const void *reserved, void *userDa
   return true;
 }
 
+EM_BOOL handleWindowBlur(int eventType, const EmscriptenFocusEvent *event, void *userData) {
+  g_Instance->ReleaseKeyboardAndMouse();
+  return EM_TRUE;
+}
+
 void MoonlightInstance::ReportMouseMovement() {
-  if (m_MouseDeltaX != 0 || m_MouseDeltaY != 0) {
-    LiSendMouseMoveEvent(m_MouseDeltaX, m_MouseDeltaY);
-    m_MouseDeltaX = m_MouseDeltaY = 0;
+  const int deltaX = static_cast<int>(m_MouseDeltaX);
+  const int deltaY = static_cast<int>(m_MouseDeltaY);
+  if (deltaX != 0 || deltaY != 0) {
+    LiSendMouseMoveEvent(deltaX, deltaY);
+    m_MouseDeltaX -= deltaX;
+    m_MouseDeltaY -= deltaY;
   }
 
   if (m_AccumulatedTicks != 0) {
@@ -204,6 +241,28 @@ void MoonlightInstance::DidLockMouse(int32_t result) {
 
 void MoonlightInstance::MouseLockLost() {
   m_MouseLocked = false;
+  ReleaseKeyboardAndMouse();
+}
+
+void MoonlightInstance::ReleaseKeyboardAndMouse() {
+  for (size_t button = 0; button < m_PhysicalMouseButtons.size(); ++button) {
+    if (!m_PhysicalMouseButtons[button]) continue;
+    LiSendMouseButtonEvent(
+      BUTTON_ACTION_RELEASE,
+      ConvertButtonToLiButton(static_cast<unsigned short>(button)));
+    m_PhysicalMouseButtons[button] = false;
+  }
+  for (size_t key = 0; key < m_PressedKeys.size(); ++key) {
+    if (m_PressedKeys[key]) {
+      LiSendKeyboardEvent(
+        KEY_PREFIX << 8 | static_cast<uint32_t>(key),
+        KEY_ACTION_UP,
+        0);
+      m_PressedKeys[key] = false;
+    }
+    m_ConsumedKeys[key] = false;
+  }
+  m_WaitingForAllModifiersUp = false;
 }
 
 void sendKeyboardEvent(uint32_t keyCode, uint16_t action, char modifiers) {

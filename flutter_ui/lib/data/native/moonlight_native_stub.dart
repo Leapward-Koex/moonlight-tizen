@@ -84,6 +84,12 @@ final class UnsupportedMoonlightNativeRuntime
   int connectedGamepadMask() => 0;
 
   @override
+  List<NativeInputDevice> inputDevices() => const <NativeInputDevice>[];
+
+  @override
+  bool testRumble(int browserIndex) => false;
+
+  @override
   bool sendEscape() => false;
 
   @override

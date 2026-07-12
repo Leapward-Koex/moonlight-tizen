@@ -272,7 +272,8 @@ class SettingsOptionsPane extends StatelessWidget {
     'basic' => 'Picture quality, frame rate, and common streaming behavior.',
     'video' => 'Codec, HDR, color, and frame pacing.',
     'audio' => 'Speaker layout, buffering, and host audio.',
-    'input' => 'Controller feedback and button mapping.',
+    'input' =>
+      'Connected controllers, button layouts, mouse behavior, keyboard capture, and streaming shortcuts.',
     'advanced' => 'Compatibility, diagnostics, and developer options.',
     'about' => 'Version, system information, and support.',
     _ => 'Moonlight preferences.',

@@ -1,35 +1,98 @@
 #include "moonlight_wasm.hpp"
 
-#include <iostream>
-#include <array>
-#include <utility>
-#include <sstream>
-#include <chrono>
-#include <thread>
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <iostream>
+#include <limits>
+#include <sstream>
+#include <string>
+#include <vector>
 
 #include <Limelight.h>
 #include <emscripten/emscripten.h>
 
-// Bitmask for gamepad combo buttons to stop the streaming session
-const short STOP_STREAM_BUTTONS = BACK_FLAG | PLAY_FLAG | LB_FLAG | RB_FLAG;
+namespace {
 
-// Bitmask for gamepad combo buttons to toggle the performance stats overlay
-const short PERF_STATS_BUTTONS = BACK_FLAG | LB_FLAG | RB_FLAG | X_FLAG;
+constexpr int kMaxControllers = 4;
+constexpr auto kMouseToggleHold = std::chrono::milliseconds(1000);
 
-// Flag for gamepad to track controller rumble state
-bool rumbleFeedbackSwitch = false;
+float ClampFloat(float value, float minimum, float maximum) {
+  return std::max(minimum, std::min(maximum, value));
+}
 
-// Flags for gamepad to track mouse emulation state
-bool mouseEmulationSwitch = false;
-bool mouseEmulationActive = false;
+std::vector<std::string> Split(const std::string& value, char delimiter) {
+  std::vector<std::string> parts;
+  std::stringstream stream(value);
+  std::string part;
+  while (std::getline(stream, part, delimiter)) {
+    parts.push_back(part);
+  }
+  if (!value.empty() && value.back() == delimiter) {
+    parts.emplace_back();
+  }
+  return parts;
+}
 
-// Flags for gamepad to track face buttons state
-bool flipABfaceButtonsSwitch = false;
-bool flipXYfaceButtonsSwitch = false;
+float ParseFloat(const std::vector<std::string>& parts, size_t index, float fallback) {
+  if (index >= parts.size()) return fallback;
+  try {
+    return std::stof(parts[index]);
+  } catch (...) {
+    return fallback;
+  }
+}
 
-// For explanation on ordering, see: https://www.w3.org/TR/gamepad/#remapping
-// Enumeration for gamepad buttons
+bool ParseBool(const std::vector<std::string>& parts, size_t index, bool fallback) {
+  if (index >= parts.size()) return fallback;
+  return parts[index] == "1" ? true : parts[index] == "0" ? false : fallback;
+}
+
+uint32_t GamepadFingerprint(const char* id) {
+  uint32_t hash = 2166136261u;
+  if (!id) return hash;
+  for (const unsigned char* cursor = reinterpret_cast<const unsigned char*>(id); *cursor; ++cursor) {
+    hash ^= *cursor;
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
+InputConfiguration ParseInputConfiguration(const std::string& wire) {
+  InputConfiguration config;
+  const auto parts = Split(wire, '|');
+  if (parts.empty() || parts[0] != "v1") return config;
+  if (parts.size() > 1 && !parts[1].empty()) config.controllerLayout = parts[1];
+  config.stickDeadzone = ClampFloat(ParseFloat(parts, 2, config.stickDeadzone), 0.0f, 0.5f);
+  config.triggerThreshold = ClampFloat(ParseFloat(parts, 3, config.triggerThreshold), 0.0f, 0.95f);
+  config.controllerSensitivity = ClampFloat(ParseFloat(parts, 4, config.controllerSensitivity), 0.5f, 2.0f);
+  config.invertControllerYAxis = ParseBool(parts, 5, config.invertControllerYAxis);
+  config.mouseEmulationSpeed = ClampFloat(ParseFloat(parts, 6, config.mouseEmulationSpeed), 0.25f, 3.0f);
+  config.mouseAcceleration = ClampFloat(ParseFloat(parts, 7, config.mouseAcceleration), 0.5f, 2.5f);
+  config.mouseScrollSpeed = ClampFloat(ParseFloat(parts, 8, config.mouseScrollSpeed), 0.25f, 5.0f);
+  if (parts.size() > 9 && !parts[9].empty()) config.mouseActivationButton = parts[9];
+  config.physicalMouseSensitivity = ClampFloat(ParseFloat(parts, 10, config.physicalMouseSensitivity), 0.25f, 3.0f);
+  config.invertMouseScroll = ParseBool(parts, 11, config.invertMouseScroll);
+  config.keyboardCaptureWithoutPointerLock = ParseBool(parts, 12, config.keyboardCaptureWithoutPointerLock);
+  if (parts.size() > 13 && !parts[13].empty()) config.pointerCaptureMode = parts[13];
+  if (parts.size() > 14 && !parts[14].empty()) config.stopControllerShortcut = parts[14];
+  if (parts.size() > 15 && !parts[15].empty()) config.statsControllerShortcut = parts[15];
+  if (parts.size() > 16 && !parts[16].empty()) config.stopKeyboardShortcut = parts[16];
+  if (parts.size() > 17 && !parts[17].empty()) config.statsKeyboardShortcut = parts[17];
+  if (parts.size() > 18) {
+    for (const auto& profile : Split(parts[18], ',')) {
+      const auto separator = profile.find(':');
+      if (separator == std::string::npos) continue;
+      try {
+        const auto fingerprint = static_cast<uint32_t>(std::stoul(profile.substr(0, separator), nullptr, 16));
+        config.controllerProfiles[fingerprint] = profile.substr(separator + 1);
+      } catch (...) {
+      }
+    }
+  }
+  return config;
+}
+
 enum GamepadButton {
   A, B, X, Y,
   LeftBumper, RightBumper,
@@ -41,279 +104,328 @@ enum GamepadButton {
   Count,
 };
 
-// For explanation on ordering, see: https://www.w3.org/TR/gamepad/#remapping
-// Enumeration for gamepad axis
-enum GamepadAxis {
-  LeftX = 0,
-  LeftY = 1,
-  RightX = 2,
-  RightY = 3,
+enum GamepadAxis { LeftX = 0, LeftY = 1, RightX = 2, RightY = 3 };
+
+const int kButtonMasksDefault[] = {
+  A_FLAG, B_FLAG, X_FLAG, Y_FLAG, LB_FLAG, RB_FLAG, 0, 0,
+  BACK_FLAG, PLAY_FLAG, LS_CLK_FLAG, RS_CLK_FLAG,
+  UP_FLAG, DOWN_FLAG, LEFT_FLAG, RIGHT_FLAG, SPECIAL_FLAG,
+};
+const int kButtonMasksAB[] = {
+  B_FLAG, A_FLAG, X_FLAG, Y_FLAG, LB_FLAG, RB_FLAG, 0, 0,
+  BACK_FLAG, PLAY_FLAG, LS_CLK_FLAG, RS_CLK_FLAG,
+  UP_FLAG, DOWN_FLAG, LEFT_FLAG, RIGHT_FLAG, SPECIAL_FLAG,
+};
+const int kButtonMasksXY[] = {
+  A_FLAG, B_FLAG, Y_FLAG, X_FLAG, LB_FLAG, RB_FLAG, 0, 0,
+  BACK_FLAG, PLAY_FLAG, LS_CLK_FLAG, RS_CLK_FLAG,
+  UP_FLAG, DOWN_FLAG, LEFT_FLAG, RIGHT_FLAG, SPECIAL_FLAG,
+};
+const int kButtonMasksABXY[] = {
+  B_FLAG, A_FLAG, Y_FLAG, X_FLAG, LB_FLAG, RB_FLAG, 0, 0,
+  BACK_FLAG, PLAY_FLAG, LS_CLK_FLAG, RS_CLK_FLAG,
+  UP_FLAG, DOWN_FLAG, LEFT_FLAG, RIGHT_FLAG, SPECIAL_FLAG,
 };
 
-// Function to create a mask for active gamepads
-static short GetActiveGamepadMask(int numGamepads) {
-  short result = 0;
-  
-  for (int i = 0; i < numGamepads; ++i) {
-    result |= (1 << i);
+short GetButtonFlags(const EmscriptenGamepadEvent& gamepad,
+                     const InputConfiguration& config,
+                     bool legacyFlipAB,
+                     bool legacyFlipXY) {
+  std::string layout = config.controllerLayout;
+  const auto profile = config.controllerProfiles.find(GamepadFingerprint(gamepad.id));
+  if (profile != config.controllerProfiles.end() && profile->second != "automatic") {
+    layout = profile->second;
   }
-  
+
+  bool flipAB = false;
+  bool flipXY = false;
+  if (layout == "nintendo") {
+    flipAB = true;
+    flipXY = true;
+  } else if (layout == "custom" || layout == "automatic") {
+    flipAB = legacyFlipAB;
+    flipXY = legacyFlipXY;
+  }
+
+  const int* masks = flipAB && flipXY ? kButtonMasksABXY
+                    : flipAB ? kButtonMasksAB
+                    : flipXY ? kButtonMasksXY
+                    : kButtonMasksDefault;
+  const int maskCount = static_cast<int>(sizeof(kButtonMasksDefault) / sizeof(kButtonMasksDefault[0]));
+  short result = 0;
+  for (int index = 0; index < gamepad.numButtons && index < maskCount; ++index) {
+    if (gamepad.digitalButton[index] == EM_TRUE) result |= masks[index];
+  }
   return result;
 }
 
-// Function to map gamepad buttons to flags
-static short GetButtonFlags(const EmscriptenGamepadEvent& gamepad) {
-  // Triggers are considered analog buttons in the "Emscripten API", however they need
-  // to be passed in separate arguments for "Limelight" (it even lacks flags for them).
-
-  const int* buttonMasks = nullptr;
-  int buttonMasksSize = 0;
-
-  // Define button mapping with A/B and X/Y swapped
-  static const int buttonMasksABXY[] = {
-    B_FLAG, A_FLAG, Y_FLAG, X_FLAG,
-    LB_FLAG, RB_FLAG,
-    0 /* LT_FLAG */, 0 /* RT_FLAG */,
-    BACK_FLAG, PLAY_FLAG,
-    LS_CLK_FLAG, RS_CLK_FLAG,
-    UP_FLAG, DOWN_FLAG, LEFT_FLAG, RIGHT_FLAG,
-    SPECIAL_FLAG,
-  };
-  // Define button mapping with A/B swapped
-  static const int buttonMasksAB[] = {
-    B_FLAG, A_FLAG, X_FLAG, Y_FLAG,
-    LB_FLAG, RB_FLAG,
-    0 /* LT_FLAG */, 0 /* RT_FLAG */,
-    BACK_FLAG, PLAY_FLAG,
-    LS_CLK_FLAG, RS_CLK_FLAG,
-    UP_FLAG, DOWN_FLAG, LEFT_FLAG, RIGHT_FLAG,
-    SPECIAL_FLAG,
-  };
-  // Define button mapping with X/Y swapped
-  static const int buttonMasksXY[] = {
-    A_FLAG, B_FLAG, Y_FLAG, X_FLAG,
-    LB_FLAG, RB_FLAG,
-    0 /* LT_FLAG */, 0 /* RT_FLAG */,
-    BACK_FLAG, PLAY_FLAG,
-    LS_CLK_FLAG, RS_CLK_FLAG,
-    UP_FLAG, DOWN_FLAG, LEFT_FLAG, RIGHT_FLAG,
-    SPECIAL_FLAG,
-  };
-  // Define default button mapping
-  static const int buttonMasksDefault[] = {
-    A_FLAG, B_FLAG, X_FLAG, Y_FLAG,
-    LB_FLAG, RB_FLAG,
-    0 /* LT_FLAG */, 0 /* RT_FLAG */,
-    BACK_FLAG, PLAY_FLAG,
-    LS_CLK_FLAG, RS_CLK_FLAG,
-    UP_FLAG, DOWN_FLAG, LEFT_FLAG, RIGHT_FLAG,
-    SPECIAL_FLAG,
-  };
-
-  // Check if the A/B or X/Y face buttons switches are checked
-  if (flipABfaceButtonsSwitch && flipXYfaceButtonsSwitch) {
-    // Swap both A/B and X/Y buttons
-    buttonMasks = buttonMasksABXY;
-    buttonMasksSize = sizeof(buttonMasksABXY) / sizeof(buttonMasksABXY[0]);
-  } else if (flipABfaceButtonsSwitch) { // Check if the A/B face buttons switch is checked
-    // Swap A and B buttons
-    buttonMasks = buttonMasksAB;
-    buttonMasksSize = sizeof(buttonMasksAB) / sizeof(buttonMasksAB[0]);
-  } else if (flipXYfaceButtonsSwitch) { // Check if the X/Y face buttons switch is checked
-    // Swap X and Y buttons
-    buttonMasks = buttonMasksXY;
-    buttonMasksSize = sizeof(buttonMasksXY) / sizeof(buttonMasksXY[0]);
-  } else {
-    // Default buttons layout
-    buttonMasks = buttonMasksDefault;
-    buttonMasksSize = sizeof(buttonMasksDefault) / sizeof(buttonMasksDefault[0]);
-  }
-
-  short result = 0;
-  
-  for (int i = 0; i < gamepad.numButtons && i < buttonMasksSize; ++i) {
-    if (gamepad.digitalButton[i] == EM_TRUE) {
-      result |= buttonMasks[i];
-    }
-  }
-
-  return result;
+float ReadAxis(const EmscriptenGamepadEvent& gamepad, int index) {
+  return index < gamepad.numAxes ? ClampFloat(static_cast<float>(gamepad.axis[index]), -1.0f, 1.0f) : 0.0f;
 }
 
-// Function to handle the gamepad input state
-void MoonlightInstance::HandleGamepadInputState(bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons) {
-  rumbleFeedbackSwitch = rumbleFeedback;
-  mouseEmulationSwitch = mouseEmulation;
-  flipABfaceButtonsSwitch = flipABfaceButtons;
-  flipXYfaceButtonsSwitch = flipXYfaceButtons;
+float ReadTrigger(const EmscriptenGamepadEvent& gamepad, int index, const InputConfiguration& config) {
+  if (index >= gamepad.numButtons) return 0.0f;
+  const float value = ClampFloat(static_cast<float>(gamepad.analogButton[index]), 0.0f, 1.0f);
+  if (value <= config.triggerThreshold) return 0.0f;
+  return (value - config.triggerThreshold) / (1.0f - config.triggerThreshold);
 }
 
-// Function to poll gamepad input
+void ApplyStick(float& x, float& y, const InputConfiguration& config) {
+  const float magnitude = std::sqrt(x * x + y * y);
+  if (magnitude <= config.stickDeadzone || magnitude <= 0.0001f) {
+    x = 0;
+    y = 0;
+    return;
+  }
+  const float normalized = ClampFloat((magnitude - config.stickDeadzone) / (1.0f - config.stickDeadzone), 0.0f, 1.0f);
+  const float shaped = std::pow(normalized, 1.0f / config.controllerSensitivity);
+  const float scale = shaped / magnitude;
+  x = ClampFloat(x * scale, -1.0f, 1.0f);
+  y = ClampFloat(y * scale, -1.0f, 1.0f);
+}
+
+short ControllerShortcutMask(const std::string& preset, bool statistics) {
+  if (preset == "disabled") return 0;
+  if (preset == "simplified") return statistics ? BACK_FLAG | X_FLAG : BACK_FLAG | PLAY_FLAG;
+  return statistics ? BACK_FLAG | LB_FLAG | RB_FLAG | X_FLAG
+                    : BACK_FLAG | PLAY_FLAG | LB_FLAG | RB_FLAG;
+}
+
+short ActivationMask(const std::string& button) {
+  if (button == "back") return BACK_FLAG;
+  if (button == "leftStick") return LS_CLK_FLAG;
+  if (button == "rightStick") return RS_CLK_FLAG;
+  return PLAY_FLAG;
+}
+
+struct PolledGamepad {
+  int browserIndex;
+  EmscriptenGamepadEvent event;
+};
+
+}  // namespace
+
+void MoonlightInstance::HandleGamepadInputState(bool rumbleFeedback,
+                                                 bool mouseEmulation,
+                                                 bool flipABfaceButtons,
+                                                 bool flipXYfaceButtons) {
+  m_RumbleFeedbackEnabled = rumbleFeedback;
+  m_MouseEmulationEnabled = mouseEmulation;
+  m_FlipABfaceButtonsEnabled = flipABfaceButtons;
+  m_FlipXYfaceButtonsEnabled = flipXYfaceButtons;
+  m_LastGamepadPoll = std::chrono::steady_clock::now();
+}
+
+void MoonlightInstance::ConfigureInput(const std::string& inputConfiguration) {
+  m_InputConfig = ParseInputConfiguration(inputConfiguration);
+}
+
+void MoonlightInstance::SetEmulatedMouseButton(int index, bool pressed) {
+  if (index < 0 || index >= static_cast<int>(m_EmulatedMouseButtons.size())) return;
+  if (m_EmulatedMouseButtons[index] == pressed) return;
+  static const int buttons[] = {BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT};
+  LiSendMouseButtonEvent(pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, buttons[index]);
+  m_EmulatedMouseButtons[index] = pressed;
+}
+
+void MoonlightInstance::DeactivateMouseEmulation() {
+  if (m_MouseEmulationControllerSlot >= 0) {
+    PostToJs(std::string("mouseEmulationOff"));
+  }
+  SetEmulatedMouseButton(0, false);
+  SetEmulatedMouseButton(1, false);
+  SetEmulatedMouseButton(2, false);
+  m_MouseEmulationControllerSlot = -1;
+  m_MouseScrollRemainderX = 0;
+  m_MouseScrollRemainderY = 0;
+}
+
 void MoonlightInstance::PollGamepads() {
-  if (emscripten_sample_gamepad_data() != EMSCRIPTEN_RESULT_SUCCESS) {
-    std::cerr << "Sample gamepad data failed!\n";
-    return;
-  }
+  if (emscripten_sample_gamepad_data() != EMSCRIPTEN_RESULT_SUCCESS) return;
+  const int reportedCount = emscripten_get_num_gamepads();
+  if (reportedCount < 0) return;
 
-  const auto numGamepads = emscripten_get_num_gamepads();
-  if (numGamepads == EMSCRIPTEN_RESULT_NOT_SUPPORTED) {
-    std::cerr << "Get num gamepads failed!\n";
-    return;
-  }
-
-  // Create a mask for active gamepads
-  const auto activeGamepadMask = GetActiveGamepadMask(numGamepads);
-
-  // Prevent repeated trigger while the button combo is held down
-  static bool comboTriggered = false;
-
-  // Iterate through connected gamepads and process their input
-  for (int gamepadID = 0; gamepadID < numGamepads; ++gamepadID) {
-    emscripten_sample_gamepad_data();
-    EmscriptenGamepadEvent gamepad;
-    // See logic in getConnectedGamepadMask() (utils.js)
-    // These must stay in sync!
-
-    const auto result = emscripten_get_gamepad_status(gamepadID, &gamepad);
-    if (result != EMSCRIPTEN_RESULT_SUCCESS || !gamepad.connected) {
-      // Not connected
+  std::vector<PolledGamepad> connected;
+  for (int browserIndex = 0; browserIndex < reportedCount; ++browserIndex) {
+    EmscriptenGamepadEvent event{};
+    if (emscripten_get_gamepad_status(browserIndex, &event) != EMSCRIPTEN_RESULT_SUCCESS ||
+        !event.connected || event.timestamp == 0) {
       continue;
     }
+    connected.push_back({browserIndex, event});
+  }
 
-    if (gamepad.timestamp == 0) {
-      // On some platforms, Tizen returns "connected" gamepads that really 
-      // aren't, so timestamp stays at zero. To work around this, we'll only
-      // count gamepads that have a non-zero timestamp in our controller index.
-      continue;
+  auto findEvent = [&](int browserIndex) -> const EmscriptenGamepadEvent* {
+    for (const auto& item : connected) {
+      if (item.browserIndex == browserIndex) return &item.event;
     }
+    return nullptr;
+  };
+  auto hasSlot = [&](int browserIndex) {
+    return std::find(m_GamepadBrowserIndices.begin(), m_GamepadBrowserIndices.end(), browserIndex) != m_GamepadBrowserIndices.end();
+  };
 
-    // Process input for active gamepad
-    const auto buttonFlags = GetButtonFlags(gamepad);
-    const auto leftTrigger = gamepad.analogButton[GamepadButton::LeftTrigger]
-      * std::numeric_limits<unsigned char>::max();
-    const auto rightTrigger = gamepad.analogButton[GamepadButton::RightTrigger]
-      * std::numeric_limits<unsigned char>::max();
-    const auto leftStickX = gamepad.axis[GamepadAxis::LeftX]
-      * std::numeric_limits<short>::max();
-    const auto leftStickY = -gamepad.axis[GamepadAxis::LeftY]
-      * std::numeric_limits<short>::max();
-    const auto rightStickX = gamepad.axis[GamepadAxis::RightX]
-      * std::numeric_limits<short>::max();
-    const auto rightStickY = -gamepad.axis[GamepadAxis::RightY]
-      * std::numeric_limits<short>::max();
+  std::array<bool, kMaxControllers> disconnectedSlots{};
+  for (int slot = 0; slot < kMaxControllers; ++slot) {
+    if (m_GamepadBrowserIndices[slot] >= 0 && !findEvent(m_GamepadBrowserIndices[slot])) {
+      disconnectedSlots[slot] = true;
+      m_GamepadBrowserIndices[slot] = -1;
+      m_LastControllerButtons[slot] = 0;
+      m_MouseToggleHeld[slot] = false;
+      m_MouseToggleConsumed[slot] = false;
+      m_StatsComboLatched[slot] = false;
+      if (m_MouseEmulationControllerSlot == slot) DeactivateMouseEmulation();
+    }
+  }
+  for (const auto& item : connected) {
+    if (hasSlot(item.browserIndex)) continue;
+    const auto freeSlot = std::find(m_GamepadBrowserIndices.begin(), m_GamepadBrowserIndices.end(), -1);
+    if (freeSlot == m_GamepadBrowserIndices.end()) break;
+    *freeSlot = item.browserIndex;
+  }
 
-    // Check if the current button flags match the defined button combination on the gamepad
-    if (buttonFlags == STOP_STREAM_BUTTONS) {
-      // Terminate the connection
+  short activeMask = 0;
+  for (int slot = 0; slot < kMaxControllers; ++slot) {
+    if (m_GamepadBrowserIndices[slot] >= 0) activeMask |= static_cast<short>(1 << slot);
+  }
+  for (int slot = 0; slot < kMaxControllers; ++slot) {
+    if (disconnectedSlots[slot]) {
+      LiSendMultiControllerEvent(slot, activeMask, 0, 0, 0, 0, 0, 0, 0);
+    }
+  }
+
+  const auto now = std::chrono::steady_clock::now();
+  float elapsed = std::chrono::duration<float>(now - m_LastGamepadPoll).count();
+  elapsed = ClampFloat(elapsed, 0.001f, 0.05f);
+  m_LastGamepadPoll = now;
+
+  if (!m_MouseEmulationEnabled) DeactivateMouseEmulation();
+
+  for (int slot = 0; slot < kMaxControllers; ++slot) {
+    const auto* gamepad = findEvent(m_GamepadBrowserIndices[slot]);
+    if (!gamepad) continue;
+
+    short buttons = GetButtonFlags(*gamepad, m_InputConfig,
+                                   m_FlipABfaceButtonsEnabled,
+                                   m_FlipXYfaceButtonsEnabled);
+    const short stopMask = ControllerShortcutMask(m_InputConfig.stopControllerShortcut, false);
+    const short statsMask = ControllerShortcutMask(m_InputConfig.statsControllerShortcut, true);
+    if (stopMask && (buttons & stopMask) == stopMask) {
       stopStream();
       return;
-    } else if (buttonFlags == PERF_STATS_BUTTONS) {
-      if (!comboTriggered) {
-        // Toggle performance stats overlay
-        toggleStats();
-        // Mark combo as triggered until buttons are released
-        comboTriggered = true;
-      }
-    } else {
-      // Reset when buttons are released
-      comboTriggered = false;
+    }
+    const bool statsPressed = statsMask && (buttons & statsMask) == statsMask;
+    if (statsPressed && !m_StatsComboLatched[slot]) toggleStats();
+    m_StatsComboLatched[slot] = statsPressed;
+
+    float leftX = ReadAxis(*gamepad, GamepadAxis::LeftX);
+    float leftY = -ReadAxis(*gamepad, GamepadAxis::LeftY);
+    float rightX = ReadAxis(*gamepad, GamepadAxis::RightX);
+    float rightY = -ReadAxis(*gamepad, GamepadAxis::RightY);
+    ApplyStick(leftX, leftY, m_InputConfig);
+    ApplyStick(rightX, rightY, m_InputConfig);
+    if (m_InputConfig.invertControllerYAxis) {
+      leftY = -leftY;
+      rightY = -rightY;
     }
 
-    // Check if the mouse emulation switch is checked
-    if (mouseEmulationSwitch) {
-      static auto activatePressTime = std::chrono::steady_clock::now();
-      // Toggle mouse emulation on and off based on how long the PLAY/START button is pressed
-      if (buttonFlags & PLAY_FLAG) {
-        auto currentTime = std::chrono::steady_clock::now();
-        // Calculate the duration in milliseconds since the PLAY/START button was pressed
-        auto durationTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - activatePressTime).count();
-        // If the button has been pressed for at least 1000 milliseconds (1 second)
-        if (durationTime >= 1000) {
-          // Toggle mouse emulation state
-          if (!mouseEmulationActive) {
-            // Activate mouse emulation and notify the user
-            mouseEmulationActive = true;
-            PostToJs(std::string("mouseEmulationOn"));
-          } else {
-            // Deactivate mouse emulation and notify the user
-            mouseEmulationActive = false;
-            PostToJs(std::string("mouseEmulationOff"));
-          }
-          // Reset the PLAY/START press time to the current time after toggling
-          activatePressTime = std::chrono::steady_clock::now();
+    const short activation = ActivationMask(m_InputConfig.mouseActivationButton);
+    const bool activationPressed = (buttons & activation) != 0;
+    if (m_MouseEmulationEnabled && activationPressed) {
+      if (!m_MouseToggleHeld[slot]) {
+        m_MouseToggleHeld[slot] = true;
+        m_MouseToggleConsumed[slot] = false;
+        m_MouseToggleStarted[slot] = now;
+      } else if (!m_MouseToggleConsumed[slot] && now - m_MouseToggleStarted[slot] >= kMouseToggleHold) {
+        m_MouseToggleConsumed[slot] = true;
+        LiSendMultiControllerEvent(slot, activeMask, 0, 0, 0, 0, 0, 0, 0);
+        m_LastControllerButtons[slot] = 0;
+        if (m_MouseEmulationControllerSlot == slot) {
+          DeactivateMouseEmulation();
+        } else {
+          DeactivateMouseEmulation();
+          m_MouseEmulationControllerSlot = slot;
+          PostToJs(std::string("mouseEmulationOn"));
         }
-      } else {
-        // If the PLAY/START button is not pressed, reset PLAY/START press time to the current time
-        activatePressTime = std::chrono::steady_clock::now();
       }
-    } else {
-      // Deactivate mouse emulation if the mouse emulation switch is unchecked
-      mouseEmulationActive = false;
+    } else if (!activationPressed) {
+      m_MouseToggleHeld[slot] = false;
+      m_MouseToggleConsumed[slot] = false;
     }
 
-    // If mouse emulation is active, then send mouse input to the desired handler (acts as a mouse)
-    if (mouseEmulationActive) {
-      // Left Stick values are mapped to horizontal and vertical mouse movements
-      const float baseMouseSpeed = 10.0f;
-      const float leftStickMagnitude = std::sqrt(leftStickX * leftStickX + leftStickY * leftStickY) / std::numeric_limits<short>::max();
-      const float mouseSpeed = baseMouseSpeed * leftStickMagnitude;
-      const float mouseXDelta = static_cast<float>(leftStickX) / std::numeric_limits<short>::max() * mouseSpeed;
-      const float mouseYDelta = -static_cast<float>(leftStickY) / std::numeric_limits<short>::max() * mouseSpeed;
-      
-      // Send a mouse move event with the specified delta values for both horizontal (X-axis) and vertical (Y-axis) coordinates
-      LiSendMouseMoveEvent(static_cast<int>(mouseXDelta), static_cast<int>(mouseYDelta));
+    if (m_MouseToggleConsumed[slot]) buttons &= ~activation;
 
-      // Right Stick values are mapped to horizontal and vertical mouse scrolls
-      const float baseScrollSpeed = 1.0f;
-      const float rightStickMagnitude = std::sqrt(rightStickX * rightStickX + rightStickY * rightStickY) / std::numeric_limits<short>::max();
-      const float scrollSpeed = baseScrollSpeed * rightStickMagnitude;
-      const float scrollXDelta = static_cast<float>(rightStickX) / std::numeric_limits<short>::max() * scrollSpeed;
-      const float scrollYDelta = static_cast<float>(rightStickY) / std::numeric_limits<short>::max() * scrollSpeed;
-      
-      // Send mouse scroll events with the specified delta values for both horizontal (X-axis) and vertical (Y-axis) coordinates
-      LiSendHScrollEvent(static_cast<int>(scrollXDelta));
-      LiSendScrollEvent(static_cast<int>(scrollYDelta));
+    if (m_MouseEmulationControllerSlot == slot) {
+      const float leftMagnitude = std::sqrt(leftX * leftX + leftY * leftY);
+      if (leftMagnitude > 0.0001f) {
+        const float curve = std::pow(ClampFloat(leftMagnitude, 0.0f, 1.0f), m_InputConfig.mouseAcceleration);
+        const float pixels = 900.0f * m_InputConfig.mouseEmulationSpeed * curve * elapsed;
+        m_MouseDeltaX += leftX / leftMagnitude * pixels;
+        m_MouseDeltaY -= leftY / leftMagnitude * pixels;
+      }
 
-      // Face Buttons values are mapped to control mouse buttons
-      if (buttonFlags & (A_FLAG | LB_FLAG)) {
-        // Send a mouse button press event for the left button
-        LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_LEFT);
-      } else {
-        // Send a mouse button release event for the left button
-        LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+      const float scrollScale = 20.0f * m_InputConfig.mouseScrollSpeed * elapsed;
+      m_MouseScrollRemainderX += rightX * scrollScale;
+      m_MouseScrollRemainderY += rightY * scrollScale;
+      const int scrollX = static_cast<int>(m_MouseScrollRemainderX);
+      const int scrollY = static_cast<int>(m_MouseScrollRemainderY);
+      if (scrollX != 0) {
+        LiSendHScrollEvent(scrollX);
+        m_MouseScrollRemainderX -= scrollX;
       }
-      if (buttonFlags & (X_FLAG | Y_FLAG)) {
-        // Send a mouse button press event for the Middle button
-        LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_MIDDLE);
-      } else {
-        // Send a mouse button release event for the Middle button
-        LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_MIDDLE);
+      if (scrollY != 0) {
+        LiSendScrollEvent(scrollY);
+        m_MouseScrollRemainderY -= scrollY;
       }
-      if (buttonFlags & (B_FLAG | RB_FLAG)) {
-        // Send a mouse button press event for the Right button
-        LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_RIGHT);
-      } else {
-        // Send a mouse button release event for the Right button
-        LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
-      }
-    } else {
-      // If mouse emulation is inactive, then send gamepad input to the desired handler (acts as a gamepad)
-      LiSendMultiControllerEvent(
-        gamepadID, activeGamepadMask, buttonFlags, leftTrigger,
-        rightTrigger, leftStickX, leftStickY, rightStickX, rightStickY);
+      SetEmulatedMouseButton(0, (buttons & (A_FLAG | LB_FLAG)) != 0);
+      SetEmulatedMouseButton(1, (buttons & (X_FLAG | Y_FLAG)) != 0);
+      SetEmulatedMouseButton(2, (buttons & (B_FLAG | RB_FLAG)) != 0);
+      continue;
     }
+
+    const auto leftTrigger = static_cast<unsigned char>(std::lround(
+      ReadTrigger(*gamepad, GamepadButton::LeftTrigger, m_InputConfig) * std::numeric_limits<unsigned char>::max()));
+    const auto rightTrigger = static_cast<unsigned char>(std::lround(
+      ReadTrigger(*gamepad, GamepadButton::RightTrigger, m_InputConfig) * std::numeric_limits<unsigned char>::max()));
+    const auto toShort = [](float value) {
+      return static_cast<short>(std::lround(value * std::numeric_limits<short>::max()));
+    };
+    LiSendMultiControllerEvent(slot, activeMask, buttons, leftTrigger, rightTrigger,
+                               toShort(leftX), toShort(leftY), toShort(rightX), toShort(rightY));
+    m_LastControllerButtons[slot] = buttons;
   }
 }
 
-// Function to send controller rumble feedback for gamepad
-void MoonlightInstance::ClControllerRumble(unsigned short controllerNumber, unsigned short lowFreqMotor, unsigned short highFreqMotor) {
-  const float weakMagnitude = static_cast<float>(highFreqMotor) / static_cast<float>(UINT16_MAX);
-  const float strongMagnitude = static_cast<float>(lowFreqMotor) / static_cast<float>(UINT16_MAX);
-  
-  // Check if the rumble feedback switch is checked
-  if (rumbleFeedbackSwitch) {
-    std::ostringstream ss;
-    ss << controllerNumber << "," << weakMagnitude << "," << strongMagnitude;
-    PostToJs(std::string("controllerRumble: ") + ss.str());
+void MoonlightInstance::ReleaseAllInput() {
+  DeactivateMouseEmulation();
+  for (int slot = 0; slot < kMaxControllers; ++slot) {
+    if (m_GamepadBrowserIndices[slot] >= 0 || m_LastControllerButtons[slot] != 0) {
+      LiSendMultiControllerEvent(slot, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
+    m_GamepadBrowserIndices[slot] = -1;
+    m_LastControllerButtons[slot] = 0;
+    m_MouseToggleHeld[slot] = false;
+    m_MouseToggleConsumed[slot] = false;
+    m_StatsComboLatched[slot] = false;
   }
+  for (size_t key = 0; key < m_PressedKeys.size(); ++key) {
+    if (m_PressedKeys[key]) {
+      LiSendKeyboardEvent(0x8000u | static_cast<uint32_t>(key), KEY_ACTION_UP, 0);
+      m_PressedKeys[key] = false;
+    }
+    m_ConsumedKeys[key] = false;
+  }
+}
+
+void MoonlightInstance::ClControllerRumble(unsigned short controllerNumber,
+                                            unsigned short lowFreqMotor,
+                                            unsigned short highFreqMotor) {
+  if (!g_Instance || !g_Instance->m_RumbleFeedbackEnabled || controllerNumber >= kMaxControllers) return;
+  const int browserIndex = g_Instance->m_GamepadBrowserIndices[controllerNumber];
+  if (browserIndex < 0) return;
+  const float weakMagnitude = static_cast<float>(highFreqMotor) / UINT16_MAX;
+  const float strongMagnitude = static_cast<float>(lowFreqMotor) / UINT16_MAX;
+  std::ostringstream message;
+  message << browserIndex << "," << weakMagnitude << "," << strongMagnitude;
+  PostToJs(std::string("controllerRumble: ") + message.str());
 }

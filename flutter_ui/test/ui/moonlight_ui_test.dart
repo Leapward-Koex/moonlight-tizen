@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:moonlight_tizen_flutter/data/native/native_runtime.dart';
+import 'package:moonlight_tizen_flutter/domain/app_settings.dart';
 import 'package:moonlight_tizen_flutter/ui/moonlight_ui.dart';
 
 void main() {
@@ -50,6 +52,50 @@ void main() {
 
     await tester.tap(find.text('Gaming PC'));
     expect(selected?.id, 'one');
+  });
+
+  testWidgets('input device panel shows live state and tests rumble', (
+    tester,
+  ) async {
+    setViewport(tester, const Size(1280, 720));
+    var rumbleIndex = -1;
+    final device = NativeInputDevice(
+      slot: 0,
+      browserIndex: 2,
+      fingerprint: 'deadbeef',
+      id: 'Test Controller',
+      mapping: 'standard',
+      buttonCount: 17,
+      axisCount: 4,
+      supportsRumble: true,
+      pressedButtons: const [0, 9],
+      axes: const [.25, -.5, 0, 1],
+    );
+    await tester.pumpWidget(
+      themed(
+        Scaffold(
+          body: SingleChildScrollView(
+            child: InputDevicesControl(
+              devicesReader: () => [device],
+              defaultLayout: ControllerLayout.xbox,
+              profiles: const {'deadbeef': ControllerLayout.nintendo},
+              onLayoutChanged: (_, _) {},
+              onResetDevice: (_) {},
+              onTestRumble: (index) => rumbleIndex = index,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.textContaining('Player 1: Test Controller'), findsOneWidget);
+    expect(find.textContaining('buttons 0, 9'), findsOneWidget);
+    expect(find.text('Default layout: xbox'), findsOneWidget);
+    final rumbleButton = find.widgetWithText(TvActionButton, 'Test rumble');
+    await tester.ensureVisible(rumbleButton);
+    await tester.tap(rumbleButton);
+    expect(rumbleIndex, 2);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('apps use five TV-scale columns and preserve the running state', (

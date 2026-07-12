@@ -32,6 +32,80 @@ enum AudioBackend {
 
 enum DiagnosticLogLevel { off, error, warning, info, debug }
 
+enum ControllerLayout {
+  automatic('automatic'),
+  xbox('xbox'),
+  nintendo('nintendo'),
+  playStation('playstation'),
+  custom('custom');
+
+  const ControllerLayout(this.wireName);
+  final String wireName;
+
+  static ControllerLayout fromWireName(String value) => values.firstWhere(
+    (item) => item.wireName == value.toLowerCase(),
+    orElse: () => automatic,
+  );
+}
+
+enum MouseActivationButton {
+  start('start'),
+  back('back'),
+  leftStick('leftStick'),
+  rightStick('rightStick');
+
+  const MouseActivationButton(this.wireName);
+  final String wireName;
+
+  static MouseActivationButton fromWireName(String value) => values.firstWhere(
+    (item) => item.wireName.toLowerCase() == value.toLowerCase(),
+    orElse: () => start,
+  );
+}
+
+enum PointerCaptureMode {
+  firstClick('firstClick'),
+  streamStart('streamStart'),
+  disabled('disabled');
+
+  const PointerCaptureMode(this.wireName);
+  final String wireName;
+
+  static PointerCaptureMode fromWireName(String value) => values.firstWhere(
+    (item) => item.wireName.toLowerCase() == value.toLowerCase(),
+    orElse: () => firstClick,
+  );
+}
+
+enum ControllerShortcutPreset {
+  standard('standard'),
+  simplified('simplified'),
+  disabled('disabled');
+
+  const ControllerShortcutPreset(this.wireName);
+  final String wireName;
+
+  static ControllerShortcutPreset fromWireName(String value) =>
+      values.firstWhere(
+        (item) => item.wireName.toLowerCase() == value.toLowerCase(),
+        orElse: () => standard,
+      );
+}
+
+enum KeyboardShortcutPreset {
+  full('full'),
+  compact('compact'),
+  disabled('disabled');
+
+  const KeyboardShortcutPreset(this.wireName);
+  final String wireName;
+
+  static KeyboardShortcutPreset fromWireName(String value) => values.firstWhere(
+    (item) => item.wireName.toLowerCase() == value.toLowerCase(),
+    orElse: () => full,
+  );
+}
+
 final class StreamResolution {
   const StreamResolution(this.width, this.height);
 
@@ -80,7 +154,7 @@ final class StreamResolution {
 /// Use [normalized] after restoring persisted JSON or applying a UI change. It
 /// enforces the same cross-setting constraints as the legacy web UI.
 final class AppSettings {
-  static const int currentSchemaVersion = 2;
+  static const int currentSchemaVersion = 3;
   static const List<int> normalFrameRates = [30, 60];
   static const List<int> unlockedFrameRates = [30, 60, 90, 120, 144];
   static const List<int> packetDurationsMs = [0, 5, 10, 20];
@@ -98,6 +172,24 @@ final class AppSettings {
     this.mouseEmulation = false,
     this.flipAbButtons = false,
     this.flipXyButtons = false,
+    this.controllerLayout = ControllerLayout.automatic,
+    this.controllerProfiles = const <String, ControllerLayout>{},
+    this.stickDeadzone = .12,
+    this.triggerThreshold = .05,
+    this.controllerSensitivity = 1,
+    this.invertControllerYAxis = false,
+    this.mouseEmulationSpeed = 1,
+    this.mouseAcceleration = 1,
+    this.mouseScrollSpeed = 1,
+    this.mouseActivationButton = MouseActivationButton.start,
+    this.physicalMouseSensitivity = 1,
+    this.invertMouseScroll = false,
+    this.keyboardCaptureWithoutPointerLock = true,
+    this.pointerCaptureMode = PointerCaptureMode.firstClick,
+    this.stopControllerShortcut = ControllerShortcutPreset.standard,
+    this.statsControllerShortcut = ControllerShortcutPreset.standard,
+    this.stopKeyboardShortcut = KeyboardShortcutPreset.full,
+    this.statsKeyboardShortcut = KeyboardShortcutPreset.full,
     this.audioBackend = AudioBackend.webAudio,
     this.audioConfiguration = AudioConfiguration.stereo,
     this.audioPacketDurationMs = 0,
@@ -126,6 +218,24 @@ final class AppSettings {
   final bool mouseEmulation;
   final bool flipAbButtons;
   final bool flipXyButtons;
+  final ControllerLayout controllerLayout;
+  final Map<String, ControllerLayout> controllerProfiles;
+  final double stickDeadzone;
+  final double triggerThreshold;
+  final double controllerSensitivity;
+  final bool invertControllerYAxis;
+  final double mouseEmulationSpeed;
+  final double mouseAcceleration;
+  final double mouseScrollSpeed;
+  final MouseActivationButton mouseActivationButton;
+  final double physicalMouseSensitivity;
+  final bool invertMouseScroll;
+  final bool keyboardCaptureWithoutPointerLock;
+  final PointerCaptureMode pointerCaptureMode;
+  final ControllerShortcutPreset stopControllerShortcut;
+  final ControllerShortcutPreset statsControllerShortcut;
+  final KeyboardShortcutPreset stopKeyboardShortcut;
+  final KeyboardShortcutPreset statsKeyboardShortcut;
   final AudioBackend audioBackend;
   final AudioConfiguration audioConfiguration;
   final int audioPacketDurationMs;
@@ -183,6 +293,48 @@ final class AppSettings {
       flipXyButtons: jsonBool(
         json['flipXyButtons'] ?? json['flipXYfaceButtons'],
       ),
+      controllerLayout: ControllerLayout.fromWireName(
+        jsonString(json['controllerLayout'], 'automatic'),
+      ),
+      controllerProfiles: Map.unmodifiable(
+        jsonMap(json['controllerProfiles']).map(
+          (key, value) => MapEntry(
+            key,
+            ControllerLayout.fromWireName(jsonString(value, 'automatic')),
+          ),
+        ),
+      ),
+      stickDeadzone: jsonDouble(json['stickDeadzone'], .12),
+      triggerThreshold: jsonDouble(json['triggerThreshold'], .05),
+      controllerSensitivity: jsonDouble(json['controllerSensitivity'], 1),
+      invertControllerYAxis: jsonBool(json['invertControllerYAxis']),
+      mouseEmulationSpeed: jsonDouble(json['mouseEmulationSpeed'], 1),
+      mouseAcceleration: jsonDouble(json['mouseAcceleration'], 1),
+      mouseScrollSpeed: jsonDouble(json['mouseScrollSpeed'], 1),
+      mouseActivationButton: MouseActivationButton.fromWireName(
+        jsonString(json['mouseActivationButton'], 'start'),
+      ),
+      physicalMouseSensitivity: jsonDouble(json['physicalMouseSensitivity'], 1),
+      invertMouseScroll: jsonBool(json['invertMouseScroll']),
+      keyboardCaptureWithoutPointerLock: jsonBool(
+        json['keyboardCaptureWithoutPointerLock'],
+        true,
+      ),
+      pointerCaptureMode: PointerCaptureMode.fromWireName(
+        jsonString(json['pointerCaptureMode'], 'firstClick'),
+      ),
+      stopControllerShortcut: ControllerShortcutPreset.fromWireName(
+        jsonString(json['stopControllerShortcut'], 'standard'),
+      ),
+      statsControllerShortcut: ControllerShortcutPreset.fromWireName(
+        jsonString(json['statsControllerShortcut'], 'standard'),
+      ),
+      stopKeyboardShortcut: KeyboardShortcutPreset.fromWireName(
+        jsonString(json['stopKeyboardShortcut'], 'full'),
+      ),
+      statsKeyboardShortcut: KeyboardShortcutPreset.fromWireName(
+        jsonString(json['statsKeyboardShortcut'], 'full'),
+      ),
       audioBackend: AudioBackend.fromWireName(
         jsonString(json['audioBackend'], AudioBackend.webAudio.wireName),
       ),
@@ -235,6 +387,26 @@ final class AppSettings {
     'mouseEmulation': mouseEmulation,
     'flipAbButtons': flipAbButtons,
     'flipXyButtons': flipXyButtons,
+    'controllerLayout': controllerLayout.wireName,
+    'controllerProfiles': controllerProfiles.map(
+      (key, value) => MapEntry(key, value.wireName),
+    ),
+    'stickDeadzone': stickDeadzone,
+    'triggerThreshold': triggerThreshold,
+    'controllerSensitivity': controllerSensitivity,
+    'invertControllerYAxis': invertControllerYAxis,
+    'mouseEmulationSpeed': mouseEmulationSpeed,
+    'mouseAcceleration': mouseAcceleration,
+    'mouseScrollSpeed': mouseScrollSpeed,
+    'mouseActivationButton': mouseActivationButton.wireName,
+    'physicalMouseSensitivity': physicalMouseSensitivity,
+    'invertMouseScroll': invertMouseScroll,
+    'keyboardCaptureWithoutPointerLock': keyboardCaptureWithoutPointerLock,
+    'pointerCaptureMode': pointerCaptureMode.wireName,
+    'stopControllerShortcut': stopControllerShortcut.wireName,
+    'statsControllerShortcut': statsControllerShortcut.wireName,
+    'stopKeyboardShortcut': stopKeyboardShortcut.wireName,
+    'statsKeyboardShortcut': statsKeyboardShortcut.wireName,
     'audioBackend': audioBackend.wireName,
     'audioConfiguration': audioConfiguration.wireName,
     'audioPacketDurationMs': audioPacketDurationMs,
@@ -249,6 +421,30 @@ final class AppSettings {
     'disableConnectionWarnings': disableConnectionWarnings,
     'showPerformanceStats': showPerformanceStats,
     'diagnosticLogLevel': diagnosticLogLevel.name,
+  };
+
+  Map<String, Object?> toInputConfigurationJson() => {
+    'version': 1,
+    'controllerLayout': controllerLayout.wireName,
+    'controllerProfiles': controllerProfiles.map(
+      (key, value) => MapEntry(key, value.wireName),
+    ),
+    'stickDeadzone': stickDeadzone,
+    'triggerThreshold': triggerThreshold,
+    'controllerSensitivity': controllerSensitivity,
+    'invertControllerYAxis': invertControllerYAxis,
+    'mouseEmulationSpeed': mouseEmulationSpeed,
+    'mouseAcceleration': mouseAcceleration,
+    'mouseScrollSpeed': mouseScrollSpeed,
+    'mouseActivationButton': mouseActivationButton.wireName,
+    'physicalMouseSensitivity': physicalMouseSensitivity,
+    'invertMouseScroll': invertMouseScroll,
+    'keyboardCaptureWithoutPointerLock': keyboardCaptureWithoutPointerLock,
+    'pointerCaptureMode': pointerCaptureMode.wireName,
+    'stopControllerShortcut': stopControllerShortcut.wireName,
+    'statsControllerShortcut': statsControllerShortcut.wireName,
+    'stopKeyboardShortcut': stopKeyboardShortcut.wireName,
+    'statsKeyboardShortcut': statsKeyboardShortcut.wireName,
   };
 
   AppSettings normalized(PlatformCapabilities capabilities) {
@@ -283,6 +479,15 @@ final class AppSettings {
       frameRate: normalizedRate,
       bitrateMbps: normalizedBitrate,
       rumbleFeedback: rumbleFeedback && capabilities.supportsRumble,
+      stickDeadzone: stickDeadzone.clamp(0.0, .5).toDouble(),
+      triggerThreshold: triggerThreshold.clamp(0.0, .95).toDouble(),
+      controllerSensitivity: controllerSensitivity.clamp(.5, 2.0).toDouble(),
+      mouseEmulationSpeed: mouseEmulationSpeed.clamp(.25, 3.0).toDouble(),
+      mouseAcceleration: mouseAcceleration.clamp(.5, 2.5).toDouble(),
+      mouseScrollSpeed: mouseScrollSpeed.clamp(.25, 5.0).toDouble(),
+      physicalMouseSensitivity: physicalMouseSensitivity
+          .clamp(.25, 3.0)
+          .toDouble(),
       audioBackend: capabilities.supportsNativeAudio
           ? audioBackend
           : AudioBackend.webAudio,
@@ -319,6 +524,31 @@ final class AppSettings {
     return next.normalized(capabilities);
   }
 
+  AppSettings withDefaultInputSettings() => copyWith(
+    rumbleFeedback: false,
+    mouseEmulation: false,
+    flipAbButtons: false,
+    flipXyButtons: false,
+    controllerLayout: ControllerLayout.automatic,
+    controllerProfiles: const <String, ControllerLayout>{},
+    stickDeadzone: .12,
+    triggerThreshold: .05,
+    controllerSensitivity: 1,
+    invertControllerYAxis: false,
+    mouseEmulationSpeed: 1,
+    mouseAcceleration: 1,
+    mouseScrollSpeed: 1,
+    mouseActivationButton: MouseActivationButton.start,
+    physicalMouseSensitivity: 1,
+    invertMouseScroll: false,
+    keyboardCaptureWithoutPointerLock: true,
+    pointerCaptureMode: PointerCaptureMode.firstClick,
+    stopControllerShortcut: ControllerShortcutPreset.standard,
+    statsControllerShortcut: ControllerShortcutPreset.standard,
+    stopKeyboardShortcut: KeyboardShortcutPreset.full,
+    statsKeyboardShortcut: KeyboardShortcutPreset.full,
+  );
+
   AppSettings copyWith({
     int? schemaVersion,
     StreamResolution? resolution,
@@ -332,6 +562,24 @@ final class AppSettings {
     bool? mouseEmulation,
     bool? flipAbButtons,
     bool? flipXyButtons,
+    ControllerLayout? controllerLayout,
+    Map<String, ControllerLayout>? controllerProfiles,
+    double? stickDeadzone,
+    double? triggerThreshold,
+    double? controllerSensitivity,
+    bool? invertControllerYAxis,
+    double? mouseEmulationSpeed,
+    double? mouseAcceleration,
+    double? mouseScrollSpeed,
+    MouseActivationButton? mouseActivationButton,
+    double? physicalMouseSensitivity,
+    bool? invertMouseScroll,
+    bool? keyboardCaptureWithoutPointerLock,
+    PointerCaptureMode? pointerCaptureMode,
+    ControllerShortcutPreset? stopControllerShortcut,
+    ControllerShortcutPreset? statsControllerShortcut,
+    KeyboardShortcutPreset? stopKeyboardShortcut,
+    KeyboardShortcutPreset? statsKeyboardShortcut,
     AudioBackend? audioBackend,
     AudioConfiguration? audioConfiguration,
     int? audioPacketDurationMs,
@@ -359,6 +607,31 @@ final class AppSettings {
     mouseEmulation: mouseEmulation ?? this.mouseEmulation,
     flipAbButtons: flipAbButtons ?? this.flipAbButtons,
     flipXyButtons: flipXyButtons ?? this.flipXyButtons,
+    controllerLayout: controllerLayout ?? this.controllerLayout,
+    controllerProfiles: Map.unmodifiable(
+      controllerProfiles ?? this.controllerProfiles,
+    ),
+    stickDeadzone: stickDeadzone ?? this.stickDeadzone,
+    triggerThreshold: triggerThreshold ?? this.triggerThreshold,
+    controllerSensitivity: controllerSensitivity ?? this.controllerSensitivity,
+    invertControllerYAxis: invertControllerYAxis ?? this.invertControllerYAxis,
+    mouseEmulationSpeed: mouseEmulationSpeed ?? this.mouseEmulationSpeed,
+    mouseAcceleration: mouseAcceleration ?? this.mouseAcceleration,
+    mouseScrollSpeed: mouseScrollSpeed ?? this.mouseScrollSpeed,
+    mouseActivationButton: mouseActivationButton ?? this.mouseActivationButton,
+    physicalMouseSensitivity:
+        physicalMouseSensitivity ?? this.physicalMouseSensitivity,
+    invertMouseScroll: invertMouseScroll ?? this.invertMouseScroll,
+    keyboardCaptureWithoutPointerLock:
+        keyboardCaptureWithoutPointerLock ??
+        this.keyboardCaptureWithoutPointerLock,
+    pointerCaptureMode: pointerCaptureMode ?? this.pointerCaptureMode,
+    stopControllerShortcut:
+        stopControllerShortcut ?? this.stopControllerShortcut,
+    statsControllerShortcut:
+        statsControllerShortcut ?? this.statsControllerShortcut,
+    stopKeyboardShortcut: stopKeyboardShortcut ?? this.stopKeyboardShortcut,
+    statsKeyboardShortcut: statsKeyboardShortcut ?? this.statsKeyboardShortcut,
     audioBackend: audioBackend ?? this.audioBackend,
     audioConfiguration: audioConfiguration ?? this.audioConfiguration,
     audioPacketDurationMs: audioPacketDurationMs ?? this.audioPacketDurationMs,

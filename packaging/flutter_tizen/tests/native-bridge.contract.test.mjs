@@ -204,7 +204,27 @@ const request = {
   gameMode: false,
   disableConnectionWarnings: true,
   showPerformanceStats: true,
-  disabledCodecMimeTypes: ['video/av1', 'video/hevc']
+  disabledCodecMimeTypes: ['video/av1', 'video/hevc'],
+  inputConfiguration: {
+    controllerLayout: 'nintendo',
+    controllerProfiles: { '89abcdef': 'xbox', '01234567': 'playstation' },
+    stickDeadzone: 0.18,
+    triggerThreshold: 0.1,
+    controllerSensitivity: 1.25,
+    invertControllerYAxis: true,
+    mouseEmulationSpeed: 1.5,
+    mouseAcceleration: 1.2,
+    mouseScrollSpeed: 2,
+    mouseActivationButton: 'rightStick',
+    physicalMouseSensitivity: 0.8,
+    invertMouseScroll: true,
+    keyboardCaptureWithoutPointerLock: false,
+    pointerCaptureMode: 'streamStart',
+    stopControllerShortcut: 'simplified',
+    statsControllerShortcut: 'disabled',
+    stopKeyboardShortcut: 'compact',
+    statsKeyboardShortcut: 'disabled'
+  }
 };
 const mapped = bridge.__testing.streamRequestToArgs(request);
 assert.equal(mapped.length, 30, 'native startStream ABI must remain 30 positional arguments');
@@ -212,6 +232,10 @@ assert.deepEqual(mapped.slice(0, 6), ['192.0.2.10', 47989, '1920', '1080', '120'
 assert.deepEqual(mapped.slice(6, 12), ['key', 'key-id', '7.1.0', '3.27', 'rtsp://session', 7]);
 assert.equal(mapped[18], 'emss');
 assert.equal(mapped[29], 'video/av1\nvideo/hevc');
+assert.equal(
+  bridge.__testing.inputConfigurationToWire(request.inputConfiguration),
+  'v1|nintendo|0.18|0.1|1.25|1|1.5|1.2|2|rightStick|0.8|1|0|streamStart|simplified|disabled|compact|disabled|01234567:playstation,89abcdef:xbox'
+);
 
 assert.deepEqual(
   bridge.__testing.parseLifecycle('streamStartFailed: 4:-200:renderer failed'),
@@ -243,6 +267,7 @@ const fakeModule = {
     queueMicrotask(() => globalThis.handlePromiseMessage(id, 'resolve', '198.51.100.4'));
   },
   wakeOnLan(...args) { calls.push(['wakeOnLan', ...args]); },
+  configureInput(value) { calls.push(['configureInput', value]); },
   startStream(...args) {
     calls.push(['startStream', ...args]);
     queueMicrotask(() => globalThis.handleMessage('streamStarted: 42'));
@@ -273,6 +298,7 @@ assert.equal(streamResult.attemptId, 42);
 assert.equal(documentElement.dataset.streamState, 'active');
 assert.equal(MoonlightInput.mode, 'stream');
 assert.equal(calls.find((call) => call[0] === 'startStream').length, 31);
+assert.match(calls.find((call) => call[0] === 'configureInput')[1], /^v1\|nintendo\|/);
 
 await bridge.toggleStats();
 assert.deepEqual(await bridge.probeVideoCodecSupport(request), { selectedMimeType: 'video/hevc' });

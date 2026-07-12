@@ -31,10 +31,18 @@ function makeContext(enabled) {
     setTimeout() { return 1; },
     clearTimeout() {},
     location: { origin: 'file://', pathname: '/index.html' },
+    KeyboardEvent: class KeyboardEvent {
+      constructor(type, init) { Object.assign(this, init); this.type = type; }
+    },
+    Event: class Event {
+      constructor(type, init) { Object.assign(this, init); this.type = type; }
+    },
     document: {
       readyState: 'complete',
       title: 'Moonlight Flutter',
       visibilityState: 'visible',
+      activeElement: null,
+      dispatchEvent(event) { requests.push({ event }); return true; },
       querySelector() { return {}; }
     },
     navigator: { onLine: true, getGamepads() { return []; } },
@@ -83,5 +91,11 @@ const diagnostics = await enabled.context.MoonlightDebugBridge.executeCommand({
 });
 assert.match(diagnostics.logs, /safe/);
 assert.equal(diagnostics.status.available, true);
+const navigation = await enabled.context.MoonlightDebugBridge.executeCommand({
+  type: 'nav',
+  args: { action: 'down' }
+});
+assert.equal(navigation.dispatched, true);
+assert.ok(enabled.requests.some((request) => request.event?.key === 'ArrowDown'));
 
 console.log('Moonlight Flutter debug bridge contract tests passed.');

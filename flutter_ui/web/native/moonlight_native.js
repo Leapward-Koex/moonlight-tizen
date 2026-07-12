@@ -638,6 +638,51 @@
     return value == null ? '' : String(value);
   }
 
+  function inputConfigurationToWire(value) {
+    var config = value && typeof value === 'object' ? value : {};
+    var profiles = config.controllerProfiles && typeof config.controllerProfiles === 'object'
+      ? Object.keys(config.controllerProfiles).sort().map(function(fingerprint) {
+          return String(fingerprint).replace(/[^0-9a-f]/gi, '') + ':' +
+            String(config.controllerProfiles[fingerprint] || 'automatic').replace(/[^a-z]/gi, '');
+        }).filter(function(item) { return item.charAt(0) !== ':'; }).join(',')
+      : '';
+    return [
+      'v1',
+      String(config.controllerLayout || 'automatic'),
+      Number(config.stickDeadzone == null ? 0.12 : config.stickDeadzone),
+      Number(config.triggerThreshold == null ? 0.05 : config.triggerThreshold),
+      Number(config.controllerSensitivity == null ? 1 : config.controllerSensitivity),
+      config.invertControllerYAxis ? 1 : 0,
+      Number(config.mouseEmulationSpeed == null ? 1 : config.mouseEmulationSpeed),
+      Number(config.mouseAcceleration == null ? 1 : config.mouseAcceleration),
+      Number(config.mouseScrollSpeed == null ? 1 : config.mouseScrollSpeed),
+      String(config.mouseActivationButton || 'start'),
+      Number(config.physicalMouseSensitivity == null ? 1 : config.physicalMouseSensitivity),
+      config.invertMouseScroll ? 1 : 0,
+      config.keyboardCaptureWithoutPointerLock === false ? 0 : 1,
+      String(config.pointerCaptureMode || 'firstClick'),
+      String(config.stopControllerShortcut || 'standard'),
+      String(config.statsControllerShortcut || 'standard'),
+      String(config.stopKeyboardShortcut || 'full'),
+      String(config.statsKeyboardShortcut || 'full'),
+      profiles
+    ].join('|');
+  }
+
+  function configureNativeInput(request) {
+    try {
+      var target = getModuleMethod('configureInput');
+      target.method.call(
+        target.module,
+        inputConfigurationToWire(readField(request || {}, ['inputConfiguration'], {}))
+      );
+      return true;
+    } catch (_) {
+      // Older runtimes retain the legacy defaults and 30-argument ABI.
+      return false;
+    }
+  }
+
   function streamRequestToArgs(request) {
     request = request || {};
     return [
@@ -741,6 +786,9 @@
     showWarning('');
     showStatistics('');
     showProgress('Starting stream…');
+    if (root.MoonlightInput && typeof root.MoonlightInput.setConfiguration === 'function') {
+      root.MoonlightInput.setConfiguration(readField(request || {}, ['inputConfiguration'], {}));
+    }
     setStreamSurface('loading');
     var audioBackend = readField(request || {}, ['audioBackend'], 'webaudio');
     var audioPreparation = Promise.resolve();
@@ -756,6 +804,7 @@
       }
     }
     var args = streamRequestToArgs(request);
+    configureNativeInput(request);
     return audioPreparation.then(function() {
       return callMessageResult('startStream', args);
     }).then(function(value) {
@@ -903,6 +952,16 @@
     },
     connectedGamepadMask: connectedGamepadMask,
     getConnectedGamepadMask: connectedGamepadMask,
+    inputDevices: function() {
+      return root.MoonlightInput && typeof root.MoonlightInput.inputDevices === 'function'
+        ? root.MoonlightInput.inputDevices()
+        : [];
+    },
+    testRumble: function(browserIndex) {
+      return !!(root.MoonlightInput &&
+        typeof root.MoonlightInput.testRumble === 'function' &&
+        root.MoonlightInput.testRumble(Number(browserIndex)));
+    },
     setEventSink: setEventSink,
     getPlatformInfo: getPlatformInfo,
     registerKeys: function(keys) {
@@ -924,6 +983,8 @@
     __testing: Object.freeze({
       parseLifecycle: parseLifecycle,
       streamRequestToArgs: streamRequestToArgs,
+      inputConfigurationToWire: inputConfigurationToWire,
+      configureNativeInput: configureNativeInput,
       codecProbeToArgs: codecProbeToArgs,
       handleNativeMessage: handleNativeMessage,
       useReadyModule: function(module) {

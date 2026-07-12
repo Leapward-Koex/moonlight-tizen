@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../data/native/native_runtime.dart';
+import '../../domain/app_settings.dart';
 import '../theme/moonlight_theme.dart';
 import '../view_models.dart';
 import 'tv_focusable.dart';
@@ -380,6 +384,163 @@ class SettingInfoPanel extends StatelessWidget {
             contentPadding: EdgeInsets.zero,
             title: Text(entry.label),
             subtitle: SelectableText(entry.value),
+          ),
+      ],
+    );
+  }
+}
+
+class InputDevicesControl extends StatefulWidget {
+  const InputDevicesControl({
+    required this.devicesReader,
+    required this.defaultLayout,
+    required this.profiles,
+    required this.onLayoutChanged,
+    required this.onResetDevice,
+    required this.onTestRumble,
+    super.key,
+  });
+
+  final List<NativeInputDevice> Function() devicesReader;
+  final ControllerLayout defaultLayout;
+  final Map<String, ControllerLayout> profiles;
+  final void Function(String fingerprint, ControllerLayout layout)
+  onLayoutChanged;
+  final ValueChanged<String> onResetDevice;
+  final ValueChanged<int> onTestRumble;
+
+  @override
+  State<InputDevicesControl> createState() => _InputDevicesControlState();
+}
+
+class _InputDevicesControlState extends State<InputDevicesControl> {
+  late List<NativeInputDevice> _devices = widget.devicesReader();
+  Timer? _timer;
+
+  static const _layouts = <ChoiceItem<ControllerLayout>>[
+    ChoiceItem(value: ControllerLayout.automatic, label: 'Use default'),
+    ChoiceItem(value: ControllerLayout.xbox, label: 'Xbox'),
+    ChoiceItem(value: ControllerLayout.nintendo, label: 'Nintendo'),
+    ChoiceItem(value: ControllerLayout.playStation, label: 'PlayStation'),
+    ChoiceItem(value: ControllerLayout.custom, label: 'Custom swaps'),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      if (mounted) setState(() => _devices = widget.devicesReader());
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_devices.isEmpty) {
+      return const ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(Icons.gamepad_outlined),
+        title: Text('No controllers detected'),
+        subtitle: Text(
+          'Connect or press a button on a controller to make it available.',
+        ),
+      );
+    }
+    return Column(
+      children: [
+        for (final device in _devices)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: MoonlightColors.control.withValues(alpha: .45),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: MoonlightColors.divider),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.sports_esports, size: 30),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Player ${device.slot + 1}: ${device.id}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              Text(
+                                '${device.mapping} mapping • ${device.buttonCount} buttons • ${device.axisCount} axes'
+                                '${device.supportsRumble ? ' • rumble' : ''}',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Live input: ${device.pressedButtons.isEmpty ? 'no buttons' : 'buttons ${device.pressedButtons.join(', ')}'}'
+                      '${device.axes.isEmpty ? '' : ' • axes ${device.axes.join(', ')}'}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: MoonlightColors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Default layout: ${widget.defaultLayout.wireName}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    TvChoiceControl<ControllerLayout>(
+                      value:
+                          widget.profiles[device.fingerprint] ??
+                          ControllerLayout.automatic,
+                      choices: _layouts,
+                      semanticLabel: 'Layout for ${device.id}',
+                      onChanged: (layout) =>
+                          widget.onLayoutChanged(device.fingerprint, layout),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TvActionButton(
+                            label: 'Reset device',
+                            icon: Icons.restart_alt,
+                            onPressed: () =>
+                                widget.onResetDevice(device.fingerprint),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TvActionButton(
+                            label: device.supportsRumble
+                                ? 'Test rumble'
+                                : 'Rumble unavailable',
+                            icon: Icons.vibration,
+                            enabled: device.supportsRumble,
+                            onPressed: () =>
+                                widget.onTestRumble(device.browserIndex),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
       ],
     );

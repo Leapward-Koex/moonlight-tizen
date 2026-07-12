@@ -56,7 +56,7 @@ final class LaunchResult {
 /// Named replacement for the native runtime's historical positional
 /// arguments. [toJson] is passed unchanged to `MoonlightNative.startStream`.
 final class StreamRequest {
-  static const int currentSchemaVersion = 2;
+  static const int currentSchemaVersion = 3;
 
   const StreamRequest({
     this.schemaVersion = currentSchemaVersion,
@@ -79,6 +79,7 @@ final class StreamRequest {
     required this.mouseEmulation,
     required this.flipAbButtons,
     required this.flipXyButtons,
+    this.inputConfiguration = const <String, Object?>{},
     required this.audioBackend,
     required this.audioConfiguration,
     required this.audioPacketDurationMs,
@@ -113,6 +114,7 @@ final class StreamRequest {
   final bool mouseEmulation;
   final bool flipAbButtons;
   final bool flipXyButtons;
+  final Map<String, Object?> inputConfiguration;
   final AudioBackend audioBackend;
   final AudioConfiguration audioConfiguration;
   final int audioPacketDurationMs;
@@ -154,6 +156,7 @@ final class StreamRequest {
     mouseEmulation: settings.mouseEmulation,
     flipAbButtons: settings.flipAbButtons,
     flipXyButtons: settings.flipXyButtons,
+    inputConfiguration: settings.toInputConfigurationJson(),
     audioBackend: settings.audioBackend,
     audioConfiguration: settings.audioConfiguration,
     audioPacketDurationMs: settings.audioPacketDurationMs,
@@ -193,6 +196,7 @@ final class StreamRequest {
     mouseEmulation: jsonBool(json['mouseEmulation']),
     flipAbButtons: jsonBool(json['flipAbButtons']),
     flipXyButtons: jsonBool(json['flipXyButtons']),
+    inputConfiguration: Map.unmodifiable(jsonMap(json['inputConfiguration'])),
     audioBackend: AudioBackend.fromWireName(
       jsonString(json['audioBackend'], AudioBackend.webAudio.wireName),
     ),
@@ -238,6 +242,7 @@ final class StreamRequest {
     'mouseEmulation': mouseEmulation,
     'flipAbButtons': flipAbButtons,
     'flipXyButtons': flipXyButtons,
+    'inputConfiguration': inputConfiguration,
     'audioBackend': audioBackend.wireName,
     'audioConfiguration': audioConfiguration.wireName,
     'audioPacketDurationMs': audioPacketDurationMs,

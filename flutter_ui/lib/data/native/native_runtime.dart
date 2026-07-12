@@ -90,6 +90,48 @@ final class NativeInputEvent {
       );
 }
 
+final class NativeInputDevice {
+  const NativeInputDevice({
+    required this.slot,
+    required this.browserIndex,
+    required this.fingerprint,
+    required this.id,
+    required this.mapping,
+    required this.buttonCount,
+    required this.axisCount,
+    required this.supportsRumble,
+    this.pressedButtons = const <int>[],
+    this.axes = const <double>[],
+  });
+
+  final int slot;
+  final int browserIndex;
+  final String fingerprint;
+  final String id;
+  final String mapping;
+  final int buttonCount;
+  final int axisCount;
+  final bool supportsRumble;
+  final List<int> pressedButtons;
+  final List<double> axes;
+
+  factory NativeInputDevice.fromJson(Map<String, Object?> json) =>
+      NativeInputDevice(
+        slot: jsonInt(json['slot']),
+        browserIndex: jsonInt(json['browserIndex']),
+        fingerprint: jsonString(json['fingerprint']),
+        id: jsonString(json['id'], 'Controller'),
+        mapping: jsonString(json['mapping'], 'unknown'),
+        buttonCount: jsonInt(json['buttonCount']),
+        axisCount: jsonInt(json['axisCount']),
+        supportsRumble: jsonBool(json['supportsRumble']),
+        pressedButtons: jsonList(
+          json['pressedButtons'],
+        ).map(jsonInt).toList(growable: false),
+        axes: jsonList(json['axes']).map(jsonDouble).toList(growable: false),
+      );
+}
+
 /// Typed Dart boundary around `window.MoonlightNative`.
 ///
 /// The runtime also implements the three protocol gateways so one instance is
@@ -121,6 +163,8 @@ abstract interface class MoonlightNativeRuntime
 
   NativeInputMode setInputMode(NativeInputMode mode);
   int connectedGamepadMask();
+  List<NativeInputDevice> inputDevices();
+  bool testRumble(int browserIndex);
   bool sendEscape();
   bool restartApp();
   String setDiagnosticLogLevel(String level);
