@@ -2,7 +2,7 @@
 param(
     [string] $FlutterBuild = 'flutter_ui/build/web',
     [string] $WasmBuild = 'build/codex-wasm-proxy-pthread',
-    [string] $Output = 'build/flutter-tizen/widget',
+    [string] $Output = 'build/flutter-tizen/widget-standard',
     [switch] $ForceGameMode
 )
 

@@ -66,6 +66,7 @@ For in-depth guides, technical support, and comprehensive documentation, please 
 - ❓ Common questions and tips: [Frequently Asked Questions](https://github.com/brightcraft/moonlight-tizen/wiki/Frequently-Asked-Questions)
 - ⚠️ Review limitations and notes: [Known Issues & Limitations](https://github.com/brightcraft/moonlight-tizen/wiki/Known-Issues-&-Limitations)
 - 🔮 Instructions for building the app: [Development Guide](https://github.com/brightcraft/moonlight-tizen/wiki/Development-Guide)
+- 🛠️ Build, sign, and deploy this checkout locally: [Local development and emulator workflow](DEVELOPMENT.md)
 
 ---
 

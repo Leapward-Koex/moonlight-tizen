@@ -1,18 +1,42 @@
 ---
 name: tizen-emulator-deploy
-description: Build, sign, install, launch, and debug Moonlight Tizen WGTs with the VS Code Tizen extension TV emulator. Use when Codex needs to package patched wasm/platform files, use Samsung certificates from .env, handle tz/sdb CLI quirks, deploy to emulator-26101, run MoonLightS, or investigate emulator startup/loading behavior.
+description: Build, sign, install, launch, and debug Moonlight Tizen WGTs with the VS Code Tizen extension TV emulator. Use for the Flutter preview, legacy wasm widget, Samsung signing, emulator deployment, or the authenticated remote debug bridge.
 ---
 
 # Tizen Emulator Deploy
 
-Use this workflow for Moonlight Tizen TV emulator packaging and deployment from this repo on Windows.
+Use repository scripts and `DEVELOPMENT.md` as the source of truth. Do not
+recreate WGT ZIPs, signing commands, or staged overlays by hand.
+
+## Current Flutter Fast Path
+
+Read `DEVELOPMENT.md`, confirm the emulator is attached, then run:
+
+```powershell
+.\packaging\flutter_tizen\build-emulator.ps1
+```
+
+Useful switches are `-SkipWasm`, `-SkipFlutter`, `-NoDeploy`,
+`-ForceGameMode`, `-EnableDebugBridge`, `-Serial`, and `-FlutterPath`. The
+script builds WebAssembly and Flutter, validates staging, signs a stable WGT
+filename, installs it, and launches package ID `MLFlutter1`.
+
+In a restricted Codex session, build Flutter with access to the installed SDK
+cache, then return to the normal workspace context and run the fast path with
+`-SkipFlutter`. Do not sign in the elevated Flutter context: locally encrypted
+Tizen `.pwd` files may fail there with `ERROR:Decryption error!`.
+
+The legacy widget uses package ID `MoonLightS`. Never mix the two identities or
+staging layouts. Keep the WGT filename stable between emulator installs because
+the Tizen tooling can derive its uninstall identity from the filename.
 
 ## Ground Rules
 
 - Treat `.env`, `.p12`, `.pwd`, and certificate profile files as secrets. Never print password values.
 - `.env` has contained `CERTNAME`, `CERTPASSWORD`, `CERTNAME2`, and `CERTPASSWORD2`; the Samsung cert has used the `*2` values.
 - Use PowerShell path quoting with `& "path\to\tool.exe"` for Tizen tools.
-- If `git` reports dubious ownership, inspect with `git -c safe.directory=C:/Dev/moonlight-tizen ...` rather than changing global config.
+- If `git` reports dubious ownership, use a command-scoped `safe.directory`
+  setting rather than changing global Git configuration.
 - Keep generated WGTs, password files, and unpacked widgets under ignored `build/codex-tizen-run/`.
 
 ## Tool Paths
@@ -28,7 +52,7 @@ $Tz = Join-Path $SdkTools 'tizen-core\tz.exe'
 The currently observed TV emulator:
 
 ```powershell
-$Serial = 'emulator-26101'
+$Serial = '<serial-from-sdb-devices>'
 $PackageId = 'MoonLightS'
 $AppId = 'MoonLightS.MoonlightWasm'
 ```
@@ -51,47 +75,16 @@ Observed emulator facts:
 - Secure commands like `shell 0 applist`, `shell 0 getduid`, and `shell 0 app_launcher` can work.
 - `tz run --debug-mode` has still launched with `debug 0` and no forwarded inspector port.
 
-## Samsung MCP Tools First
-
-When the Samsung Tizen MCP servers are available in Codex, use them before manual `tz`, `sdb`, CDP, or debug-bridge work.
-
-Current expected servers:
-
-- `tizen-doctor-mcp`: use for `validate_environment`, `get_available_ides_info`, `launch_emulator`, `discover_devices`, `connect_tv_target`, `build_project`, `install_app`, `launch_app`, and `uninstall_app`.
-- `tizen-simulator-mcp`: use for `start_simulator`, `stop_simulator`, `install_app`, `launch_app`, `list_apps`, `uninstall_app`, `get_simulator_info`, `remote_press`, `open_devtools`, `toggle_fullscreen`, and `minimize_window`.
-
-Example user-facing prompts:
-
-```text
-Use tizen-doctor-mcp.validate_environment for this repo and summarize missing Tizen prerequisites.
-```
-
-```text
-Use tizen-doctor-mcp.discover_devices, then install and launch build\codex-tizen-run\Moonlight-patched-scott-samsung.wgt on the active emulator.
-```
-
-```text
-Use tizen-simulator-mcp.start_simulator, install the Moonlight WGT, list_apps to confirm the app ID, and launch the app.
-```
-
-```text
-Use tizen-simulator-mcp.remote_press for enter, back, left, right, up, and down on the running app.
-```
-
-```text
-Use tizen-simulator-mcp.get_simulator_info and open_devtools for the running simulator.
-```
-
-Use manual CLI commands only when the MCP server is unavailable, returns an insufficient error, or lacks the exact operation needed. Use the debug bridge only when MCP tools do not expose app-internal Moonlight state such as logs, `getState`, local storage, or Add Host form automation.
-
 ## Remote Debug Bridge
 
-When MCP tools do not expose the app-internal state needed, use the app's dev-only HTTP polling bridge before spending time on `dlog` or manual emulator input. The tracked app config at `wasm/platform/debug_bridge_config.js` is disabled by default. Only enable it in ignored staged build output.
+Use the app's dev-only HTTP polling bridge before spending time on `dlog` or
+manual emulator input. The tracked configuration is disabled by default. Only
+enable it in ignored staged build output.
 
 Start the local server on a LAN address the emulator can reach. Do not use `localhost` in the app config:
 
 ```powershell
-$HostIp = '192.168.50.2'
+$HostIp = '<emulator-reachable-host-ip>'
 $Token = '<local-debug-token>'
 node tools/debug-bridge-server.mjs `
   --host 0.0.0.0 `
@@ -123,7 +116,7 @@ Invoke-RestMethod -Headers $Headers -Method Post -ContentType 'application/json'
 
 Invoke-RestMethod -Headers $Headers -Method Post -ContentType 'application/json' `
   -Uri 'http://127.0.0.1:49321/api/commands' `
-  -Body (@{ clientId = $ClientId; type = 'addHost'; args = @{ address = '192.168.50.2:46665' } } | ConvertTo-Json -Depth 4)
+  -Body (@{ clientId = $ClientId; type = 'addHost'; args = @{ address = '<moonlight-host>:46665' } } | ConvertTo-Json -Depth 4)
 
 Invoke-RestMethod -Headers $Headers -Uri "http://127.0.0.1:49321/api/results?tail=20&clientId=$ClientId"
 ```
@@ -132,7 +125,10 @@ Allowed app commands are `nav`, `click`, `setValue`, `addHost`, `getState`, `loc
 
 ## VS Code Extension DevTools
 
-Prefer `tizen-simulator-mcp.open_devtools` for simulator DevTools. When the VS Code Tizen extension starts a web debug session, it opens a Chrome DevTools window for the running app. That Chrome window is backed by a local Chrome DevTools Protocol endpoint, so Codex can attach directly while the session is open. The observed frontend looked like:
+When the VS Code Tizen extension starts a web debug session, it opens a Chrome
+DevTools window for the running app. That Chrome window is backed by a local
+Chrome DevTools Protocol endpoint, so Codex can attach directly while the
+session is open. The observed frontend looked like:
 
 ```text
 http://127.0.0.1:35276/devtools/inspector.html?ws=127.0.0.1:35276/devtools/page/<target-id>
@@ -223,26 +219,29 @@ Preferred signing path: repack the unsigned WGT with an explicit Samsung profile
 ```powershell
 & $Tz pack --type wgt `
   --base-pkg build\codex-tizen-run\Moonlight-patched-unsigned.wgt `
-  --out-path build\codex-tizen-run\Moonlight-patched-scott-samsung.wgt `
-  --sign-profile Scott-Samsung `
-  --profiles-path build\codex-tizen-run\profiles-scott-samsung-local-pwd.xml
+  --out-path build\codex-tizen-run\Moonlight-patched-signed.wgt `
+  --sign-profile $SignProfile `
+  --profiles-path $ProfilesPath
 ```
 
-Known Samsung cert locations:
+Certificate paths are machine-specific. Resolve them from the explicit profile
+and `$env:USERPROFILE`; do not hard-code a user profile in checked-in guidance:
 
 ```text
-C:\Users\ScottM\SamsungCertificate\Scott-Samsung\author.p12
-C:\Users\ScottM\SamsungCertificate\Scott-Samsung\distributor.p12
+$env:USERPROFILE\SamsungCertificate\<profile>\author.p12
+$env:USERPROFILE\SamsungCertificate\<profile>\distributor.p12
 ```
 
-If `profiles-scott-samsung-local-pwd.xml` is missing or stale, recreate a scratch profile using the Samsung cert password from `.env`, without echoing the password. The successful profile points at the Samsung `author.p12` and `distributor.p12`, with workspace-local encrypted `.pwd` files under `build/codex-tizen-run/`.
+If the local profiles file is missing or stale, recreate a scratch profile using
+the Samsung certificate password from `.env` without echoing it. Keep encrypted
+`.pwd` files under ignored `build/` output.
 
 ## Install And Launch
 
 Install the signed WGT:
 
 ```powershell
-& $Tz install --package-path build\codex-tizen-run\Moonlight-patched-scott-samsung.wgt --serial $Serial
+& $Tz install --package-path build\codex-tizen-run\Moonlight-patched-signed.wgt --serial $Serial
 ```
 
 Launch using the package ID, not the full app ID:
@@ -266,9 +265,12 @@ node --check wasm/platform/audio.js
 node --check wasm/platform/debug_bridge.js
 node --check wasm/platform/debug_bridge_config.js
 node --check tools/debug-bridge-server.mjs
-git -c safe.directory=C:/Dev/moonlight-tizen diff --check -- wasm/index.html wasm/platform/index.js wasm/platform/audio.js wasm/platform/debug_bridge.js wasm/platform/debug_bridge_config.js tools/debug-bridge-server.mjs .codex/skills/tizen-emulator-deploy/SKILL.md AGENTS.md .gitignore
+git diff --check -- wasm/index.html wasm/platform/index.js wasm/platform/audio.js wasm/platform/debug_bridge.js wasm/platform/debug_bridge_config.js tools/debug-bridge-server.mjs .codex/skills/tizen-emulator-deploy/SKILL.md AGENTS.md .gitignore
 ```
 
-After launch, prefer the Samsung MCP tools for install/launch status, simulator state, DevTools, and remote input. Use the Remote Debug Bridge for startup logs, `getState`, and input-sensitive flows such as Add Host when the MCP tools do not expose enough app-internal state. Visual verification is still useful; if Windows Computer Use is available, follow its own skill instructions first, then capture the `Tizen Emulator` window and verify the Moonlight UI reaches the expected screen.
+After launch, use the Remote Debug Bridge for startup logs, `getState`, and
+input-sensitive flows such as Add Host. Visual verification is still useful;
+capture the emulator window and confirm the Moonlight UI reaches the expected
+screen.
 
 For startup/loading failures, suspect top-level JavaScript exceptions before `common.js` appends `moonlight-wasm.js`. In this repo, unguarded `tizen`/`webapis` platform probes in `wasm/platform/index.js` were enough to leave the emulator stuck on loading.

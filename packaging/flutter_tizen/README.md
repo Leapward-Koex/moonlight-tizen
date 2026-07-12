@@ -1,45 +1,46 @@
 # Moonlight Flutter Tizen packaging
 
-This project uses an identity separate from the legacy widget so both can be installed together:
+The Flutter preview uses an identity separate from the legacy widget:
 
 - package: `MLFlutter1`
 - application: `MLFlutter1.MoonlightFlutter`
 - widget: `http://samsung.tv/MoonlightFlutter`
 - minimum platform: Tizen 10.0
 
-Build the Flutter app with local CanvasKit and no service worker, then stage it with the existing native runtime:
+For the complete workstation workflow and troubleshooting, read
+[`DEVELOPMENT.md`](../../DEVELOPMENT.md). The normal build/sign/install/launch
+command is:
 
 ```powershell
-flutter build web --release -t lib/main.dart --csp --no-web-resources-cdn --no-wasm-dry-run --pwa-strategy=none
-./packaging/flutter_tizen/stage-widget.ps1
+.\packaging\flutter_tizen\build-emulator.ps1
 ```
 
-Pass `-ForceGameMode` to stage the Samsung Game Mode metadata variant. The staging script only assembles a directory under `build/flutter-tizen/widget`; signing profiles, passwords, signatures, and generated WGTs remain outside source control.
-
-Create an unsigned WGT, or sign it with an explicit workspace-local profile:
+To run the phases separately:
 
 ```powershell
-./packaging/flutter_tizen/package-widget.ps1
-./packaging/flutter_tizen/package-widget.ps1 -Sign
+# After building wasm and flutter_ui/build/web:
+.\packaging\flutter_tizen\stage-widget.ps1
+.\packaging\flutter_tizen\package-widget.ps1 -Sign
+.\packaging\flutter_tizen\deploy-widget.ps1
 ```
 
-Build the Force Game Mode artifact separately so it can be installed in place of the standard Flutter preview:
+All three commands agree on `build/flutter-tizen/widget-standard` and
+`build/flutter-tizen/MoonlightFlutter.wgt`. Use `-ForceGameMode` with the build
+or staging command for the alternate manifest. Staging validates the Flutter
+shell, native bridge, WebAssembly artifacts, and isolated Tizen identity.
+
+Signing always uses an explicit profile file outside source control. Generated
+WGTs, signatures, tokens, and password files belong under ignored `build/`
+directories.
+
+For emulator-only remote diagnostics, pass `-EnableDebugBridge` to the combined
+script, or configure an already staged widget:
 
 ```powershell
-./packaging/flutter_tizen/stage-widget.ps1 `
-  -Output build/flutter-tizen/widget-force-game-mode -ForceGameMode
-./packaging/flutter_tizen/package-widget.ps1 `
-  -Stage build/flutter-tizen/widget-force-game-mode `
-  -Output build/flutter-tizen/MoonlightFlutter-ForceGM.wgt -Sign
+.\tools\write-debug-bridge-config.ps1 -Enable `
+  -ProjectRoot build\flutter-tizen\widget-standard `
+  -HostIp <emulator-reachable-host-ip>
 ```
 
-The final artifact names are `MoonlightFlutter.wgt` and `MoonlightFlutter-ForceGM.wgt`. Launch either variant with package ID `MLFlutter1`.
-
-Release packages contain the remote diagnostics bridge in a disabled state.
-For an emulator or explicitly controlled test device, start
-`tools/debug-bridge-server.mjs` with a modern Node version and use
-`--write-config build/flutter-tizen/widget/native/debug_bridge_config.js`
-before signing that staged widget. Set `--public-url` to a host address the TV
-can reach (the current emulator uses `http://192.168.50.2:49321`, not
-`localhost`). The generated config contains an access token and must remain in
-ignored build output.
+Then sign/deploy that stage and start `tools/debug-bridge-server.mjs` with the
+same token using modern Node. Never ship an enabled bridge configuration.
