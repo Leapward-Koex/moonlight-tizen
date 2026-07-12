@@ -58,6 +58,7 @@ $requiredFiles = @(
     'flutter_bootstrap.js',
     'main.dart.js',
     'native/audio.js',
+    'native/audio-worklet.js',
     'native/diagnostics.js',
     'native/debug_bridge_config.js',
     'native/debug_bridge.js',

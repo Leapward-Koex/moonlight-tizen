@@ -17,6 +17,19 @@ enum AudioConfiguration {
   );
 }
 
+enum AudioBackend {
+  webAudio('webaudio'),
+  nativeEmss('emss');
+
+  const AudioBackend(this.wireName);
+  final String wireName;
+
+  static AudioBackend fromWireName(String value) => values.firstWhere(
+    (item) => item.wireName.toLowerCase() == value.toLowerCase(),
+    orElse: () => webAudio,
+  );
+}
+
 enum DiagnosticLogLevel { off, error, warning, info, debug }
 
 final class StreamResolution {
@@ -67,7 +80,7 @@ final class StreamResolution {
 /// Use [normalized] after restoring persisted JSON or applying a UI change. It
 /// enforces the same cross-setting constraints as the legacy web UI.
 final class AppSettings {
-  static const int currentSchemaVersion = 1;
+  static const int currentSchemaVersion = 2;
   static const List<int> normalFrameRates = [30, 60];
   static const List<int> unlockedFrameRates = [30, 60, 90, 120, 144];
   static const List<int> packetDurationsMs = [0, 5, 10, 20];
@@ -85,6 +98,7 @@ final class AppSettings {
     this.mouseEmulation = false,
     this.flipAbButtons = false,
     this.flipXyButtons = false,
+    this.audioBackend = AudioBackend.webAudio,
     this.audioConfiguration = AudioConfiguration.stereo,
     this.audioPacketDurationMs = 0,
     this.audioJitterBufferMs = 100,
@@ -112,6 +126,7 @@ final class AppSettings {
   final bool mouseEmulation;
   final bool flipAbButtons;
   final bool flipXyButtons;
+  final AudioBackend audioBackend;
   final AudioConfiguration audioConfiguration;
   final int audioPacketDurationMs;
   final int audioJitterBufferMs;
@@ -168,6 +183,9 @@ final class AppSettings {
       flipXyButtons: jsonBool(
         json['flipXyButtons'] ?? json['flipXYfaceButtons'],
       ),
+      audioBackend: AudioBackend.fromWireName(
+        jsonString(json['audioBackend'], AudioBackend.webAudio.wireName),
+      ),
       audioConfiguration: AudioConfiguration.fromWireName(
         jsonString(json['audioConfiguration'] ?? json['audioConfig'], 'Stereo'),
       ),
@@ -217,6 +235,7 @@ final class AppSettings {
     'mouseEmulation': mouseEmulation,
     'flipAbButtons': flipAbButtons,
     'flipXyButtons': flipXyButtons,
+    'audioBackend': audioBackend.wireName,
     'audioConfiguration': audioConfiguration.wireName,
     'audioPacketDurationMs': audioPacketDurationMs,
     'audioJitterBufferMs': audioJitterBufferMs,
@@ -254,7 +273,7 @@ final class AppSettings {
         ? videoCodec
         : VideoCodec.h264;
     final normalizedJitter =
-        ((audioJitterBufferMs.clamp(50, 500) / 25).round() * 25).clamp(50, 500);
+        ((audioJitterBufferMs.clamp(10, 500) / 10).round() * 10).clamp(10, 500);
     final normalizedBitrate = ((bitrateMbps.clamp(0.5, 150.0) * 2).round() / 2)
         .toDouble();
 
@@ -264,6 +283,9 @@ final class AppSettings {
       frameRate: normalizedRate,
       bitrateMbps: normalizedBitrate,
       rumbleFeedback: rumbleFeedback && capabilities.supportsRumble,
+      audioBackend: capabilities.supportsNativeAudio
+          ? audioBackend
+          : AudioBackend.webAudio,
       audioPacketDurationMs: packetDurationsMs.contains(audioPacketDurationMs)
           ? audioPacketDurationMs
           : 0,
@@ -310,6 +332,7 @@ final class AppSettings {
     bool? mouseEmulation,
     bool? flipAbButtons,
     bool? flipXyButtons,
+    AudioBackend? audioBackend,
     AudioConfiguration? audioConfiguration,
     int? audioPacketDurationMs,
     int? audioJitterBufferMs,
@@ -336,6 +359,7 @@ final class AppSettings {
     mouseEmulation: mouseEmulation ?? this.mouseEmulation,
     flipAbButtons: flipAbButtons ?? this.flipAbButtons,
     flipXyButtons: flipXyButtons ?? this.flipXyButtons,
+    audioBackend: audioBackend ?? this.audioBackend,
     audioConfiguration: audioConfiguration ?? this.audioConfiguration,
     audioPacketDurationMs: audioPacketDurationMs ?? this.audioPacketDurationMs,
     audioJitterBufferMs: audioJitterBufferMs ?? this.audioJitterBufferMs,

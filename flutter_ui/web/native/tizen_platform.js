@@ -89,7 +89,8 @@
       maximumHeight: maximumHeight,
       screenWidth: Number(screenWidth) || 0,
       screenHeight: Number(screenHeight) || 0,
-      supportsNativeStreaming: !!(tizen && webapis)
+      supportsNativeStreaming: !!(tizen && webapis),
+      supportsNativeAudio: !!(tizen && webapis)
     };
   }
 

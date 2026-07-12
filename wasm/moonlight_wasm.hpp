@@ -93,6 +93,11 @@ enum class StreamLifecycle {
   Stopping
 };
 
+enum class AudioBackend {
+  WebAudio,
+  NativeEmss
+};
+
 constexpr const char* kCanvasName = "#wasm_module";
 
 class MoonlightInstance {
@@ -102,7 +107,7 @@ class MoonlightInstance {
   MessageResult StartStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
     std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
     bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-    std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+    std::string audioBackend, std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
     bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes);
   std::string ProbeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
   MessageResult StopStream();
@@ -169,8 +174,11 @@ class MoonlightInstance {
   void TogglePerformanceStats();
 
   static int AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, void* context, int arFlags);
+  static void AudDecStart(void);
+  static void AudDecStop(void);
   static void AudDecCleanup(void);
   static void AudDecDecodeAndPlaySample(char* sampleData, int sampleLength);
+  static void SubmitNativeAudioFrame(const opus_int16* samples, int decodedSamples, uint64_t firstSample);
 
   MessageResult MakeCert();
 
@@ -202,6 +210,17 @@ class MoonlightInstance {
   private:
     MoonlightInstance* m_Instance;
   };
+  class AudioTrackListener
+    : public samsung::wasm::ElementaryMediaTrackListener {
+  public:
+    AudioTrackListener(MoonlightInstance* instance);
+    void OnTrackOpen() override;
+    void OnTrackClosed(EmssTrackCloseReason) override;
+    void OnSessionIdChanged(samsung::wasm::SessionId new_session_id) override;
+    void OnAppendError(samsung::wasm::OperationResult result) override;
+  private:
+    MoonlightInstance* m_Instance;
+  };
 
   bool WaitFor(std::condition_variable* variable, const char* waitName, uint32_t timeoutMs, std::function<bool()> condition);
   bool ProbeVideoTrack(const char* mimeType, int width, int height, int redrawRate);
@@ -226,7 +245,8 @@ class MoonlightInstance {
 
   static CONNECTION_LISTENER_CALLBACKS s_ClCallbacks;
   static DECODER_RENDERER_CALLBACKS s_DrCallbacks;
-  static AUDIO_RENDERER_CALLBACKS s_ArCallbacks;
+  static AUDIO_RENDERER_CALLBACKS s_WebAudioCallbacks;
+  static AUDIO_RENDERER_CALLBACKS s_NativeAudioCallbacks;
 
   std::string m_Host;
   int m_HttpPort;
@@ -241,9 +261,13 @@ class MoonlightInstance {
   bool m_MouseEmulationEnabled;
   bool m_FlipABfaceButtonsEnabled;
   bool m_FlipXYfaceButtonsEnabled;
+  AudioBackend m_AudioBackend;
   int m_AudioConfig;
   int m_AudioPacketDuration;
   int m_AudioJitterMs;
+  std::atomic<int> m_AudioSampleRate;
+  std::atomic<int> m_AudioChannelCount;
+  std::atomic<int> m_AudioSamplesPerFrame;
   bool m_PlayHostAudioEnabled;
   bool m_HdrModeEnabled;
   bool m_FullRangeEnabled;
@@ -280,14 +304,19 @@ class MoonlightInstance {
 
   std::mutex m_Mutex;
   std::condition_variable m_EmssStateChanged;
+  std::condition_variable m_EmssAudioStateChanged;
   std::condition_variable m_EmssVideoStateChanged;
   EmssReadyState m_EmssReadyState;
+  std::atomic<bool> m_AudioStarted;
   std::atomic<bool> m_VideoStarted;
+  std::atomic<samsung::wasm::SessionId> m_AudioSessionId;
   std::atomic<samsung::wasm::SessionId> m_VideoSessionId;
   samsung::html::HTMLMediaElement m_MediaElement;
   std::unique_ptr<samsung::wasm::ElementaryMediaStreamSource> m_Source;
   SourceListener m_SourceListener;
+  AudioTrackListener m_AudioTrackListener;
   VideoTrackListener m_VideoTrackListener;
+  samsung::wasm::ElementaryMediaTrack m_AudioTrack;
   samsung::wasm::ElementaryMediaTrack m_VideoTrack;
   int m_ProbedVideoFormat;
   int m_ProbedVideoWidth;
@@ -313,7 +342,7 @@ void openUrl(int callbackId, std::string url, emscripten::val ppk, bool binaryRe
 MessageResult startStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+  std::string audioBackend, std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes);
 std::string probeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
 MessageResult stopStream();

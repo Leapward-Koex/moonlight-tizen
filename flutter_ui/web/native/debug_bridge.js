@@ -19,6 +19,10 @@
   }
 
   function getState() {
+    var audio = window.MoonlightAudio;
+    var mediaElement = typeof document.getElementById === 'function'
+      ? document.getElementById('wasm_module')
+      : null;
     return {
       href: window.location.origin + window.location.pathname,
       readyState: document.readyState,
@@ -27,6 +31,13 @@
       online: navigator.onLine,
       logger: loggerStatus(),
       runtime: runtimeInfo(),
+      audio: audio ? {
+        context: typeof audio.getContextSnapshot === 'function' ? audio.getContextSnapshot() : null,
+        stats: typeof audio.getStats === 'function' ? audio.getStats() : null,
+        videoCurrentTime: mediaElement && typeof mediaElement.currentTime === 'number'
+          ? mediaElement.currentTime
+          : null
+      } : null,
       capabilities: {
         tizen: typeof window.tizen !== 'undefined',
         flutter: !!document.querySelector('flutter-view'),
