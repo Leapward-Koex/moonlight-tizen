@@ -1943,10 +1943,19 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
   }
 
   void _showSupport() {
+    const supportUrl = SupportDialog.repositoryUrl;
+    final qrSvg = widget.diagnosticQrSvg(supportUrl);
     showMoonlightDialog<void>(
       context: context,
       builder: (dialogContext) => SupportDialog(
         version: '1.13.0',
+        supportUrl: supportUrl,
+        qrCode: qrSvg.isEmpty
+            ? null
+            : DiagnosticQrCode(
+                svg: qrSvg,
+                semanticLabel: 'Moonlight Tizen repository QR code',
+              ),
         onClose: () => Navigator.of(dialogContext).pop(),
       ),
     );

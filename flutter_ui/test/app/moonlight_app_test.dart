@@ -10,6 +10,39 @@ import 'package:moonlight_tizen_flutter/state/state.dart';
 import 'package:moonlight_tizen_flutter/ui/moonlight_ui.dart';
 
 void main() {
+  testWidgets('support dialog generates a QR code for this repository', (
+    tester,
+  ) async {
+    final bundle = await createFakeOverrideBundle(const FakeStateSeed());
+    String? encodedUrl;
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: bundle.overrides,
+        child: _testApp(
+          diagnosticQrSvg: (url) {
+            encodedUrl = url;
+            return '<svg></svg>';
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    tester
+        .widget<TvIconButton>(find.byKey(const ValueKey('header-support')))
+        .onPressed();
+    await tester.pumpAndSettle();
+
+    expect(encodedUrl, SupportDialog.repositoryUrl);
+    expect(find.text(SupportDialog.repositoryUrl), findsOneWidget);
+    expect(find.byType(DiagnosticQrCode), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('normalized controller direction enters settings options', (
     tester,
   ) async {
@@ -246,6 +279,7 @@ void main() {
 
 MoonlightFlutterApp _testApp({
   Stream<String> navigationActions = const Stream<String>.empty(),
+  DiagnosticQrSvg diagnosticQrSvg = _emptyDiagnosticQrSvg,
 }) => MoonlightFlutterApp(
   startNativeStream: (_) async {},
   stopNativeStream: () async {},
@@ -263,9 +297,11 @@ MoonlightFlutterApp _testApp({
   clearDiagnosticLogs: () async => const <String, Object?>{},
   startLogExport: () async => '',
   stopLogExport: () async {},
-  diagnosticQrSvg: (_) => '',
+  diagnosticQrSvg: diagnosticQrSvg,
   probeCodecs: (_) async => const <String, Object?>{},
 );
+
+String _emptyDiagnosticQrSvg(String _) => '';
 
 final class _ControlledDiscovery implements SubnetDiscoveryGateway {
   final Completer<List<String>> _scan = Completer<List<String>>();

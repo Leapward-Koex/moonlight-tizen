@@ -5,11 +5,14 @@ import '../view_models.dart';
 import 'moonlight_dialog.dart';
 
 class SupportDialog extends StatelessWidget {
+  static const repositoryUrl =
+      'https://github.com/Leapward-Koex/moonlight-tizen';
+
   const SupportDialog({
     required this.onClose,
     super.key,
     this.qrCode,
-    this.supportUrl = 'https://github.com/OneLiberty/moonlight-chrome-tizen',
+    this.supportUrl = repositoryUrl,
     this.version,
   });
 
