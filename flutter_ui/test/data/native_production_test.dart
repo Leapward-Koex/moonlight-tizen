@@ -187,6 +187,15 @@ final class _FakeNativeRuntime implements MoonlightNativeRuntime {
   Future<void> stopStream() async {}
 
   @override
+  Future<void> startSyntheticAudioTest({required bool gameMode}) async {}
+
+  @override
+  Future<int> playSyntheticAudioClick(String inputLabel) async => 1;
+
+  @override
+  Future<void> stopSyntheticAudioTest() async {}
+
+  @override
   void recoverStreamSurface() {}
 
   @override

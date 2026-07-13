@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moonlight_tizen_flutter/app/moonlight_app.dart';
+import 'package:moonlight_tizen_flutter/data/native/native_runtime.dart';
 import 'package:moonlight_tizen_flutter/domain/domain.dart';
 import 'package:moonlight_tizen_flutter/state/state.dart';
 import 'package:moonlight_tizen_flutter/ui/moonlight_ui.dart';
@@ -145,7 +146,11 @@ void main() {
           connectedGamepadMask: () => 0,
           inputDevices: () => const [],
           testRumble: (_) => false,
+          inputEvents: const Stream<NativeInputEvent>.empty(),
           navigationActions: const Stream<String>.empty(),
+          startSyntheticAudioTest: ({required gameMode}) async {},
+          playSyntheticAudioClick: (_) async => 1,
+          stopSyntheticAudioTest: () async {},
           checkForUpdates: () async => (version: '', notes: ''),
           restartApp: () => false,
           exitApp: () => false,
@@ -209,7 +214,11 @@ void main() {
           connectedGamepadMask: () => 0,
           inputDevices: () => const [],
           testRumble: (_) => false,
+          inputEvents: const Stream<NativeInputEvent>.empty(),
           navigationActions: navigation.stream,
+          startSyntheticAudioTest: ({required gameMode}) async {},
+          playSyntheticAudioClick: (_) async => 1,
+          stopSyntheticAudioTest: () async {},
           checkForUpdates: () async => (version: '', notes: ''),
           restartApp: () => false,
           exitApp: () {
@@ -275,11 +284,87 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
+
+  testWidgets('any controller button appends a synthetic PCM click', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final bundle = await createFakeOverrideBundle(
+      FakeStateSeed(capabilities: PlatformCapabilities.tizen10()),
+    );
+    final input = StreamController<NativeInputEvent>.broadcast(sync: true);
+    addTearDown(input.close);
+    var starts = 0;
+    var stops = 0;
+    final labels = <String>[];
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: bundle.overrides,
+        child: _testApp(
+          inputEvents: input.stream,
+          startSyntheticAudioTest: ({required gameMode}) async {
+            starts += 1;
+          },
+          playSyntheticAudioClick: (label) async {
+            labels.add(label);
+            return labels.length;
+          },
+          stopSyntheticAudioTest: () async {
+            stops += 1;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    tester
+        .widget<TvIconButton>(find.byKey(const ValueKey('header-settings')))
+        .onPressed();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Audio Settings'));
+    await tester.pumpAndSettle();
+    tester
+        .widget<TvActionButton>(
+          find.widgetWithText(TvActionButton, 'Open PCM click test'),
+        )
+        .onPressed();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+
+    expect(starts, 1);
+    expect(find.byType(MoonlightDialog), findsOneWidget);
+    input.add(
+      const NativeInputEvent(
+        type: 'controller-button',
+        phase: 'pressed',
+        source: 'gamepad',
+        gamepadIndex: 2,
+        data: {'controlIndex': 12},
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(labels, ['gamepad:2:button:12']);
+    expect(find.textContaining('Click 1 appended'), findsOneWidget);
+
+    tester
+        .widget<TextButton>(find.widgetWithText(TextButton, 'Close'))
+        .onPressed!();
+    await tester.pumpAndSettle();
+    expect(stops, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
 
 MoonlightFlutterApp _testApp({
+  Stream<NativeInputEvent> inputEvents = const Stream<NativeInputEvent>.empty(),
   Stream<String> navigationActions = const Stream<String>.empty(),
   DiagnosticQrSvg diagnosticQrSvg = _emptyDiagnosticQrSvg,
+  StartSyntheticAudioTest? startSyntheticAudioTest,
+  PlaySyntheticAudioClick? playSyntheticAudioClick,
+  StopNativeStream? stopSyntheticAudioTest,
 }) => MoonlightFlutterApp(
   startNativeStream: (_) async {},
   stopNativeStream: () async {},
@@ -288,7 +373,12 @@ MoonlightFlutterApp _testApp({
   connectedGamepadMask: () => 0,
   inputDevices: () => const [],
   testRumble: (_) => false,
+  inputEvents: inputEvents,
   navigationActions: navigationActions,
+  startSyntheticAudioTest:
+      startSyntheticAudioTest ?? ({required gameMode}) async {},
+  playSyntheticAudioClick: playSyntheticAudioClick ?? (_) async => 1,
+  stopSyntheticAudioTest: stopSyntheticAudioTest ?? () async {},
   checkForUpdates: () async => (version: '', notes: ''),
   restartApp: () => false,
   exitApp: () => false,

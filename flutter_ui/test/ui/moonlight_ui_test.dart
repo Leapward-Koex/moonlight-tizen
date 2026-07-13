@@ -94,7 +94,8 @@ void main() {
       ),
     );
     expect(find.text('Pair required'), findsOneWidget);
-    expect(find.byIcon(Icons.lock_outline_rounded), findsNWidgets(2));
+    expect(find.byIcon(Icons.lock_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
   });
 
   testWidgets('input device panel shows live state and tests rumble', (

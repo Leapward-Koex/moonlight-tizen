@@ -75,6 +75,17 @@ final class UnsupportedMoonlightNativeRuntime
   Future<void> stopStream() async => _unsupported();
 
   @override
+  Future<void> startSyntheticAudioTest({required bool gameMode}) async =>
+      _unsupported();
+
+  @override
+  Future<int> playSyntheticAudioClick(String inputLabel) async =>
+      _unsupported();
+
+  @override
+  Future<void> stopSyntheticAudioTest() async => _unsupported();
+
+  @override
   void recoverStreamSurface() {}
 
   @override

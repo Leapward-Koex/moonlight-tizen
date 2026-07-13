@@ -81,13 +81,20 @@ MoonlightInstance::MoonlightInstance()
     m_VideoStarted(false),
     m_AudioSessionId(0),
     m_VideoSessionId(0),
+    m_SyntheticAudioTestState(SyntheticAudioTestState::Inactive),
+    m_SyntheticAudioSessionId(0),
+    m_SyntheticAudioSampleCursor(0),
+    m_SyntheticAudioClickCount(0),
+    m_SyntheticAudioClick(),
     m_MediaElement("wasm_module"),
     m_Source(nullptr),
     m_SourceListener(this),
     m_AudioTrackListener(this),
     m_VideoTrackListener(this),
+    m_SyntheticAudioTrackListener(this),
     m_AudioTrack(),
     m_VideoTrack(),
+    m_SyntheticAudioTrack(),
     m_ProbedVideoFormat(0),
     m_ProbedVideoWidth(0),
     m_ProbedVideoHeight(0),
@@ -503,6 +510,11 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
     return MessageResult::Reject(emscripten::val(reason));
   }
 
+  // The standalone PCM test owns the same media element as streaming. Always
+  // detach it before creating the real stream source so callbacks and packets
+  // from the two sessions cannot overlap.
+  StopSyntheticAudioTest();
+
   uint32_t attemptId = m_StreamAttemptId.fetch_add(1) + 1;
   SetLifecycle(StreamLifecycle::Starting, "start requested");
   m_Running.store(false);
@@ -648,6 +660,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   );
   // Set the source listener to the media source
   m_Source->SetListener(&m_SourceListener);
+  LogEmssAudioClock("before-stream", 0.0);
 
   // Store the parameters from the start message
   m_Host = host;
@@ -855,6 +868,20 @@ MessageResult stopStream() {
   return g_Instance->StopStream();
 }
 
+MessageResult startSyntheticAudioTest(bool gameMode) {
+  MoonlightInstance::ClLogMessage("JS bridge invoked startSyntheticAudioTest: gameMode=%d\n", gameMode);
+  return g_Instance->StartSyntheticAudioTest(gameMode);
+}
+
+MessageResult playSyntheticAudioClick(std::string inputLabel) {
+  return g_Instance->PlaySyntheticAudioClick(std::move(inputLabel));
+}
+
+MessageResult stopSyntheticAudioTest() {
+  MoonlightInstance::ClLogMessage("JS bridge invoked stopSyntheticAudioTest\n");
+  return g_Instance->StopSyntheticAudioTest();
+}
+
 void toggleStats() {
   g_Instance->TogglePerformanceStats();
 }
@@ -911,6 +938,9 @@ EMSCRIPTEN_BINDINGS(handle_message) {
   emscripten::function("configureInput", &configureInput);
   emscripten::function("probeVideoCodecSupport", &probeVideoCodecSupport);
   emscripten::function("stopStream", &stopStream);
+  emscripten::function("startSyntheticAudioTest", &startSyntheticAudioTest);
+  emscripten::function("playSyntheticAudioClick", &playSyntheticAudioClick);
+  emscripten::function("stopSyntheticAudioTest", &stopSyntheticAudioTest);
   emscripten::function("toggleStats", &toggleStats);
   emscripten::function("stun", &stun);
   emscripten::function("pair", &pair);

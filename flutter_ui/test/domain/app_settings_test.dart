@@ -66,6 +66,28 @@ void main() {
       expect(settings.hdr, isFalse);
     });
 
+    test('compile variant controls persisted settings and stream requests', () {
+      final settings = const AppSettings(
+        gameMode: false,
+      ).normalized(PlatformCapabilities.tizen10());
+      final request = StreamRequest.fromSettings(
+        app: const MoonlightApp(id: 1, title: 'Test'),
+        host: const SavedHost(
+          id: 'host',
+          hostname: 'Test PC',
+          address: '192.0.2.1',
+        ),
+        hostStatus: const HostStatus(),
+        settings: settings,
+        remoteInput: const RemoteInputCredentials(key: '00', keyId: 0),
+        sessionUrl: 'rtsp://test',
+        disabledCodecMimeTypes: const <String>[],
+      );
+
+      expect(settings.gameMode, kForceGameMode);
+      expect(request.gameMode, kForceGameMode);
+    });
+
     test('standard presets preserve the legacy table', () {
       expect(BitratePolicy.standardMbps(StreamResolution.sd480, 30), 2);
       expect(BitratePolicy.standardMbps(StreamResolution.hd720, 60), 10);

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'build_variant.dart';
 import 'json_utils.dart';
 import 'platform_capabilities.dart';
 
@@ -498,7 +499,7 @@ final class AppSettings {
       videoCodec: normalizedCodec,
       hdr:
           hdr && capabilities.supportsHdr && normalizedCodec != VideoCodec.h264,
-      gameMode: gameMode && capabilities.supportsGameMode,
+      gameMode: capabilities.supportsGameMode && (kForceGameMode || gameMode),
     );
   }
 

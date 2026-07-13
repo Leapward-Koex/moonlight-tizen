@@ -40,6 +40,8 @@ The script uses these stable local defaults:
 - Flutter SDK: the `flutter` command selected by `PATH` (override with
   `-FlutterPath` when needed)
 - staged widget: `build/flutter-tizen/widget-standard`
+- standard Flutter output: `flutter_ui/build/web`
+- forced Game Mode Flutter output: `flutter_ui/build/web-force-game-mode`
 - signed WGT: `build/flutter-tizen/MoonlightFlutter.wgt`
 - signing profile: supplied with `-SignProfile` and `-ProfilesPath` or the
   corresponding `MOONLIGHT_TIZEN_*` environment variables
@@ -47,8 +49,10 @@ The script uses these stable local defaults:
 - launch package ID: `MLFlutter1`
 
 Use `-SkipWasm` or `-SkipFlutter` only when the corresponding output is known to
-be current. Use `-NoDeploy` to stop after signing, and `-ForceGameMode` for the
-alternate manifest.
+be current. Use `-NoDeploy` to stop after signing. `-ForceGameMode` creates a
+separate Flutter build with `MOONLIGHT_FORCE_GAME_MODE=true`, omits the Game
+Mode setting, hardcodes every stream request to Game Mode on, and uses the
+alternate manifest and WGT output.
 
 In a restricted Codex session, use two phases: run the Flutter command from
 section 2 with access to the installed SDK cache, then return to the normal
@@ -89,6 +93,11 @@ sandbox, Flutter can hang silently before printing `Compiling`, and even
 same command with permission to access the installed Flutter SDK/cache; the
 normal build takes tens of seconds on this machine. Clean up only orphaned Dart
 processes started by the failed attempt.
+
+The combined script builds the forced variant separately at
+`flutter_ui/build/web-force-game-mode` by adding
+`--dart-define=MOONLIGHT_FORCE_GAME_MODE=true`; it never stages the standard
+Flutter output into the forced Game Mode WGT.
 
 ### 3. Stage, sign, deploy
 

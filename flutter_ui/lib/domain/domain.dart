@@ -1,4 +1,5 @@
 export 'app_settings.dart';
+export 'build_variant.dart';
 export 'codec_capability.dart';
 export 'contracts.dart';
 export 'diagnostics.dart';

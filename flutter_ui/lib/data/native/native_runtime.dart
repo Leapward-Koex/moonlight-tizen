@@ -167,6 +167,9 @@ abstract interface class MoonlightNativeRuntime
 
   Future<StreamEvent> startStream(StreamRequest request);
   Future<void> stopStream();
+  Future<void> startSyntheticAudioTest({required bool gameMode});
+  Future<int> playSyntheticAudioClick(String inputLabel);
+  Future<void> stopSyntheticAudioTest();
   void recoverStreamSurface();
   Future<void> toggleStats();
 

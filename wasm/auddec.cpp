@@ -202,6 +202,11 @@ void MoonlightInstance::SubmitNativeAudioFrame(const opus_int16* samples, int de
 
   auto result = g_Instance->m_AudioTrack.AppendPacketAsync(packet);
   if (result) {
+    if (s_nativeAppends == 0 || (s_nativeAppends % 100) == 0) {
+      g_Instance->LogEmssAudioClock(
+        "stream-native-audio-append",
+        static_cast<double>(firstSample) / s_sampleRate);
+    }
     s_nativeAppends++;
     return;
   }

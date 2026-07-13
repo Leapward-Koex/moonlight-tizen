@@ -917,6 +917,18 @@
     });
   }
 
+  function startSyntheticAudioTest(gameMode) {
+    return callMessageResult('startSyntheticAudioTest', [!!gameMode]);
+  }
+
+  function playSyntheticAudioClick(inputLabel) {
+    return callMessageResult('playSyntheticAudioClick', [String(inputLabel || 'ui')]);
+  }
+
+  function stopSyntheticAudioTest() {
+    return callMessageResult('stopSyntheticAudioTest', []);
+  }
+
   function toggleStats() {
     return callRaw('toggleStats', []).then(function() { return true; });
   }
@@ -987,6 +999,9 @@
     scanLocalSubnet: scanLocalSubnet,
     startStream: startStream,
     stopStream: stopStream,
+    startSyntheticAudioTest: startSyntheticAudioTest,
+    playSyntheticAudioClick: playSyntheticAudioClick,
+    stopSyntheticAudioTest: stopSyntheticAudioTest,
     toggleStats: toggleStats,
     probeVideoCodecSupport: probeVideoCodecSupport,
     startLogExportServer: startLogExportServer,

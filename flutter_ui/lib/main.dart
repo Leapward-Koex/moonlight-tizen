@@ -84,9 +84,13 @@ Future<void> main() async {
           connectedGamepadMask: native.runtime.connectedGamepadMask,
           inputDevices: native.runtime.inputDevices,
           testRumble: native.runtime.testRumble,
+          inputEvents: native.runtime.inputEvents,
           navigationActions: native.runtime.inputEvents
               .where(shouldForwardUiNavigation)
               .map((event) => event.action),
+          startSyntheticAudioTest: native.runtime.startSyntheticAudioTest,
+          playSyntheticAudioClick: native.runtime.playSyntheticAudioClick,
+          stopSyntheticAudioTest: native.runtime.stopSyntheticAudioTest,
           checkForUpdates: () => _checkForUpdates(native.runtime),
           restartApp: native.runtime.restartApp,
           exitApp: native.runtime.exitApp,

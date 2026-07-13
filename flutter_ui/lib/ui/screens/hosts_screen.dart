@@ -163,17 +163,11 @@ class HostCard extends StatelessWidget {
                 size: 128,
                 color: host.isPaired
                     ? MoonlightColors.cyan
-                    : MoonlightColors.cyan.withValues(alpha: .88),
+                    : MoonlightColors.hostUnpaired,
               ),
             ),
             if (host.pairingStatusKnown && !host.isPaired)
-              const Center(
-                child: CircleAvatar(
-                  radius: 38,
-                  backgroundColor: Color(0xFF30343A),
-                  child: Icon(Icons.lock_outline_rounded, size: 40),
-                ),
-              ),
+              const Center(child: _PairingRequiredBadge()),
             if (host.availability == HostAvailability.connecting)
               const Center(
                 child: SizedBox.square(
@@ -210,6 +204,35 @@ class HostCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PairingRequiredBadge extends StatelessWidget {
+  const _PairingRequiredBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 82,
+      height: 82,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: MoonlightColors.surfaceRaised,
+        border: Border.all(
+          color: MoonlightColors.cyan.withValues(alpha: .8),
+          width: 2,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const [
+          BoxShadow(color: Color(0x66000000), blurRadius: 12, spreadRadius: 2),
+        ],
+      ),
+      child: const Icon(
+        Icons.lock_rounded,
+        size: 42,
+        color: MoonlightColors.cyan,
       ),
     );
   }

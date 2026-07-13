@@ -13,6 +13,9 @@ import '../ui/moonlight_ui.dart';
 
 typedef StartNativeStream = Future<void> Function(StreamRequest request);
 typedef StopNativeStream = Future<void> Function();
+typedef StartSyntheticAudioTest =
+    Future<void> Function({required bool gameMode});
+typedef PlaySyntheticAudioClick = Future<int> Function(String inputLabel);
 typedef RecoverNativeStreamSurface = void Function();
 typedef NativeAction = void Function();
 typedef NativeBoolAction = bool Function();
@@ -36,7 +39,11 @@ class MoonlightFlutterApp extends StatefulWidget {
     required this.connectedGamepadMask,
     required this.inputDevices,
     required this.testRumble,
+    required this.inputEvents,
     required this.navigationActions,
+    required this.startSyntheticAudioTest,
+    required this.playSyntheticAudioClick,
+    required this.stopSyntheticAudioTest,
     required this.checkForUpdates,
     required this.restartApp,
     required this.exitApp,
@@ -57,7 +64,11 @@ class MoonlightFlutterApp extends StatefulWidget {
   final GamepadMaskReader connectedGamepadMask;
   final InputDevicesReader inputDevices;
   final TestRumble testRumble;
+  final Stream<NativeInputEvent> inputEvents;
   final Stream<String> navigationActions;
+  final StartSyntheticAudioTest startSyntheticAudioTest;
+  final PlaySyntheticAudioClick playSyntheticAudioClick;
+  final StopNativeStream stopSyntheticAudioTest;
   final CheckForUpdates checkForUpdates;
   final NativeBoolAction restartApp;
   final NativeBoolAction exitApp;
@@ -110,7 +121,11 @@ class _MoonlightFlutterAppState extends State<MoonlightFlutterApp> {
           connectedGamepadMask: widget.connectedGamepadMask,
           inputDevices: widget.inputDevices,
           testRumble: widget.testRumble,
+          inputEvents: widget.inputEvents,
           navigationActions: widget.navigationActions,
+          startSyntheticAudioTest: widget.startSyntheticAudioTest,
+          playSyntheticAudioClick: widget.playSyntheticAudioClick,
+          stopSyntheticAudioTest: widget.stopSyntheticAudioTest,
           checkForUpdates: widget.checkForUpdates,
           restartApp: widget.restartApp,
           exitApp: widget.exitApp,
@@ -151,7 +166,11 @@ class _MoonlightExperience extends ConsumerStatefulWidget {
     required this.connectedGamepadMask,
     required this.inputDevices,
     required this.testRumble,
+    required this.inputEvents,
     required this.navigationActions,
+    required this.startSyntheticAudioTest,
+    required this.playSyntheticAudioClick,
+    required this.stopSyntheticAudioTest,
     required this.checkForUpdates,
     required this.restartApp,
     required this.exitApp,
@@ -174,7 +193,11 @@ class _MoonlightExperience extends ConsumerStatefulWidget {
   final GamepadMaskReader connectedGamepadMask;
   final InputDevicesReader inputDevices;
   final TestRumble testRumble;
+  final Stream<NativeInputEvent> inputEvents;
   final Stream<String> navigationActions;
+  final StartSyntheticAudioTest startSyntheticAudioTest;
+  final PlaySyntheticAudioClick playSyntheticAudioClick;
+  final StopNativeStream stopSyntheticAudioTest;
   final CheckForUpdates checkForUpdates;
   final NativeBoolAction restartApp;
   final NativeBoolAction exitApp;
@@ -1385,6 +1408,19 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
                 ),
               ),
             ),
+          if (capabilities.supportsNativeAudio)
+            MoonlightSettingOption(
+              title: 'Synthetic PCM latency test',
+              badge: 'Diagnostic',
+              description:
+                  'Opens a controller-driven click test using raw PCM through the TV EMSS sink. It bypasses Sunshine, networking, Opus decoding, and Moonlight audio queues.',
+              control: TvActionButton(
+                label: 'Open PCM click test',
+                icon: Icons.graphic_eq,
+                onPressed: () =>
+                    unawaited(_openSyntheticAudioLatencyTest(settings)),
+              ),
+            ),
           _toggle(
             'Play audio on host',
             settings.playAudioOnHost,
@@ -1453,18 +1489,19 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
             controlLabel:
                 'Use full color range for more detail in dark and bright areas',
           ),
-          _toggle(
-            'Game mode',
-            settings.gameMode,
-            (value) {
-              update(settings.copyWith(gameMode: value));
-            },
-            enabled: capabilities.supportsGameMode,
-            description:
-                'Enable for ultra-low latency, or disable to retain post-processing video enhancements.',
-            controlLabel:
-                'Use game mode for optimal streaming latency and performance',
-          ),
+          if (!kForceGameMode)
+            _toggle(
+              'Game mode',
+              settings.gameMode,
+              (value) {
+                update(settings.copyWith(gameMode: value));
+              },
+              enabled: capabilities.supportsGameMode,
+              description:
+                  'Enable for ultra-low latency, or disable to retain post-processing video enhancements.',
+              controlLabel:
+                  'Use game mode for optimal streaming latency and performance',
+            ),
         ],
       ),
       SettingsCategoryViewModel(
@@ -1666,6 +1703,42 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
       onChanged: onChanged,
     ),
   );
+
+  Future<void> _openSyntheticAudioLatencyTest(AppSettings settings) async {
+    final gameMode = kForceGameMode || settings.gameMode;
+    _logger.log('info', 'ui.synthetic_audio.dialog_open_requested', {
+      'requestedGameMode': gameMode,
+      'requestedEmssMode': gameMode ? 'ultra-low' : 'low',
+      'audioPts': 0,
+    });
+    try {
+      await widget.startSyntheticAudioTest(gameMode: gameMode);
+      // EMSS source and track transitions are callback-driven. Give the TV a
+      // short head start so the first physical button press is normally
+      // audible; the dialog still reports a retryable initialization error.
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      if (!mounted) {
+        await widget.stopSyntheticAudioTest();
+        return;
+      }
+      await showMoonlightDialog<void>(
+        context: context,
+        builder: (dialogContext) => _SyntheticAudioLatencyDialog(
+          inputEvents: widget.inputEvents,
+          emssMode: gameMode ? 'Ultra-low (Game Mode)' : 'Low latency',
+          onPlayClick: widget.playSyntheticAudioClick,
+          onClose: () => Navigator.of(dialogContext).pop(),
+        ),
+      );
+    } catch (error, stackTrace) {
+      _logger.error('ui.synthetic_audio.dialog_failed', error, stackTrace);
+      if (mounted) {
+        showMoonlightSnackBar(context, 'PCM click test failed: $error');
+      }
+    } finally {
+      await widget.stopSyntheticAudioTest();
+    }
+  }
 
   Future<void> _probeCodecProfiles(AppSettings settings) async {
     try {
@@ -2031,6 +2104,136 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
       TvFocusable.activate(focus);
     }
   }
+}
+
+class _SyntheticAudioLatencyDialog extends StatefulWidget {
+  const _SyntheticAudioLatencyDialog({
+    required this.inputEvents,
+    required this.emssMode,
+    required this.onPlayClick,
+    required this.onClose,
+  });
+
+  final Stream<NativeInputEvent> inputEvents;
+  final String emssMode;
+  final PlaySyntheticAudioClick onPlayClick;
+  final VoidCallback onClose;
+
+  @override
+  State<_SyntheticAudioLatencyDialog> createState() =>
+      _SyntheticAudioLatencyDialogState();
+}
+
+class _SyntheticAudioLatencyDialogState
+    extends State<_SyntheticAudioLatencyDialog> {
+  StreamSubscription<NativeInputEvent>? _inputSubscription;
+  DateTime? _lastTrigger;
+  bool _busy = false;
+  int _clickCount = 0;
+  String _status = 'Ready — press any controller button.';
+
+  @override
+  void initState() {
+    super.initState();
+    _inputSubscription = widget.inputEvents
+        .where(
+          (event) =>
+              event.type == 'controller-button' && event.phase == 'pressed',
+        )
+        .listen((event) {
+          final controlIndex = event.data['controlIndex'];
+          unawaited(
+            _playClick(
+              'gamepad:${event.gamepadIndex ?? -1}:button:$controlIndex',
+            ),
+          );
+        });
+  }
+
+  @override
+  void dispose() {
+    unawaited(_inputSubscription?.cancel());
+    super.dispose();
+  }
+
+  Future<void> _playClick(String inputLabel) async {
+    final now = DateTime.now();
+    if (_busy ||
+        (_lastTrigger != null &&
+            now.difference(_lastTrigger!) < const Duration(milliseconds: 80))) {
+      return;
+    }
+    _lastTrigger = now;
+    setState(() {
+      _busy = true;
+      _status = 'Appending raw PCM click…';
+    });
+    try {
+      final clickNumber = await widget.onPlayClick(inputLabel);
+      if (!mounted) return;
+      setState(() {
+        _clickCount = clickNumber > 0 ? clickNumber : _clickCount + 1;
+        _status = 'Click $_clickCount appended — press another button.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _status = '$error Press again after the EMSS track is ready.';
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => MoonlightDialog(
+    title: 'Synthetic PCM latency test',
+    icon: Icons.graphic_eq,
+    actions: [
+      MoonlightDialogAction(
+        label: 'Play click',
+        icon: Icons.volume_up,
+        autofocus: true,
+        onPressed: () => unawaited(_playClick('dialog-action')),
+      ),
+      MoonlightDialogAction(
+        label: 'Close',
+        icon: Icons.close,
+        onPressed: widget.onClose,
+      ),
+    ],
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'Record the physical controller sound and TV audio together, then '
+          'measure the gap. A D-pad press is especially easy to identify.',
+        ),
+        const SizedBox(height: 16),
+        Text('Any controller button plays one click, including D-pad buttons.'),
+        const SizedBox(height: 16),
+        Text('Actual pipeline: raw stereo PCM → EMSS → TV audio output'),
+        Text('EMSS mode: ${widget.emssMode}'),
+        const Text('Excluded: Sunshine, network, Opus, Moonlight audio queues'),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            if (_busy)
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              const Icon(Icons.surround_sound, size: 22),
+            const SizedBox(width: 12),
+            Expanded(child: Text(_status)),
+          ],
+        ),
+      ],
+    ),
+  );
 }
 
 final class _HostInput {

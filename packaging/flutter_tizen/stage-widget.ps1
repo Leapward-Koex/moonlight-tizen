@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string] $FlutterBuild = 'flutter_ui/build/web',
+    [string] $FlutterBuild = '',
     [string] $WasmBuild = 'build/codex-wasm-proxy-pthread',
     [string] $Output = 'build/flutter-tizen/widget-standard',
     [switch] $ForceGameMode
@@ -8,6 +8,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+
+if ([string]::IsNullOrWhiteSpace($FlutterBuild)) {
+    $FlutterBuild = if ($ForceGameMode) {
+        'flutter_ui/build/web-force-game-mode'
+    } else {
+        'flutter_ui/build/web'
+    }
+}
 
 function Resolve-WorkspacePath([string] $Path, [switch] $MustExist) {
     $candidate = if ([IO.Path]::IsPathRooted($Path)) {

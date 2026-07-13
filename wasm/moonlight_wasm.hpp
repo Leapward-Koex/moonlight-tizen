@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include <future>
 #include <string>
+#include <vector>
 
 #include <Limelight.h>
 #include <opus_multistream.h>
@@ -100,6 +101,15 @@ enum class AudioBackend {
   NativeEmss
 };
 
+enum class SyntheticAudioTestState {
+  Inactive,
+  Binding,
+  Opening,
+  Ready,
+  Stopping,
+  Failed
+};
+
 struct InputConfiguration {
   std::string controllerLayout = "automatic";
   std::unordered_map<uint32_t, std::string> controllerProfiles;
@@ -134,6 +144,9 @@ class MoonlightInstance {
     bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes);
   std::string ProbeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
   MessageResult StopStream();
+  MessageResult StartSyntheticAudioTest(bool gameMode);
+  MessageResult PlaySyntheticAudioClick(std::string inputLabel);
+  MessageResult StopSyntheticAudioTest();
 
   void STUN(int callbackId);
   void Pair(int callbackId, std::string serverMajorVersion, std::string address, int httpPort, std::string randomNumber);
@@ -249,6 +262,17 @@ class MoonlightInstance {
   private:
     MoonlightInstance* m_Instance;
   };
+  class SyntheticAudioTrackListener
+    : public samsung::wasm::ElementaryMediaTrackListener {
+  public:
+    SyntheticAudioTrackListener(MoonlightInstance* instance);
+    void OnTrackOpen() override;
+    void OnTrackClosed(EmssTrackCloseReason) override;
+    void OnSessionIdChanged(samsung::wasm::SessionId new_session_id) override;
+    void OnAppendError(samsung::wasm::OperationResult result) override;
+  private:
+    MoonlightInstance* m_Instance;
+  };
 
   bool WaitFor(std::condition_variable* variable, const char* waitName, uint32_t timeoutMs, std::function<bool()> condition);
   bool ProbeVideoTrack(const char* mimeType, int width, int height, int redrawRate);
@@ -259,10 +283,14 @@ class MoonlightInstance {
   uint32_t GetStreamAttemptId() const;
   void CompleteStartFailure(uint32_t attemptId, int errorCode, const std::string& reason);
   void ResetMediaStateForStart(uint32_t attemptId);
+  void ConfigureSyntheticAudioTest();
+  void ResetSyntheticAudioTestMedia();
+  void LogEmssAudioClock(const char* context, double audioPts) const;
   void JoinStaleThreadsIfIdle();
   void CompleteStop(uint32_t attemptId, int errorCode, uint64_t stopStartMs);
   static const char* StreamLifecycleName(StreamLifecycle lifecycle);
   static const char* EmssReadyStateName(EmssReadyState state);
+  static const char* EmssLatencyModeName(samsung::wasm::ElementaryMediaStreamSource::LatencyMode mode);
 
   void OpenUrl_private(int callbackId, std::string url, std::string ppk, bool binaryResponse);
   void STUN_private(int callbackId);
@@ -354,13 +382,20 @@ class MoonlightInstance {
   std::atomic<bool> m_VideoStarted;
   std::atomic<samsung::wasm::SessionId> m_AudioSessionId;
   std::atomic<samsung::wasm::SessionId> m_VideoSessionId;
+  std::atomic<SyntheticAudioTestState> m_SyntheticAudioTestState;
+  std::atomic<samsung::wasm::SessionId> m_SyntheticAudioSessionId;
+  uint64_t m_SyntheticAudioSampleCursor;
+  uint32_t m_SyntheticAudioClickCount;
+  std::vector<opus_int16> m_SyntheticAudioClick;
   samsung::html::HTMLMediaElement m_MediaElement;
   std::unique_ptr<samsung::wasm::ElementaryMediaStreamSource> m_Source;
   SourceListener m_SourceListener;
   AudioTrackListener m_AudioTrackListener;
   VideoTrackListener m_VideoTrackListener;
+  SyntheticAudioTrackListener m_SyntheticAudioTrackListener;
   samsung::wasm::ElementaryMediaTrack m_AudioTrack;
   samsung::wasm::ElementaryMediaTrack m_VideoTrack;
+  samsung::wasm::ElementaryMediaTrack m_SyntheticAudioTrack;
   int m_ProbedVideoFormat;
   int m_ProbedVideoWidth;
   int m_ProbedVideoHeight;
@@ -390,6 +425,9 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
 void configureInput(std::string inputConfiguration);
 std::string probeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
 MessageResult stopStream();
+MessageResult startSyntheticAudioTest(bool gameMode);
+MessageResult playSyntheticAudioClick(std::string inputLabel);
+MessageResult stopSyntheticAudioTest();
 
 void toggleStats();
 void stun(int callbackId);

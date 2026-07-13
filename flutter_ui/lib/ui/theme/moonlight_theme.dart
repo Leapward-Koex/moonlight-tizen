@@ -14,6 +14,7 @@ abstract final class MoonlightColors {
   static const textMuted = Color(0xFFC6CAD3);
   static const textBody = Color(0xFFE1E3E9);
   static const cyan = Color(0xFF9EC5FE);
+  static const hostUnpaired = Color(0xFF6F7E91);
   static const onCyan = Color(0xFF003258);
   static const offline = Color(0xFFF44336);
   static const running = Color(0xFF8BC34A);

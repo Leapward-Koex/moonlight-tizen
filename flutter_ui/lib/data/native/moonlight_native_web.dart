@@ -35,6 +35,9 @@ extension type _MoonlightNativeFacade(JSObject _) implements JSObject {
   external JSPromise<JSString> scanLocalSubnet(JSNumber timeoutMs);
   external JSPromise<JSAny?> startStream(JSAny request);
   external JSPromise<JSAny?> stopStream();
+  external JSPromise<JSAny?> startSyntheticAudioTest(JSBoolean gameMode);
+  external JSPromise<JSAny?> playSyntheticAudioClick(JSString inputLabel);
+  external JSPromise<JSAny?> stopSyntheticAudioTest();
   external void recoverStreamSurface();
   external JSPromise<JSAny?> toggleStats();
   external JSPromise<JSAny?> probeVideoCodecSupport(JSAny request);
@@ -111,6 +114,7 @@ final class WebMoonlightNativeRuntime implements MoonlightNativeRuntime {
             'source': event.source,
             'gamepadIndex': event.gamepadIndex,
             'connectedMask': event.connectedMask,
+            'controlIndex': event.data['controlIndex'],
           });
         }
       }
@@ -460,6 +464,60 @@ final class WebMoonlightNativeRuntime implements MoonlightNativeRuntime {
         'error': error.toString(),
       });
       throw MoonlightException('Unable to stop the stream.', cause: error);
+    }
+  }
+
+  @override
+  Future<void> startSyntheticAudioTest({required bool gameMode}) async {
+    logDiagnostic('info', 'native.synthetic_audio.start_requested', {
+      'requestedGameMode': gameMode,
+      'audioPts': 0,
+      'bypasses': const ['sunshine', 'network', 'opus', 'moonlight-queues'],
+    });
+    try {
+      await _native.startSyntheticAudioTest(gameMode.toJS).toDart;
+      logDiagnostic('info', 'native.synthetic_audio.start_accepted', {
+        'requestedGameMode': gameMode,
+      });
+    } catch (error) {
+      logDiagnostic('error', 'native.synthetic_audio.start_failed', {
+        'errorType': error.runtimeType.toString(),
+        'error': error.toString(),
+      });
+      throw MoonlightException(
+        'Unable to initialize the synthetic PCM audio test.',
+        cause: error,
+      );
+    }
+  }
+
+  @override
+  Future<int> playSyntheticAudioClick(String inputLabel) async {
+    try {
+      final result = await _native
+          .playSyntheticAudioClick(inputLabel.toJS)
+          .toDart;
+      final value = result?.dartify();
+      final clickNumber = value is num ? value.toInt() : int.tryParse('$value');
+      return clickNumber ?? 0;
+    } catch (error) {
+      throw MoonlightException(
+        'Unable to play the synthetic PCM click.',
+        cause: error,
+      );
+    }
+  }
+
+  @override
+  Future<void> stopSyntheticAudioTest() async {
+    try {
+      await _native.stopSyntheticAudioTest().toDart;
+      logDiagnostic('info', 'native.synthetic_audio.stopped');
+    } catch (error) {
+      logDiagnostic('warning', 'native.synthetic_audio.stop_failed', {
+        'errorType': error.runtimeType.toString(),
+        'error': error.toString(),
+      });
     }
   }
 

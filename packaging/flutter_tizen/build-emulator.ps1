@@ -15,6 +15,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $wasmBuild = Join-Path $workspace 'build\codex-wasm-proxy-pthread'
+$flutterBuild = Join-Path $workspace $(if ($ForceGameMode) { 'flutter_ui\build\web-force-game-mode' } else { 'flutter_ui\build\web' })
 $stage = Join-Path $workspace $(if ($ForceGameMode) { 'build\flutter-tizen\widget-force-game-mode' } else { 'build\flutter-tizen\widget-standard' })
 $package = Join-Path $workspace $(if ($ForceGameMode) { 'build\flutter-tizen\MoonlightFlutter-ForceGM.wgt' } else { 'build\flutter-tizen\MoonlightFlutter.wgt' })
 
@@ -41,14 +42,27 @@ if (-not $SkipFlutter) {
     $env:FLUTTER_SUPPRESS_ANALYTICS = 'true'
     Push-Location (Join-Path $workspace 'flutter_ui')
     try {
-        & $FlutterPath build web --release -t lib/main.dart --csp --no-web-resources-cdn --no-wasm-dry-run --pwa-strategy=none
+        $flutterArgs = @(
+            'build', 'web',
+            '--release',
+            '-t', 'lib/main.dart',
+            '--output', $flutterBuild,
+            '--csp',
+            '--no-web-resources-cdn',
+            '--no-wasm-dry-run',
+            '--pwa-strategy=none'
+        )
+        if ($ForceGameMode) {
+            $flutterArgs += '--dart-define=MOONLIGHT_FORCE_GAME_MODE=true'
+        }
+        & $FlutterPath @flutterArgs
         if ($LASTEXITCODE -ne 0) { throw "Flutter web build failed with exit code $LASTEXITCODE." }
     } finally {
         Pop-Location
     }
 }
 
-& (Join-Path $PSScriptRoot 'stage-widget.ps1') -Output $stage -ForceGameMode:$ForceGameMode
+& (Join-Path $PSScriptRoot 'stage-widget.ps1') -FlutterBuild $flutterBuild -Output $stage -ForceGameMode:$ForceGameMode
 if ($EnableDebugBridge) {
     $bridgeArgs = @{ Enable = $true; ProjectRoot = $stage }
     if (-not [string]::IsNullOrWhiteSpace($DebugBridgeHostIp)) {
@@ -65,6 +79,7 @@ if (-not $NoDeploy) {
 
 Write-Host "Moonlight Flutter emulator workflow completed."
 Write-Host "Package: $package"
+Write-Host "Flutter build: $flutterBuild"
 if ($EnableDebugBridge) {
     Write-Host 'Debug bridge config enabled in the staged widget.'
 }

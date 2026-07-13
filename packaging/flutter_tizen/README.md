@@ -25,9 +25,11 @@ To run the phases separately:
 ```
 
 All three commands agree on `build/flutter-tizen/widget-standard` and
-`build/flutter-tizen/MoonlightFlutter.wgt`. Use `-ForceGameMode` with the build
-or staging command for the alternate manifest. Staging validates the Flutter
-shell, native bridge, WebAssembly artifacts, and isolated Tizen identity.
+`build/flutter-tizen/MoonlightFlutter.wgt`. `-ForceGameMode` uses the separate
+`flutter_ui/build/web-force-game-mode` Flutter output, compiles Game Mode on,
+hides its setting, and stages the alternate manifest and WGT. Staging validates
+the Flutter shell, native bridge, WebAssembly artifacts, and isolated Tizen
+identity.
 
 Signing always uses an explicit profile file outside source control. Generated
 WGTs, signatures, tokens, and password files belong under ignored `build/`

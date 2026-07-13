@@ -1,4 +1,5 @@
 import 'app_settings.dart';
+import 'build_variant.dart';
 import 'host_models.dart';
 import 'json_utils.dart';
 import 'platform_capabilities.dart';
@@ -165,7 +166,7 @@ final class StreamRequest {
     videoCodec: settings.videoCodec,
     hdr: settings.hdr,
     fullColorRange: settings.fullColorRange,
-    gameMode: settings.gameMode,
+    gameMode: kForceGameMode || settings.gameMode,
     disableConnectionWarnings: settings.disableConnectionWarnings,
     showPerformanceStats: settings.showPerformanceStats,
     disabledCodecMimeTypes: List.unmodifiable(disabledCodecMimeTypes),

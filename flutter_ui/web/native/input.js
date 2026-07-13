@@ -318,6 +318,13 @@
           if (current.buttons[buttonIndex] === previous.buttons[buttonIndex]) {
             continue;
           }
+          emit({
+            type: 'controller-button',
+            phase: current.buttons[buttonIndex] ? 'pressed' : 'released',
+            source: 'gamepad',
+            gamepadIndex: gamepad.index,
+            controlIndex: buttonIndex
+          });
           var action = buttonAction(buttonIndex);
           if (!action) {
             continue;

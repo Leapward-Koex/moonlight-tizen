@@ -166,6 +166,9 @@ for (const method of [
   'scanLocalSubnet',
   'startStream',
   'stopStream',
+  'startSyntheticAudioTest',
+  'playSyntheticAudioClick',
+  'stopSyntheticAudioTest',
   'recoverStreamSurface',
   'toggleStats',
   'probeVideoCodecSupport',
@@ -287,6 +290,18 @@ const fakeModule = {
     return { type: 'resolve', ret: 42 };
   },
   stopStream() { calls.push(['stopStream']); return { type: 'resolve', ret: undefined }; },
+  startSyntheticAudioTest(...args) {
+    calls.push(['startSyntheticAudioTest', ...args]);
+    return { type: 'resolve', ret: undefined };
+  },
+  playSyntheticAudioClick(...args) {
+    calls.push(['playSyntheticAudioClick', ...args]);
+    return { type: 'resolve', ret: 3 };
+  },
+  stopSyntheticAudioTest() {
+    calls.push(['stopSyntheticAudioTest']);
+    return { type: 'resolve', ret: undefined };
+  },
   toggleStats() { calls.push(['toggleStats']); },
   probeVideoCodecSupport(...args) {
     calls.push(['probeVideoCodecSupport', ...args]);
@@ -305,6 +320,17 @@ assert.deepEqual([...await bridge.openBinary('https://host/boxart', 'ppk')], [1,
 assert.equal(await bridge.pair('7', '192.0.2.10', 47989, '1234', 'unique-id'), 'pin-key');
 assert.equal(await bridge.stun(), '198.51.100.4');
 assert.equal(await bridge.wakeOnLan('00:11:22:33:44:55'), true);
+await bridge.startSyntheticAudioTest(true);
+assert.equal(await bridge.playSyntheticAudioClick('gamepad:2:button:12'), 3);
+await bridge.stopSyntheticAudioTest();
+assert.deepEqual(calls.find((call) => call[0] === 'startSyntheticAudioTest'), [
+  'startSyntheticAudioTest',
+  true
+]);
+assert.deepEqual(calls.find((call) => call[0] === 'playSyntheticAudioClick'), [
+  'playSyntheticAudioClick',
+  'gamepad:2:button:12'
+]);
 
 const originalFetch = globalThis.fetch;
 globalThis.MoonlightTizenPlatform.getIpAddress = () => '192.0.2.25';

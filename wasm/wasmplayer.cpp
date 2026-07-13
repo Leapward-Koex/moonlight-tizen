@@ -25,6 +25,8 @@ using std::chrono_literals::operator""s;
 using std::chrono_literals::operator""ms;
 using EmssReadyState = samsung::wasm::ElementaryMediaStreamSource::ReadyState;
 using EmssOperationResult = samsung::wasm::OperationResult;
+using EmssLatencyMode = samsung::wasm::ElementaryMediaStreamSource::LatencyMode;
+using EmssRenderingMode = samsung::wasm::ElementaryMediaStreamSource::RenderingMode;
 using EmssAsyncResult = samsung::wasm::OperationResult;
 using HTMLAsyncResult = samsung::wasm::OperationResult;
 using TimeStamp = samsung::wasm::Seconds;
@@ -427,9 +429,14 @@ void MoonlightInstance::SourceListener::OnSourceOpenPending() {
 
 void MoonlightInstance::SourceListener::OnSourceClosed() {
   ClLogMessage("EMSS::OnClosed (source detached/closed)\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_EmssReadyState = EmssReadyState::kClosed;
-  m_Instance->m_EmssStateChanged.notify_all();
+  {
+    std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
+    m_Instance->m_EmssReadyState = EmssReadyState::kClosed;
+    m_Instance->m_EmssStateChanged.notify_all();
+  }
+  if (m_Instance->m_SyntheticAudioTestState.load() == SyntheticAudioTestState::Binding) {
+    m_Instance->ConfigureSyntheticAudioTest();
+  }
 }
 
 MoonlightInstance::VideoTrackListener::VideoTrackListener(
@@ -491,6 +498,296 @@ void MoonlightInstance::AudioTrackListener::OnSessionIdChanged(samsung::wasm::Se
 void MoonlightInstance::AudioTrackListener::OnAppendError(samsung::wasm::OperationResult result) {
   ClLogMessage("AUDIO ElementaryMediaTrack::OnAppendError: result=%d, sessionId=%u\n",
     static_cast<int>(result), static_cast<unsigned int>(m_Instance->m_AudioSessionId.load()));
+}
+
+MoonlightInstance::SyntheticAudioTrackListener::SyntheticAudioTrackListener(
+  MoonlightInstance* instance
+) : m_Instance(instance) {}
+
+void MoonlightInstance::SyntheticAudioTrackListener::OnTrackOpen() {
+  if (m_Instance->m_SyntheticAudioTestState.load() != SyntheticAudioTestState::Opening) {
+    ClLogMessage("Ignoring stale synthetic PCM OnTrackOpen callback\n");
+    return;
+  }
+  ClLogMessage("SYNTHETIC AUDIO ElementaryMediaTrack::OnTrackOpen (sessionId=%u)\n",
+    static_cast<unsigned int>(m_Instance->m_SyntheticAudioSessionId.load()));
+  m_Instance->m_SyntheticAudioTestState.store(SyntheticAudioTestState::Ready);
+  m_Instance->LogEmssAudioClock(
+    "synthetic-dialog-ready",
+    static_cast<double>(m_Instance->m_SyntheticAudioSampleCursor) / 48000.0);
+}
+
+void MoonlightInstance::SyntheticAudioTrackListener::OnTrackClosed(
+  samsung::wasm::ElementaryMediaTrack::CloseReason reason) {
+  ClLogMessage("SYNTHETIC AUDIO ElementaryMediaTrack::OnTrackClosed (reason=%d, sessionId=%u)\n",
+    static_cast<int>(reason),
+    static_cast<unsigned int>(m_Instance->m_SyntheticAudioSessionId.load()));
+  SyntheticAudioTestState state = m_Instance->m_SyntheticAudioTestState.load();
+  if (state == SyntheticAudioTestState::Opening || state == SyntheticAudioTestState::Ready) {
+    m_Instance->m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
+  }
+}
+
+void MoonlightInstance::SyntheticAudioTrackListener::OnSessionIdChanged(
+  samsung::wasm::SessionId newSessionId) {
+  ClLogMessage("SYNTHETIC AUDIO ElementaryMediaTrack::OnSessionIdChanged: old=%u, new=%u\n",
+    static_cast<unsigned int>(m_Instance->m_SyntheticAudioSessionId.load()),
+    static_cast<unsigned int>(newSessionId));
+  m_Instance->m_SyntheticAudioSessionId.store(newSessionId);
+}
+
+void MoonlightInstance::SyntheticAudioTrackListener::OnAppendError(
+  samsung::wasm::OperationResult result) {
+  ClLogMessage("SYNTHETIC AUDIO ElementaryMediaTrack::OnAppendError: result=%d, sessionId=%u\n",
+    static_cast<int>(result),
+    static_cast<unsigned int>(m_Instance->m_SyntheticAudioSessionId.load()));
+}
+
+const char* MoonlightInstance::EmssLatencyModeName(
+  samsung::wasm::ElementaryMediaStreamSource::LatencyMode mode) {
+  switch (mode) {
+    case samsung::wasm::ElementaryMediaStreamSource::LatencyMode::kNormal:
+      return "normal";
+    case samsung::wasm::ElementaryMediaStreamSource::LatencyMode::kLow:
+      return "low";
+    case samsung::wasm::ElementaryMediaStreamSource::LatencyMode::kUltraLow:
+      return "ultra-low";
+    default:
+      return "unknown";
+  }
+}
+
+void MoonlightInstance::LogEmssAudioClock(const char* context, double audioPts) const {
+  const char* actualModeName = "unavailable";
+  int modeResultCode = -1;
+  if (m_Source) {
+    auto modeResult = m_Source->GetLatencyMode();
+    modeResultCode = static_cast<int>(modeResult.operation_result);
+    if (modeResult) {
+      actualModeName = EmssLatencyModeName(*modeResult);
+    }
+  }
+
+  auto mediaTimeResult = m_MediaElement.GetCurrentTime();
+  if (mediaTimeResult) {
+    ClLogMessage(
+      "EMSS audio clock: context=%s, actualMode=%s, audioPts=%.6f, mediaTime=%.6f, modeResult=%d\n",
+      context, actualModeName, audioPts, (*mediaTimeResult).count(), modeResultCode);
+  } else {
+    ClLogMessage(
+      "EMSS audio clock: context=%s, actualMode=%s, audioPts=%.6f, mediaTime=unavailable, modeResult=%d, mediaTimeResult=%d\n",
+      context, actualModeName, audioPts, modeResultCode,
+      static_cast<int>(mediaTimeResult.operation_result));
+  }
+}
+
+void MoonlightInstance::ResetSyntheticAudioTestMedia() {
+  m_SyntheticAudioTestState.store(SyntheticAudioTestState::Stopping);
+  m_MediaElement.Pause();
+  if (m_Source) {
+    m_MediaElement.SetSrc(nullptr);
+  }
+  m_AudioTrack = samsung::wasm::ElementaryMediaTrack();
+  m_VideoTrack = samsung::wasm::ElementaryMediaTrack();
+  m_SyntheticAudioTrack = samsung::wasm::ElementaryMediaTrack();
+  m_Source.reset();
+  m_AudioStarted.store(false);
+  m_VideoStarted.store(false);
+  m_AudioSessionId.store(0);
+  m_VideoSessionId.store(0);
+  m_SyntheticAudioSessionId.store(0);
+  m_EmssReadyState = EmssReadyState::kDetached;
+  m_SyntheticAudioSampleCursor = 0;
+  m_SyntheticAudioClickCount = 0;
+  m_SyntheticAudioTestState.store(SyntheticAudioTestState::Inactive);
+}
+
+MessageResult MoonlightInstance::StartSyntheticAudioTest(bool gameMode) {
+  JoinStaleThreadsIfIdle();
+  if (GetLifecycle() != StreamLifecycle::Idle) {
+    return MessageResult::Reject(emscripten::val(
+      std::string("Synthetic audio test is unavailable while a stream is active.")));
+  }
+
+  ResetSyntheticAudioTestMedia();
+  m_SyntheticAudioTestState.store(SyntheticAudioTestState::Binding);
+
+  constexpr int kSampleRate = 48000;
+  constexpr int kChannelCount = 2;
+  constexpr int kPacketFrames = 960;
+  constexpr int kNoiseFrames = 240;
+  m_SyntheticAudioClick.assign(kPacketFrames * kChannelCount, 0);
+  uint32_t noise = 0x13579bdfu;
+  for (int frame = 0; frame < kNoiseFrames; frame++) {
+    noise ^= noise << 13;
+    noise ^= noise >> 17;
+    noise ^= noise << 5;
+    const int centered = static_cast<int>(noise & 0xffffu) - 32768;
+    const int sample = static_cast<int>(
+      (static_cast<int64_t>(centered) * (kNoiseFrames - frame) * 4) /
+      (kNoiseFrames * 5));
+    m_SyntheticAudioClick[frame * 2] = static_cast<opus_int16>(sample);
+    m_SyntheticAudioClick[frame * 2 + 1] = static_cast<opus_int16>(sample);
+  }
+
+  const EmssLatencyMode selectedMode = gameMode
+    ? EmssLatencyMode::kUltraLow
+    : EmssLatencyMode::kLow;
+  m_Source = std::make_unique<samsung::wasm::ElementaryMediaStreamSource>(
+    selectedMode,
+    EmssRenderingMode::kMediaElement);
+  if (!m_Source->IsValid()) {
+    m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
+    return MessageResult::Reject(emscripten::val(
+      std::string("Unable to create the synthetic PCM EMSS source.")));
+  }
+  auto listenerResult = m_Source->SetListener(&m_SourceListener);
+  if (!listenerResult) {
+    m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
+    return MessageResult::Reject(emscripten::val(
+      std::string("Unable to attach the synthetic PCM EMSS listener.")));
+  }
+
+  // This is deliberately emitted before SetSrc(), so it precedes the Flutter
+  // dialog and records the mode actually reported by the EMSS object.
+  LogEmssAudioClock("before-synthetic-dialog", 0.0);
+  auto sourceResult = m_MediaElement.SetSrc(m_Source.get());
+  if (!sourceResult) {
+    m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
+    return MessageResult::Reject(emscripten::val(
+      std::string("Unable to bind the synthetic PCM EMSS source.")));
+  }
+
+  ClLogMessage(
+    "Synthetic PCM click test requested: gameMode=%d, sampleRate=%d, channels=%d, packetFrames=%d, networkBypassed=1, opusBypassed=1, moonlightQueuesBypassed=1\n",
+    gameMode, kSampleRate, kChannelCount, kPacketFrames);
+  return MessageResult::Resolve();
+}
+
+void MoonlightInstance::ConfigureSyntheticAudioTest() {
+  if (m_SyntheticAudioTestState.load() != SyntheticAudioTestState::Binding || !m_Source) {
+    return;
+  }
+
+  constexpr int kSampleRate = 48000;
+  auto trackResult = m_Source->AddTrack(
+    samsung::wasm::ElementaryAudioTrackConfig {
+      "audio/webm; codecs=\"pcm\"",
+      {},
+      samsung::wasm::DecodingMode::kHardware,
+      samsung::wasm::SampleFormat::kS16,
+      samsung::wasm::ChannelLayout::kStereo,
+      kSampleRate,
+    });
+  if (!trackResult) {
+    ClLogMessage("Synthetic PCM AddTrack failed: result=%d\n",
+      static_cast<int>(trackResult.operation_result));
+    m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
+    return;
+  }
+
+  m_SyntheticAudioTrack = std::move(*trackResult);
+  auto listenerResult = m_SyntheticAudioTrack.SetListener(&m_SyntheticAudioTrackListener);
+  if (!listenerResult) {
+    ClLogMessage("Synthetic PCM track listener failed: result=%d\n",
+      static_cast<int>(listenerResult.operation_result));
+    m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
+    return;
+  }
+
+  m_SyntheticAudioTestState.store(SyntheticAudioTestState::Opening);
+  auto openResult = m_Source->Open([this](EmssOperationResult result) {
+    if (m_SyntheticAudioTestState.load() != SyntheticAudioTestState::Opening) {
+      ClLogMessage("Ignoring stale synthetic PCM Open callback: result=%d\n",
+        static_cast<int>(result));
+      return;
+    }
+    if (result != EmssOperationResult::kSuccess) {
+      ClLogMessage("Synthetic PCM source Open callback failed: result=%d\n",
+        static_cast<int>(result));
+      m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
+      return;
+    }
+    ClLogMessage("Synthetic PCM source opened; requesting playback\n");
+    auto playResult = m_MediaElement.Play([this](EmssOperationResult playResult) {
+      SyntheticAudioTestState state = m_SyntheticAudioTestState.load();
+      if (state != SyntheticAudioTestState::Opening && state != SyntheticAudioTestState::Ready) {
+        ClLogMessage("Ignoring stale synthetic PCM Play callback: result=%d\n",
+          static_cast<int>(playResult));
+        return;
+      }
+      ClLogMessage("Synthetic PCM Play callback: result=%d, ready=%d\n",
+        static_cast<int>(playResult),
+        m_SyntheticAudioTestState.load() == SyntheticAudioTestState::Ready);
+      if (playResult != EmssOperationResult::kSuccess) {
+        m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
+      }
+    });
+    if (!playResult) {
+      ClLogMessage("Synthetic PCM Play request failed: result=%d\n",
+        static_cast<int>(playResult.operation_result));
+      m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
+    }
+  });
+  if (!openResult) {
+    ClLogMessage("Synthetic PCM Open request failed: result=%d\n",
+      static_cast<int>(openResult.operation_result));
+    m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
+  }
+}
+
+MessageResult MoonlightInstance::PlaySyntheticAudioClick(std::string inputLabel) {
+  SyntheticAudioTestState state = m_SyntheticAudioTestState.load();
+  if (state != SyntheticAudioTestState::Ready) {
+    const char* reason = state == SyntheticAudioTestState::Failed
+      ? "Synthetic PCM audio initialization failed."
+      : "Synthetic PCM audio is still initializing; press again.";
+    return MessageResult::Reject(emscripten::val(std::string(reason)));
+  }
+
+  constexpr int kSampleRate = 48000;
+  constexpr int kPacketFrames = 960;
+  const double audioPts = static_cast<double>(m_SyntheticAudioSampleCursor) / kSampleRate;
+  const uint32_t clickNumber = ++m_SyntheticAudioClickCount;
+  LogEmssAudioClock("synthetic-click-before-append", audioPts);
+  ClLogMessage(
+    "Synthetic PCM click append: click=%u, input=%s, wallClockMs=%llu, audioPts=%.6f, sessionId=%u, frames=%d\n",
+    clickNumber, inputLabel.c_str(), static_cast<unsigned long long>(LiGetMillis()),
+    audioPts, static_cast<unsigned int>(m_SyntheticAudioSessionId.load()), kPacketFrames);
+
+  samsung::wasm::ElementaryMediaPacket packet {
+    TimeStamp(audioPts),
+    TimeStamp(audioPts),
+    TimeStamp(static_cast<double>(kPacketFrames) / kSampleRate),
+    true,
+    m_SyntheticAudioClick.size() * sizeof(opus_int16),
+    m_SyntheticAudioClick.data(),
+    0,
+    0,
+    0,
+    0,
+    m_SyntheticAudioSessionId.load(),
+  };
+  auto result = m_SyntheticAudioTrack.AppendPacketAsync(packet);
+  if (!result) {
+    ClLogMessage("Synthetic PCM click append failed: click=%u, result=%d\n",
+      clickNumber, static_cast<int>(result.operation_result));
+    return MessageResult::Reject(emscripten::val(
+      std::string("The TV rejected the synthetic PCM click packet.")));
+  }
+  m_SyntheticAudioSampleCursor += kPacketFrames;
+  return MessageResult::Resolve(emscripten::val(clickNumber));
+}
+
+MessageResult MoonlightInstance::StopSyntheticAudioTest() {
+  SyntheticAudioTestState state = m_SyntheticAudioTestState.load();
+  if (state == SyntheticAudioTestState::Inactive) {
+    return MessageResult::Resolve();
+  }
+  ClLogMessage("Stopping synthetic PCM click test: state=%d, clicks=%u\n",
+    static_cast<int>(state), m_SyntheticAudioClickCount);
+  ResetSyntheticAudioTestMedia();
+  return MessageResult::Resolve();
 }
 
 void MoonlightInstance::DidChangeFocus(bool got_focus) {

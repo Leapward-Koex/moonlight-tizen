@@ -97,6 +97,12 @@ assert.equal(events.at(-1).source, 'stream-fatal');
 animationFrame(); // Capture initial connected state.
 gamepads[2].buttons[0] = { pressed: true };
 animationFrame();
+assert.ok(events.some((event) =>
+  event.type === 'controller-button' &&
+  event.phase === 'pressed' &&
+  event.gamepadIndex === 2 &&
+  event.controlIndex === 0
+), 'every controller button edge must be exposed to Flutter diagnostics');
 assert.equal(events.at(-1).action, 'accept');
 assert.equal(events.at(-1).gamepadIndex, 2);
 
