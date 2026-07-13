@@ -1571,7 +1571,54 @@ bool MoonlightInstance::ProbeVideoTrack(const char* mimeType, int width, int hei
   return supported;
 }
 
-std::string MoonlightInstance::ProbeVideoCodecSupport(
+void MoonlightInstance::ProbeVideoCodecSupport(
+  int callbackId,
+  std::string width,
+  std::string height,
+  std::string fps,
+  bool hdrMode,
+  int serverCodecModeSupport,
+  std::string preferredCodec,
+  std::string disabledMimeTypes) {
+  // EMSS source state changes are delivered through the browser main thread.
+  // Running the waits from an embind call on that thread prevents OnSourceClosed
+  // from being delivered, making every candidate time out and freezing Flutter.
+  m_Dispatcher.post_job(std::bind(
+    &MoonlightInstance::ProbeVideoCodecSupportPrivate,
+    this,
+    callbackId,
+    std::move(width),
+    std::move(height),
+    std::move(fps),
+    hdrMode,
+    serverCodecModeSupport,
+    std::move(preferredCodec),
+    std::move(disabledMimeTypes)), false);
+}
+
+void MoonlightInstance::ProbeVideoCodecSupportPrivate(
+  int callbackId,
+  std::string width,
+  std::string height,
+  std::string fps,
+  bool hdrMode,
+  int serverCodecModeSupport,
+  std::string preferredCodec,
+  std::string disabledMimeTypes) {
+  try {
+    PostPromiseMessage(callbackId, "resolve", ProbeVideoCodecSupportSync(
+      std::move(width), std::move(height), std::move(fps), hdrMode,
+      serverCodecModeSupport, std::move(preferredCodec), std::move(disabledMimeTypes)));
+  } catch (const std::exception& error) {
+    ClLogMessage("Video codec probe failed with exception: %s\n", error.what());
+    PostPromiseMessage(callbackId, "reject", error.what());
+  } catch (...) {
+    ClLogMessage("Video codec probe failed with unknown exception\n");
+    PostPromiseMessage(callbackId, "reject", "Video codec probe failed with an unknown exception.");
+  }
+}
+
+std::string MoonlightInstance::ProbeVideoCodecSupportSync(
   std::string width,
   std::string height,
   std::string fps,

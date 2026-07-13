@@ -4,7 +4,6 @@ import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/moonlight_app.dart';
@@ -73,7 +72,7 @@ Future<void> main() async {
       },
     );
     native.runtime.inputEvents.listen(
-      (event) => _handleNativeInput(native.runtime, event),
+      (event) => _handleNativeStreamShortcut(native.runtime, event),
     );
 
     runApp(
@@ -250,10 +249,13 @@ Future<ClientIdentity?> _readIdentity(PersistentStateStore storage) async {
   }
 }
 
-void _handleNativeInput(
+void _handleNativeStreamShortcut(
   MoonlightNativeRuntime runtime,
   NativeInputEvent event,
 ) {
+  // UI navigation actions are consumed by MoonlightFlutterApp's
+  // navigationActions stream. Synthesizing matching keyboard events here
+  // would activate the focused control a second time.
   if (event.type != 'action' || event.phase == 'released') return;
   if (event.action == 'stop') {
     unawaited(runtime.stopStream());
@@ -261,31 +263,7 @@ void _handleNativeInput(
   }
   if (event.action == 'toggleStats') {
     unawaited(runtime.toggleStats());
-    return;
   }
-  final keys = switch (event.action) {
-    'up' => (PhysicalKeyboardKey.arrowUp, LogicalKeyboardKey.arrowUp),
-    'down' => (PhysicalKeyboardKey.arrowDown, LogicalKeyboardKey.arrowDown),
-    'left' => (PhysicalKeyboardKey.arrowLeft, LogicalKeyboardKey.arrowLeft),
-    'right' => (PhysicalKeyboardKey.arrowRight, LogicalKeyboardKey.arrowRight),
-    'accept' => (PhysicalKeyboardKey.enter, LogicalKeyboardKey.enter),
-    'back' => (PhysicalKeyboardKey.escape, LogicalKeyboardKey.escape),
-    _ => null,
-  };
-  if (keys == null) return;
-  final timeStamp = Duration(
-    microseconds: DateTime.now().microsecondsSinceEpoch,
-  );
-  HardwareKeyboard.instance.handleKeyEvent(
-    KeyDownEvent(
-      physicalKey: keys.$1,
-      logicalKey: keys.$2,
-      timeStamp: timeStamp,
-    ),
-  );
-  HardwareKeyboard.instance.handleKeyEvent(
-    KeyUpEvent(physicalKey: keys.$1, logicalKey: keys.$2, timeStamp: timeStamp),
-  );
 }
 
 class _StartupFailureApp extends StatelessWidget {

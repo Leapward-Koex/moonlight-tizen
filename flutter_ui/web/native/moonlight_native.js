@@ -934,7 +934,7 @@
   }
 
   function probeVideoCodecSupport(request) {
-    return callRaw('probeVideoCodecSupport', codecProbeToArgs(request)).then(function(value) {
+    return callAsync('probeVideoCodecSupport', codecProbeToArgs(request)).then(function(value) {
       if (typeof value !== 'string') return value;
       return parseJsonPayload(value) || { raw: value };
     });

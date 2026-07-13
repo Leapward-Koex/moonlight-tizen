@@ -218,6 +218,75 @@ void main() {
     expect(activated, 'second');
   });
 
+  testWidgets('offscreen TV focus scrolls smoothly with trailing space', (
+    tester,
+  ) async {
+    setViewport(tester, const Size(800, 300));
+    final controller = ScrollController();
+    final nodes = List.generate(8, (index) => FocusNode(debugLabel: '$index'));
+    addTearDown(() {
+      controller.dispose();
+      for (final node in nodes) {
+        node.dispose();
+      }
+    });
+
+    await tester.pumpWidget(
+      themed(
+        Scaffold(
+          body: Align(
+            alignment: Alignment.topCenter,
+            child: SizedBox(
+              key: const Key('focus-scroll-viewport'),
+              height: 240,
+              child: SingleChildScrollView(
+                controller: controller,
+                padding: const EdgeInsets.only(bottom: 100),
+                child: Column(
+                  children: List.generate(
+                    nodes.length,
+                    (index) => SizedBox(
+                      key: Key('focus-item-$index'),
+                      height: 64,
+                      child: TvFocusable(
+                        focusNode: nodes[index],
+                        autofocus: index == 0,
+                        onActivate: () {},
+                        builder: (context, focused) => Text('Item $index'),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    nodes[1].requestFocus();
+    await tester.pumpAndSettle();
+    expect(controller.offset, 0, reason: 'visible controls should stay put');
+
+    nodes[7].requestFocus();
+    await tester.pump();
+    expect(controller.offset, 0, reason: 'focus scrolling should animate');
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(controller.offset, greaterThan(0));
+    expect(controller.offset, lessThan(controller.position.maxScrollExtent));
+    await tester.pumpAndSettle();
+
+    final viewportBottom = tester
+        .getBottomLeft(find.byKey(const Key('focus-scroll-viewport')))
+        .dy;
+    final focusedBottom = tester
+        .getBottomLeft(find.byKey(const Key('focus-item-7')))
+        .dy;
+    expect(viewportBottom - focusedBottom, greaterThan(24));
+  });
+
   testWidgets('dialog actions remain activatable by normalized gamepad input', (
     tester,
   ) async {

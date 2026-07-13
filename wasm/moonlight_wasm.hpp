@@ -142,7 +142,7 @@ class MoonlightInstance {
     bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
     std::string audioBackend, std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
     bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes);
-  std::string ProbeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
+  void ProbeVideoCodecSupport(int callbackId, std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
   MessageResult StopStream();
   MessageResult StartSyntheticAudioTest(bool gameMode);
   MessageResult PlaySyntheticAudioClick(std::string inputLabel);
@@ -276,6 +276,8 @@ class MoonlightInstance {
 
   bool WaitFor(std::condition_variable* variable, const char* waitName, uint32_t timeoutMs, std::function<bool()> condition);
   bool ProbeVideoTrack(const char* mimeType, int width, int height, int redrawRate);
+  std::string ProbeVideoCodecSupportSync(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
+  void ProbeVideoCodecSupportPrivate(int callbackId, std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
   bool TrySetLifecycle(StreamLifecycle expected, StreamLifecycle desired, const char* reason);
   void SetLifecycle(StreamLifecycle lifecycle, const char* reason);
   StreamLifecycle GetLifecycle() const;
@@ -423,7 +425,7 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
   std::string audioBackend, std::string audioConfig, int audioPacketDuration, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats, std::string disabledVideoMimeTypes);
 void configureInput(std::string inputConfiguration);
-std::string probeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
+void probeVideoCodecSupport(int callbackId, std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes);
 MessageResult stopStream();
 MessageResult startSyntheticAudioTest(bool gameMode);
 MessageResult playSyntheticAudioClick(std::string inputLabel);

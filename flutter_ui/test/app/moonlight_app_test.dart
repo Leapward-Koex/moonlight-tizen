@@ -77,6 +77,50 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('normalized controller accept toggles a focused setting once', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final bundle = await createFakeOverrideBundle(const FakeStateSeed());
+    final navigation = StreamController<String>.broadcast(sync: true);
+    addTearDown(navigation.close);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: bundle.overrides,
+        child: _testApp(navigationActions: navigation.stream),
+      ),
+    );
+    await tester.pumpAndSettle();
+    tester
+        .widget<TvIconButton>(find.byKey(const ValueKey('header-settings')))
+        .onPressed();
+    await tester.pumpAndSettle();
+
+    final toggle = find.byType(Switch);
+    final toggleFocus = find.ancestor(of: toggle, matching: find.byType(Focus));
+    tester.widget<Focus>(toggleFocus.first).focusNode?.requestFocus();
+    await tester.pumpAndSettle();
+
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'Balance video latency and smoothness with frame pacing, off',
+    );
+    expect(tester.widget<Switch>(toggle).value, isFalse);
+
+    navigation.add('accept');
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<Switch>(toggle).value, isTrue);
+
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('only initial discovery displays the hosts loading bar', (
     tester,
   ) async {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../theme/moonlight_theme.dart';
@@ -63,6 +64,9 @@ class TvFocusable extends StatefulWidget {
 }
 
 class _TvFocusableState extends State<TvFocusable> {
+  static const _focusScrollDuration = Duration(milliseconds: 220);
+  static const _focusScrollAlignment = 0.8;
+
   late FocusNode _focusNode;
   late bool _ownsFocusNode;
   bool _focused = false;
@@ -158,6 +162,45 @@ class _TvFocusableState extends State<TvFocusable> {
     return KeyEventResult.ignored;
   }
 
+  void _ensureComfortablyVisible() {
+    final object = context.findRenderObject();
+    final scrollable = Scrollable.maybeOf(context);
+    if (object == null || scrollable == null) return;
+
+    final viewport = RenderAbstractViewport.maybeOf(object);
+    if (viewport == null) return;
+
+    final position = scrollable.position;
+    final leadingOffset = viewport
+        .getOffsetToReveal(object, 0, axis: position.axis)
+        .offset
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    final trailingOffset = viewport
+        .getOffsetToReveal(object, 1, axis: position.axis)
+        .offset
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    final visibleFrom = leadingOffset < trailingOffset
+        ? leadingOffset
+        : trailingOffset;
+    final visibleThrough = leadingOffset > trailingOffset
+        ? leadingOffset
+        : trailingOffset;
+
+    // Do not reposition controls that are already fully visible. When focus
+    // reaches an offscreen control, use an explicit trailing-biased alignment
+    // so it arrives with context below it instead of hugging the viewport edge.
+    if (position.pixels >= visibleFrom && position.pixels <= visibleThrough) {
+      return;
+    }
+    Scrollable.ensureVisible(
+      context,
+      duration: _focusScrollDuration,
+      curve: Curves.easeOutCubic,
+      alignment: _focusScrollAlignment,
+      alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final focused = _focused && widget.enabled;
@@ -183,12 +226,7 @@ class _TvFocusableState extends State<TvFocusable> {
           onFocusChange: (value) {
             if (_focused != value) setState(() => _focused = value);
             if (value) {
-              Scrollable.ensureVisible(
-                context,
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOut,
-                alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
-              );
+              _ensureComfortablyVisible();
             }
           },
           onKeyEvent: _handleKeyEvent,

@@ -856,10 +856,11 @@ void configureInput(std::string inputConfiguration) {
   g_Instance->ConfigureInput(inputConfiguration);
 }
 
-std::string probeVideoCodecSupport(std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes) {
+void probeVideoCodecSupport(int callbackId, std::string width, std::string height, std::string fps, bool hdrMode, int serverCodecModeSupport, std::string preferredCodec, std::string disabledMimeTypes) {
   MoonlightInstance::ClLogMessage("JS bridge invoked probeVideoCodecSupport: width=%s, height=%s, fps=%s, hdrMode=%d, serverCodecModeSupport=0x%x, preferredCodec=%s, disabledMimeTypesLength=%u\n",
     width.c_str(), height.c_str(), fps.c_str(), hdrMode, serverCodecModeSupport, preferredCodec.c_str(), static_cast<unsigned int>(disabledMimeTypes.size()));
-  return g_Instance->ProbeVideoCodecSupport(width, height, fps, hdrMode, serverCodecModeSupport, preferredCodec, disabledMimeTypes);
+  g_Instance->ProbeVideoCodecSupport(callbackId, std::move(width), std::move(height), std::move(fps), hdrMode,
+    serverCodecModeSupport, std::move(preferredCodec), std::move(disabledMimeTypes));
 }
 
 MessageResult stopStream() {

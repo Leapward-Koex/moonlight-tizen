@@ -303,9 +303,13 @@ const fakeModule = {
     return { type: 'resolve', ret: undefined };
   },
   toggleStats() { calls.push(['toggleStats']); },
-  probeVideoCodecSupport(...args) {
-    calls.push(['probeVideoCodecSupport', ...args]);
-    return JSON.stringify({ selectedMimeType: 'video/hevc' });
+  probeVideoCodecSupport(id, ...args) {
+    calls.push(['probeVideoCodecSupport', id, ...args]);
+    queueMicrotask(() => globalThis.handlePromiseMessage(
+      id,
+      'resolve',
+      JSON.stringify({ selectedMimeType: 'video/hevc' })
+    ));
   },
   startLogExportServer() { return { type: 'resolve', ret: { port: 48100 } }; },
   stopLogExportServer() { return { type: 'resolve', ret: undefined }; },
@@ -347,6 +351,11 @@ assert.match(calls.find((call) => call[0] === 'configureInput')[1], /^v1\|ninten
 
 await bridge.toggleStats();
 assert.deepEqual(await bridge.probeVideoCodecSupport(request), { selectedMimeType: 'video/hevc' });
+assert.equal(
+  calls.find((call) => call[0] === 'probeVideoCodecSupport').length,
+  9,
+  'codec probe ABI must include a callback ID plus 7 probe arguments'
+);
 assert.equal(bridge.sendEscape(), true);
 assert.deepEqual(
   calls.filter((call) => call[0] === 'sendKeyboardEvent').map((call) => call.slice(2)),
