@@ -5,7 +5,7 @@ import '../view_models.dart';
 import '../widgets/moonlight_shell.dart';
 import '../widgets/tv_focusable.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     required this.categories,
     required this.selectedCategoryId,
@@ -21,33 +21,120 @@ class SettingsScreen extends StatelessWidget {
   final VoidCallback onBack;
   final List<HeaderActionViewModel> headerActions;
 
+  @override
+  State<SettingsScreen> createState() => SettingsScreenState();
+}
+
+class SettingsScreenState extends State<SettingsScreen> {
+  final FocusScopeNode _categoriesFocus = FocusScopeNode(
+    debugLabel: 'Settings categories',
+  );
+  final FocusScopeNode _optionsFocus = FocusScopeNode(
+    debugLabel: 'Settings options',
+  );
+  final GlobalKey _optionsFocusKey = GlobalKey();
+  final Map<String, FocusNode> _categoryFocusNodes = {};
+  bool _isNarrow = false;
+
   SettingsCategoryViewModel? get _selectedCategory {
-    if (categories.isEmpty) return null;
-    for (final category in categories) {
-      if (category.id == selectedCategoryId) return category;
+    if (widget.categories.isEmpty) return null;
+    for (final category in widget.categories) {
+      if (category.id == widget.selectedCategoryId) return category;
     }
-    return categories.first;
+    return widget.categories.first;
+  }
+
+  FocusNode _focusNodeForCategory(SettingsCategoryViewModel category) =>
+      _categoryFocusNodes.putIfAbsent(
+        category.id,
+        () => FocusNode(debugLabel: category.label),
+      );
+
+  @override
+  void didUpdateWidget(SettingsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final categoryIds = widget.categories
+        .map((category) => category.id)
+        .toSet();
+    final removedIds = _categoryFocusNodes.keys
+        .where((id) => !categoryIds.contains(id))
+        .toList(growable: false);
+    for (final id in removedIds) {
+      _categoryFocusNodes.remove(id)?.dispose();
+    }
+  }
+
+  @override
+  void dispose() {
+    _categoriesFocus.dispose();
+    _optionsFocus.dispose();
+    for (final node in _categoryFocusNodes.values) {
+      node.dispose();
+    }
+    super.dispose();
+  }
+
+  /// Handles the TV Back action without losing the user's place in Settings.
+  ///
+  /// The options pane is one level deeper than the category pane. Back first
+  /// returns focus to the selected category; only another Back exits Settings.
+  bool handleBack() {
+    if (_isNarrow && widget.selectedCategoryId != null) {
+      final selected = _selectedCategory;
+      widget.onCategorySelected(null);
+      if (selected != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _focusNodeForCategory(selected).requestFocus();
+        });
+      }
+      return true;
+    }
+    if (!_isNarrow && _optionsFocus.hasFocus) {
+      _focusSelectedCategory();
+      return true;
+    }
+    widget.onBack();
+    return true;
+  }
+
+  void _focusSelectedCategory() {
+    final selected = _selectedCategory;
+    if (selected == null) return;
+    _focusNodeForCategory(selected).requestFocus();
+  }
+
+  void _focusFirstOption() {
+    final optionsContext = _optionsFocusKey.currentContext;
+    if (optionsContext != null) {
+      FocusScope.of(optionsContext).nextFocus();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return MoonlightShell(
       title: 'Settings',
-      onBack: onBack,
-      actions: headerActions,
+      onBack: handleBack,
+      actions: widget.headerActions,
       body: LayoutBuilder(
         builder: (context, constraints) {
-          if (categories.isEmpty) {
+          if (widget.categories.isEmpty) {
             return const Center(child: Text('No settings are available.'));
           }
           final narrow =
               constraints.maxWidth < MoonlightMetrics.narrowBreakpoint;
+          _isNarrow = narrow;
           if (narrow) {
-            if (selectedCategoryId == null) {
-              return SettingsCategoryList(
-                categories: categories,
-                selectedCategoryId: null,
-                onSelected: (category) => onCategorySelected(category.id),
+            if (widget.selectedCategoryId == null) {
+              return FocusScope(
+                node: _categoriesFocus,
+                child: SettingsCategoryList(
+                  categories: widget.categories,
+                  selectedCategoryId: null,
+                  onSelected: (category) =>
+                      widget.onCategorySelected(category.id),
+                  focusNodeForCategory: _focusNodeForCategory,
+                ),
               );
             }
             final selected = _selectedCategory!;
@@ -63,7 +150,7 @@ class SettingsScreen extends StatelessWidget {
                         TvIconButton(
                           icon: Icons.keyboard_arrow_left,
                           label: 'Settings categories',
-                          onPressed: () => onCategorySelected(null),
+                          onPressed: handleBack,
                           autofocus: true,
                         ),
                         const SizedBox(width: 18),
@@ -85,32 +172,30 @@ class SettingsScreen extends StatelessWidget {
           }
 
           final selected = _selectedCategory!;
-          final optionsFocusKey = GlobalKey();
-          void focusFirstOption() {
-            final optionsContext = optionsFocusKey.currentContext;
-            if (optionsContext != null) {
-              FocusScope.of(optionsContext).nextFocus();
-            }
-          }
-
           return TvFocusTraversalGroup(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 SizedBox(
                   width: 330,
-                  child: SettingsCategoryList(
-                    categories: categories,
-                    selectedCategoryId: selected.id,
-                    onSelected: (category) => onCategorySelected(category.id),
-                    onMoveRight: focusFirstOption,
+                  child: FocusScope(
+                    node: _categoriesFocus,
+                    child: SettingsCategoryList(
+                      categories: widget.categories,
+                      selectedCategoryId: selected.id,
+                      onSelected: (category) =>
+                          widget.onCategorySelected(category.id),
+                      onMoveRight: _focusFirstOption,
+                      focusNodeForCategory: _focusNodeForCategory,
+                    ),
                   ),
                 ),
                 const VerticalDivider(width: 1, thickness: 1),
                 Expanded(
                   child: FocusScope(
+                    node: _optionsFocus,
                     child: Builder(
-                      key: optionsFocusKey,
+                      key: _optionsFocusKey,
                       builder: (context) =>
                           SettingsOptionsPane(category: selected),
                     ),
@@ -132,12 +217,15 @@ class SettingsCategoryList extends StatelessWidget {
     required this.onSelected,
     super.key,
     this.onMoveRight,
+    this.focusNodeForCategory,
   });
 
   final List<SettingsCategoryViewModel> categories;
   final String? selectedCategoryId;
   final ValueChanged<SettingsCategoryViewModel> onSelected;
   final VoidCallback? onMoveRight;
+  final FocusNode Function(SettingsCategoryViewModel category)?
+  focusNodeForCategory;
 
   @override
   Widget build(BuildContext context) {
@@ -158,6 +246,7 @@ class SettingsCategoryList extends StatelessWidget {
           autofocus:
               category.id == selectedCategoryId ||
               (selectedCategoryId == null && index == 0),
+          focusNode: focusNodeForCategory?.call(category),
           onPressed: () => onSelected(category),
           onMoveRight: onMoveRight,
         );
@@ -174,6 +263,7 @@ class SettingsCategoryTile extends StatelessWidget {
     super.key,
     this.autofocus = false,
     this.onMoveRight,
+    this.focusNode,
   });
 
   final SettingsCategoryViewModel category;
@@ -181,12 +271,14 @@ class SettingsCategoryTile extends StatelessWidget {
   final VoidCallback onPressed;
   final bool autofocus;
   final VoidCallback? onMoveRight;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       height: 76,
       child: TvFocusable(
+        focusNode: focusNode,
         autofocus: autofocus,
         semanticLabel: category.label,
         onActivate: onPressed,
@@ -239,7 +331,9 @@ class SettingsOptionsPane extends StatelessWidget {
     }
     return ListView.builder(
       key: PageStorageKey('settings-options-${category.id}'),
-      padding: const EdgeInsets.fromLTRB(28, 28, 28, 40),
+      // Leave enough trailing scroll extent for the focused final option to
+      // sit fully above the floating snackbar used throughout Settings.
+      padding: const EdgeInsets.fromLTRB(28, 28, 28, 152),
       itemCount: category.options.length + 1,
       itemBuilder: (context, index) {
         if (index == 0) {

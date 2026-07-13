@@ -148,6 +148,9 @@ final class _FakeNativeRuntime implements MoonlightNativeRuntime {
   Future<void> stopStream() async {}
 
   @override
+  void recoverStreamSurface() {}
+
+  @override
   Future<void> toggleStats() async {}
 
   @override

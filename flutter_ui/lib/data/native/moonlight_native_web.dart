@@ -35,6 +35,7 @@ extension type _MoonlightNativeFacade(JSObject _) implements JSObject {
   external JSPromise<JSString> scanLocalSubnet(JSNumber timeoutMs);
   external JSPromise<JSAny?> startStream(JSAny request);
   external JSPromise<JSAny?> stopStream();
+  external void recoverStreamSurface();
   external JSPromise<JSAny?> toggleStats();
   external JSPromise<JSAny?> probeVideoCodecSupport(JSAny request);
   external JSBoolean unlockAudio();
@@ -460,6 +461,9 @@ final class WebMoonlightNativeRuntime implements MoonlightNativeRuntime {
       throw MoonlightException('Unable to stop the stream.', cause: error);
     }
   }
+
+  @override
+  void recoverStreamSurface() => _facade?.recoverStreamSurface();
 
   @override
   Future<void> toggleStats() async {

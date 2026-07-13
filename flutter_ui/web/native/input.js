@@ -423,6 +423,10 @@
     setMode: setInputMode,
     getMode: function() { return inputMode; },
     setSink: setInputSink,
+    requestAction: function(action, source) {
+      emitAction(action, 'pressed', source || 'ui');
+      return true;
+    },
     connectedGamepadMask: connectedGamepadMask,
     inputDevices: inputDevices,
     testRumble: testRumble,

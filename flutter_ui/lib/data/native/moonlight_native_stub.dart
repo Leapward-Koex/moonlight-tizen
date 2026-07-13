@@ -75,6 +75,9 @@ final class UnsupportedMoonlightNativeRuntime
   Future<void> stopStream() async => _unsupported();
 
   @override
+  void recoverStreamSurface() {}
+
+  @override
   Future<void> toggleStats() async => _unsupported();
 
   @override

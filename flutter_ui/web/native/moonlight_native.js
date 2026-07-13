@@ -157,12 +157,41 @@
   function showFatal(message) {
     var fatal = element('stream-fatal');
     var fatalMessage = element('stream-fatal-message');
+    var fatalBack = element('stream-fatal-back');
     if (fatalMessage) fatalMessage.textContent = message || 'The streaming session failed.';
+    if (fatalBack) {
+      fatalBack.onclick = function() {
+        recoverStreamSurface();
+        if (root.MoonlightInput && typeof root.MoonlightInput.requestAction === 'function') {
+          root.MoonlightInput.requestAction('back', 'stream-fatal');
+        }
+      };
+    }
     setHidden(fatal, false);
+    if (fatalBack) {
+      try { fatalBack.focus(); } catch (_) {}
+    }
   }
 
   function dismissFatal() {
     setHidden(element('stream-fatal'), true);
+  }
+
+  function recoverStreamSurface() {
+    if (pendingStreamStart) {
+      var pending = pendingStreamStart;
+      root.clearTimeout(pending.timer);
+      pendingStreamStart = null;
+      pending.reject(nativeError(
+        'Stream start was dismissed after a native failure.',
+        'stream-start-dismissed',
+        { attemptId: pending.attemptId }
+      ));
+    }
+    activeStreamAttemptId = null;
+    earlyStreamResult = null;
+    if (root.MoonlightAudio) root.MoonlightAudio.stop();
+    setStreamSurface('inactive');
   }
 
   function rejectOutstanding(reason) {
@@ -693,7 +722,7 @@
       String(readField(request, ['fps', 'frameRate'], '60')),
       String(readField(request, ['bitrate', 'bitrateKbps'], '10000')),
       readField(request, ['rikey', 'remoteInputKey'], ''),
-      readField(request, ['rikeyid', 'remoteInputKeyId'], ''),
+      String(readField(request, ['rikeyid', 'remoteInputKeyId'], '')),
       readField(request, ['appversion', 'appVersion'], ''),
       readField(request, ['gfeversion', 'gfeVersion'], ''),
       readField(request, ['sessionUrl', 'rtspurl', 'rtspSessionUrl'], ''),
@@ -1007,6 +1036,7 @@
     unlockAudio: unlockAudio,
     setStreamSurface: setStreamSurface,
     dismissFatal: dismissFatal,
+    recoverStreamSurface: recoverStreamSurface,
     setInputMode: setInputMode,
     registerInputSink: function(sink) {
       if (root.MoonlightInput) root.MoonlightInput.setSink(sink);

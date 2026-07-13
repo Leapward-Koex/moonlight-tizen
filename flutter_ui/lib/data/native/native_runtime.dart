@@ -159,6 +159,7 @@ abstract interface class MoonlightNativeRuntime
 
   Future<StreamEvent> startStream(StreamRequest request);
   Future<void> stopStream();
+  void recoverStreamSurface();
   Future<void> toggleStats();
 
   Future<Map<String, Object?>> probeVideoCodecSupport(

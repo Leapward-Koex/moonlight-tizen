@@ -13,6 +13,7 @@ import '../ui/moonlight_ui.dart';
 
 typedef StartNativeStream = Future<void> Function(StreamRequest request);
 typedef StopNativeStream = Future<void> Function();
+typedef RecoverNativeStreamSurface = void Function();
 typedef NativeAction = void Function();
 typedef NativeBoolAction = bool Function();
 typedef GamepadMaskReader = int Function();
@@ -30,6 +31,7 @@ class MoonlightFlutterApp extends StatefulWidget {
   const MoonlightFlutterApp({
     required this.startNativeStream,
     required this.stopNativeStream,
+    required this.recoverNativeStreamSurface,
     required this.unlockAudio,
     required this.connectedGamepadMask,
     required this.inputDevices,
@@ -49,6 +51,7 @@ class MoonlightFlutterApp extends StatefulWidget {
 
   final StartNativeStream startNativeStream;
   final StopNativeStream stopNativeStream;
+  final RecoverNativeStreamSurface recoverNativeStreamSurface;
   final NativeAction unlockAudio;
   final GamepadMaskReader connectedGamepadMask;
   final InputDevicesReader inputDevices;
@@ -100,6 +103,7 @@ class _MoonlightFlutterAppState extends State<MoonlightFlutterApp> {
           hostId: hostId,
           startNativeStream: widget.startNativeStream,
           stopNativeStream: widget.stopNativeStream,
+          recoverNativeStreamSurface: widget.recoverNativeStreamSurface,
           unlockAudio: widget.unlockAudio,
           connectedGamepadMask: widget.connectedGamepadMask,
           inputDevices: widget.inputDevices,
@@ -139,6 +143,7 @@ class _MoonlightExperience extends ConsumerStatefulWidget {
     required this.page,
     required this.startNativeStream,
     required this.stopNativeStream,
+    required this.recoverNativeStreamSurface,
     required this.unlockAudio,
     required this.connectedGamepadMask,
     required this.inputDevices,
@@ -160,6 +165,7 @@ class _MoonlightExperience extends ConsumerStatefulWidget {
   final String? hostId;
   final StartNativeStream startNativeStream;
   final StopNativeStream stopNativeStream;
+  final RecoverNativeStreamSurface recoverNativeStreamSurface;
   final NativeAction unlockAudio;
   final GamepadMaskReader connectedGamepadMask;
   final InputDevicesReader inputDevices;
@@ -189,6 +195,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
   DiagnosticLogLevel? _appliedLogLevel;
   final Set<int> _launchingApps = {};
   final Random _random = Random.secure();
+  final GlobalKey<SettingsScreenState> _settingsScreenKey = GlobalKey();
 
   DiagnosticLogger get _logger => ref.read(diagnosticLoggerProvider);
 
@@ -234,9 +241,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
       widget.setDiagnosticLogLevel(diagnosticLevel);
     }
     ref.listen(streamSessionProvider, (previous, next) {
-      final ended =
-          next.phase == StreamSessionPhase.stopped ||
-          next.phase == StreamSessionPhase.failed;
+      final ended = next.phase == StreamSessionPhase.stopped;
       if (widget.page == _Page.stream && ended) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && widget.page == _Page.stream) {
@@ -371,6 +376,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
   }
 
   Widget _buildSettings() => SettingsScreen(
+    key: _settingsScreenKey,
     categories: _settingsCategories(ref.watch(settingsProvider)),
     selectedCategoryId: _settingsCategory,
     onCategorySelected: (id) => setState(() => _settingsCategory = id),
@@ -385,41 +391,65 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
     ],
   );
 
-  Widget _buildStream() => MoonlightShell(
-    title: 'Streaming',
-    showHeader: false,
-    body: Stack(
-      fit: StackFit.expand,
-      children: [
-        const ColoredBox(color: Colors.transparent),
-        Positioned(
-          left: 28,
-          bottom: 28,
-          child: SizedBox(
-            width: 250,
-            child: TvActionButton(
-              label: 'Stop stream',
-              icon: Icons.stop,
-              autofocus: true,
-              onPressed: () => unawaited(_stopStream()),
+  Widget _buildStream() {
+    final session = ref.watch(streamSessionProvider);
+    if (session.phase == StreamSessionPhase.failed) {
+      final hasHost = widget.hostId != null && widget.hostId!.isNotEmpty;
+      return MoonlightShell(
+        title: 'Streaming error',
+        onBack: _recoverFromStreamError,
+        body: AppListMessage(
+          icon: Icons.error_outline,
+          title: 'The stream could not start',
+          message: session.error?.message.isNotEmpty ?? false
+              ? session.error!.message
+              : 'Moonlight encountered a native streaming error.',
+          actionLabel: hasHost ? 'Back to games' : 'Back to hosts',
+          onAction: _recoverFromStreamError,
+        ),
+      );
+    }
+    return MoonlightShell(
+      title: 'Streaming',
+      showHeader: false,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          const ColoredBox(color: Colors.transparent),
+          Positioned(
+            left: 28,
+            bottom: 28,
+            child: SizedBox(
+              width: 250,
+              child: TvActionButton(
+                label: 'Stop stream',
+                icon: Icons.stop,
+                autofocus: true,
+                onPressed: () => unawaited(_stopStream()),
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 
   HostTileViewModel _hostViewModel(HostEntry entry) => HostTileViewModel(
     id: entry.host.id,
     name: entry.host.hostname,
     address: entry.host.address,
     isPaired: entry.status.paired,
-    availability: entry.status.online
+    pairingStatusKnown: entry.statusKnown,
+    availability: !entry.statusKnown
+        ? HostAvailability.unknown
+        : entry.status.online
         ? HostAvailability.online
         : entry.status.consecutivePollFailures == 0
         ? HostAvailability.unknown
         : HostAvailability.offline,
-    subtitle: entry.status.online
+    subtitle: !entry.statusKnown
+        ? 'Checking status…'
+        : entry.status.online
         ? (entry.status.paired ? 'Online' : 'Pairing required')
         : 'Offline',
   );
@@ -448,13 +478,24 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
     if (!mounted || _polling || ref.read(streamSessionProvider).isActive) {
       return;
     }
-    final hostIds = ref
-        .read(savedHostsProvider)
-        .map((host) => host.id)
-        .toList();
-    if (hostIds.isEmpty) return;
     setState(() => _polling = true);
     try {
+      try {
+        await ref.read(bootstrapProvider.future);
+      } catch (_) {
+        // Bootstrap failures are rendered by bootstrapProvider in build().
+        return;
+      }
+      // Persistence restores provider state asynchronously after the backing
+      // store opens. Let that state update land before the startup poll reads
+      // the saved host list.
+      await Future<void>.delayed(Duration.zero);
+      if (!mounted || ref.read(streamSessionProvider).isActive) return;
+      final hostIds = ref
+          .read(savedHostsProvider)
+          .map((host) => host.id)
+          .toList();
+      if (hostIds.isEmpty) return;
       await Future.wait(
         hostIds.map((hostId) async {
           try {
@@ -536,7 +577,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
   void _pair(SavedHost host) {
     _logger.log('info', 'ui.pairing.dialog_opened');
     final pin = (1000 + _random.nextInt(9000)).toString();
-    late BuildContext pairingContext;
+    BuildContext? pairingContext;
     showMoonlightDialog<void>(
       context: context,
       builder: (dialogContext) {
@@ -553,15 +594,23 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
         final result = await ref
             .read(appCoordinatorProvider)
             .pair(host.id, pin);
-        if (pairingContext.mounted) Navigator.of(pairingContext).pop();
+        final dialogContext = pairingContext;
+        if (dialogContext != null && dialogContext.mounted) {
+          Navigator.of(dialogContext).pop();
+        }
         if (!mounted) return;
-        showMoonlightSnackBar(
-          context,
-          result.paired ? 'Pairing complete.' : 'The host rejected pairing.',
-        );
+        if (result.paired) {
+          showMoonlightSnackBar(context, 'Pairing complete.');
+          _goApps(result.host.id);
+          return;
+        }
+        showMoonlightSnackBar(context, 'The host rejected pairing.');
       } catch (error, stackTrace) {
         _logger.error('ui.pairing.failed', error, stackTrace);
-        if (pairingContext.mounted) Navigator.of(pairingContext).pop();
+        final dialogContext = pairingContext;
+        if (dialogContext != null && dialogContext.mounted) {
+          Navigator.of(dialogContext).pop();
+        }
         if (mounted) showMoonlightSnackBar(context, 'Pairing failed: $error');
       }
     }());
@@ -626,7 +675,6 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
           .read(streamSessionProvider.notifier)
           .fail(MoonlightRuntimeError(code: 'stream-start', message: '$error'));
       if (mounted) {
-        _goApps(host.id);
         showMoonlightSnackBar(context, 'Unable to start ${app.title}: $error');
       }
     } finally {
@@ -645,6 +693,12 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
       ref.read(appCoordinatorProvider).stopStreamOnly();
       if (mounted) _goApps(widget.hostId);
     }
+  }
+
+  void _recoverFromStreamError() {
+    widget.recoverNativeStreamSurface();
+    ref.read(appCoordinatorProvider).stopStreamOnly();
+    _goApps(widget.hostId);
   }
 
   void _confirmQuit(SavedHost host) {
@@ -1897,7 +1951,21 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
         navigator.pop();
         return;
       }
-      if (widget.page == _Page.apps || widget.page == _Page.settings) {
+      if (widget.page == _Page.settings) {
+        final settingsState = _settingsScreenKey.currentState;
+        if (settingsState != null) {
+          settingsState.handleBack();
+        } else {
+          _goHosts();
+        }
+        return;
+      }
+      if (widget.page == _Page.stream &&
+          ref.read(streamSessionProvider).phase == StreamSessionPhase.failed) {
+        _recoverFromStreamError();
+        return;
+      }
+      if (widget.page == _Page.apps) {
         _goHosts();
       }
       return;

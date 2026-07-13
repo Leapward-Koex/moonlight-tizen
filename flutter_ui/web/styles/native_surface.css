@@ -157,8 +157,28 @@ html[data-stream-state="stopping"] #flutter-host {
 }
 
 .stream-fatal p {
-  margin: 0;
+  margin: 0 0 28px;
   font-size: clamp(18px, 1.5vw, 28px);
+}
+
+.stream-fatal button {
+  min-width: 260px;
+  min-height: 64px;
+  padding: 12px 24px;
+  border: 3px solid transparent;
+  border-radius: 12px;
+  background: #263c58;
+  color: #f1f2f6;
+  font: 600 clamp(18px, 1.35vw, 24px)/1.2 Roboto, Arial, sans-serif;
+  cursor: pointer;
+}
+
+.stream-fatal button:focus,
+.stream-fatal button:focus-visible,
+.stream-fatal button:hover {
+  border-color: #9ec5fe;
+  outline: 0;
+  box-shadow: 0 0 0 4px rgba(158, 197, 254, 0.28);
 }
 
 @keyframes stream-spin {

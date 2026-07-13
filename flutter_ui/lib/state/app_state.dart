@@ -183,9 +183,14 @@ class HostStatuses extends _$HostStatuses {
 }
 
 final class HostEntry {
-  const HostEntry({required this.host, required this.status});
+  const HostEntry({
+    required this.host,
+    required this.status,
+    required this.statusKnown,
+  });
   final SavedHost host;
   final HostStatus status;
+  final bool statusKnown;
 }
 
 @riverpod
@@ -193,12 +198,14 @@ List<HostEntry> hosts(Ref ref) {
   final statuses = ref.watch(hostStatusesProvider);
   return ref
       .watch(savedHostsProvider)
-      .map(
-        (host) => HostEntry(
+      .map((host) {
+        final status = statuses[host.id];
+        return HostEntry(
           host: host,
-          status: statuses[host.id] ?? const HostStatus(),
-        ),
-      )
+          status: status ?? const HostStatus(),
+          statusKnown: status != null,
+        );
+      })
       .toList(growable: false);
 }
 

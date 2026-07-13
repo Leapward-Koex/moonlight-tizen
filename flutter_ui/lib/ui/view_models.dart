@@ -10,6 +10,7 @@ class HostTileViewModel {
     this.address,
     this.availability = HostAvailability.unknown,
     this.isPaired = false,
+    this.pairingStatusKnown = true,
     this.subtitle,
   });
 
@@ -18,6 +19,7 @@ class HostTileViewModel {
   final String? address;
   final HostAvailability availability;
   final bool isPaired;
+  final bool pairingStatusKnown;
   final String? subtitle;
 
   bool get isOnline => availability == HostAvailability.online;

@@ -89,6 +89,11 @@ assert.equal(rumbleCalls[0].options.duration, 350);
 
 const events = [];
 input.setSink((event) => events.push(event));
+assert.equal(input.requestAction('back', 'stream-fatal'), true);
+assert.equal(events.at(-1).type, 'action');
+assert.equal(events.at(-1).action, 'back');
+assert.equal(events.at(-1).phase, 'pressed');
+assert.equal(events.at(-1).source, 'stream-fatal');
 animationFrame(); // Capture initial connected state.
 gamepads[2].buttons[0] = { pressed: true };
 animationFrame();

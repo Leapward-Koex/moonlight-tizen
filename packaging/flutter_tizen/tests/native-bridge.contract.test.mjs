@@ -101,7 +101,8 @@ const elementIds = [
   'stream-statistics',
   'stream-transient',
   'stream-fatal',
-  'stream-fatal-message'
+  'stream-fatal-message',
+  'stream-fatal-back'
 ];
 const elements = Object.fromEntries(elementIds.map((id) => [id, new FakeElement(id)]));
 const documentElement = new FakeElement('html');
@@ -124,10 +125,15 @@ Object.defineProperty(globalThis, 'navigator', {
   value: { getGamepads: () => [] }
 });
 globalThis.location = { reload() {} };
+const requestedInputActions = [];
 globalThis.MoonlightInput = {
   mode: 'ui',
   setMode(mode) { this.mode = mode; return mode; },
   setSink() {},
+  requestAction(action, source) {
+    requestedInputActions.push({ action, source });
+    return true;
+  },
   connectedGamepadMask() { return 5; }
 };
 globalThis.MoonlightAudio = {
@@ -160,6 +166,7 @@ for (const method of [
   'scanLocalSubnet',
   'startStream',
   'stopStream',
+  'recoverStreamSurface',
   'toggleStats',
   'probeVideoCodecSupport',
   'unlockAudio',
@@ -183,7 +190,7 @@ const request = {
   frameRate: 120,
   bitrateKbps: 30000,
   remoteInputKey: 'key',
-  remoteInputKeyId: 'key-id',
+  remoteInputKeyId: -12,
   appVersion: '7.1.0',
   gfeVersion: '3.27',
   sessionUrl: 'rtsp://session',
@@ -230,7 +237,10 @@ const request = {
 const mapped = bridge.__testing.streamRequestToArgs(request);
 assert.equal(mapped.length, 30, 'native startStream ABI must remain 30 positional arguments');
 assert.deepEqual(mapped.slice(0, 6), ['192.0.2.10', 47989, '1920', '1080', '120', '30000']);
-assert.deepEqual(mapped.slice(6, 12), ['key', 'key-id', '7.1.0', '3.27', 'rtsp://session', 7]);
+assert.deepEqual(mapped.slice(6, 12), ['key', '-12', '7.1.0', '3.27', 'rtsp://session', 7]);
+for (const index of [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 18, 19, 23, 29]) {
+  assert.equal(typeof mapped[index], 'string', `native startStream argument ${index} must be a string`);
+}
 assert.equal(mapped[18], 'emss');
 assert.equal(mapped[29], 'video/av1\nvideo/hevc');
 assert.equal(
@@ -327,12 +337,26 @@ assert.ok(events.some((event) => event.type === 'warning' && event.visible));
 assert.ok(events.some((event) => event.type === 'statistics' && event.visible));
 assert.ok(events.some((event) => event.type === 'codec-profile' && event.data.supported));
 
+globalThis.handleMessage('streamStartFailed: 42:-200:renderer failed');
+assert.equal(documentElement.dataset.streamState, 'error');
+assert.equal(elements['stream-fatal'].hidden, false);
+assert.equal(elements['stream-fatal-back'].focused, true);
+assert.equal(typeof elements['stream-fatal-back'].onclick, 'function');
+elements['stream-fatal-back'].onclick();
+assert.equal(documentElement.dataset.streamState, 'inactive');
+assert.equal(elements['stream-fatal'].hidden, true);
+assert.deepEqual(requestedInputActions.at(-1), {
+  action: 'back',
+  source: 'stream-fatal'
+});
+
 const singleton = globalThis.MoonlightNative;
 vm.runInThisContext(source, { filename: bridgePath });
 assert.equal(globalThis.MoonlightNative, singleton, 'bridge installation must be singleton');
 
 const index = fs.readFileSync(path.join(workspace, 'flutter_ui', 'web', 'index.html'), 'utf8');
 assert.match(index, /<video id="wasm_module" autoplay tabindex="-1"/);
+assert.match(index, /<button id="stream-fatal-back" type="button">Back to games<\/button>/);
 assert.ok(
   index.indexOf('$WEBAPIS/webapis/webapis.js') < index.indexOf('native/moonlight_native.js'),
   'Samsung web APIs must load before the native runtime bridge'

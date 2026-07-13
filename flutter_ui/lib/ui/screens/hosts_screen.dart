@@ -133,7 +133,12 @@ class HostCard extends StatelessWidget {
   Widget build(BuildContext context) {
     const focusColor = MoonlightColors.cyan;
     final status = switch (host.availability) {
-      HostAvailability.online => host.isPaired ? 'Online' : 'Pair required',
+      HostAvailability.online =>
+        !host.pairingStatusKnown
+            ? 'Status unknown'
+            : host.isPaired
+            ? 'Online'
+            : 'Pair required',
       HostAvailability.offline => 'Offline',
       HostAvailability.connecting => 'Connecting',
       HostAvailability.unknown => 'Status unknown',
@@ -161,7 +166,7 @@ class HostCard extends StatelessWidget {
                     : MoonlightColors.cyan.withValues(alpha: .88),
               ),
             ),
-            if (!host.isPaired)
+            if (host.pairingStatusKnown && !host.isPaired)
               const Center(
                 child: CircleAvatar(
                   radius: 38,
@@ -253,10 +258,14 @@ class _HostStatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final online =
-        host.availability == HostAvailability.online && host.isPaired;
+        host.pairingStatusKnown &&
+        host.availability == HostAvailability.online &&
+        host.isPaired;
     final color = online ? MoonlightColors.cyan : MoonlightColors.textMuted;
     final icon = online
         ? Icons.circle
+        : !host.pairingStatusKnown
+        ? Icons.sync
         : host.isPaired
         ? Icons.cloud_off_outlined
         : Icons.lock_outline_rounded;

@@ -104,6 +104,7 @@ Future<void> main() async {
             container.read(streamSessionProvider.notifier).applyEvent(event);
           },
           stopNativeStream: native.runtime.stopStream,
+          recoverNativeStreamSurface: native.runtime.recoverStreamSurface,
         ),
       ),
     );

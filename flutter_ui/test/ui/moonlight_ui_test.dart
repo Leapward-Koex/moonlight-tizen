@@ -54,6 +54,49 @@ void main() {
     expect(selected?.id, 'one');
   });
 
+  testWidgets('unknown host status does not claim pairing is required', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      themed(
+        HostsScreen(
+          hosts: const [
+            HostTileViewModel(
+              id: 'saved',
+              name: 'Saved PC',
+              pairingStatusKnown: false,
+            ),
+          ],
+          onAddHost: () {},
+          onHostSelected: (_) {},
+        ),
+      ),
+    );
+
+    expect(find.bySemanticsLabel('Saved PC, Status unknown'), findsOneWidget);
+    expect(find.text('Pair required'), findsNothing);
+    expect(find.byIcon(Icons.lock_outline_rounded), findsNothing);
+    expect(find.byIcon(Icons.sync), findsOneWidget);
+
+    await tester.pumpWidget(
+      themed(
+        HostsScreen(
+          hosts: const [
+            HostTileViewModel(
+              id: 'saved',
+              name: 'Saved PC',
+              availability: HostAvailability.online,
+            ),
+          ],
+          onAddHost: () {},
+          onHostSelected: (_) {},
+        ),
+      ),
+    );
+    expect(find.text('Pair required'), findsOneWidget);
+    expect(find.byIcon(Icons.lock_outline_rounded), findsNWidgets(2));
+  });
+
   testWidgets('input device panel shows live state and tests rumble', (
     tester,
   ) async {
@@ -213,11 +256,14 @@ void main() {
     tester,
   ) async {
     setViewport(tester, const Size(800, 900));
+    final settingsKey = GlobalKey<SettingsScreenState>();
     String? selected;
+    var backCount = 0;
     await tester.pumpWidget(
       themed(
         StatefulBuilder(
           builder: (context, setState) => SettingsScreen(
+            key: settingsKey,
             categories: [
               SettingsCategoryViewModel(
                 id: 'basic',
@@ -238,7 +284,7 @@ void main() {
             onCategorySelected: (value) {
               setState(() => selected = value);
             },
-            onBack: () {},
+            onBack: () => backCount += 1,
           ),
         ),
       ),
@@ -251,17 +297,29 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Video resolution'), findsOneWidget);
     expect(find.bySemanticsLabel('Settings categories'), findsOneWidget);
+
+    settingsKey.currentState!.handleBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Video resolution'), findsNothing);
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Basic Settings');
+    expect(backCount, 0);
+
+    settingsKey.currentState!.handleBack();
+    expect(backCount, 1);
   });
 
   testWidgets('wide settings give the selected category remote focus', (
     tester,
   ) async {
     setViewport(tester, const Size(1600, 900));
+    final settingsKey = GlobalKey<SettingsScreenState>();
     String? selected = 'basic';
+    var backCount = 0;
     await tester.pumpWidget(
       themed(
         StatefulBuilder(
           builder: (context, setState) => SettingsScreen(
+            key: settingsKey,
             categories: [
               SettingsCategoryViewModel(
                 id: 'basic',
@@ -293,7 +351,7 @@ void main() {
             onCategorySelected: (value) {
               setState(() => selected = value);
             },
-            onBack: () {},
+            onBack: () => backCount += 1,
             headerActions: [
               HeaderActionViewModel(
                 id: 'refresh',
@@ -329,5 +387,41 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     expect(FocusManager.instance.primaryFocus?.debugLabel, '1280 × 720');
+
+    settingsKey.currentState!.handleBack();
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Basic Settings');
+    expect(backCount, 0);
+
+    settingsKey.currentState!.handleBack();
+    expect(backCount, 1);
+  });
+
+  testWidgets('settings options reserve snackbar-safe trailing scroll space', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      themed(
+        SettingsOptionsPane(
+          category: SettingsCategoryViewModel(
+            id: 'advanced',
+            label: 'Advanced',
+            icon: Icons.build,
+            options: [
+              MoonlightSettingOption(
+                title: 'Last option',
+                control: TvActionButton(label: 'Change', onPressed: () {}),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final list = tester.widget<ListView>(
+      find.byKey(const PageStorageKey('settings-options-advanced')),
+    );
+    final padding = list.padding! as EdgeInsets;
+    expect(padding.bottom, greaterThanOrEqualTo(152));
   });
 }
