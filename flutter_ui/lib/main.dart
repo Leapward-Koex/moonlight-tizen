@@ -85,12 +85,11 @@ Future<void> main() async {
           inputDevices: native.runtime.inputDevices,
           testRumble: native.runtime.testRumble,
           navigationActions: native.runtime.inputEvents
-              .where(
-                (event) => event.type == 'action' && event.phase != 'released',
-              )
+              .where(shouldForwardUiNavigation)
               .map((event) => event.action),
           checkForUpdates: () => _checkForUpdates(native.runtime),
           restartApp: native.runtime.restartApp,
+          exitApp: native.runtime.exitApp,
           setDiagnosticLogLevel: (level) =>
               native.runtime.setDiagnosticLogLevel(level.name),
           diagnosticStatus: native.runtime.diagnosticLogStatus,

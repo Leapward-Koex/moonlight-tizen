@@ -397,6 +397,84 @@ void main() {
     expect(backCount, 1);
   });
 
+  testWidgets('controller direction enters the settings options pane', (
+    tester,
+  ) async {
+    setViewport(tester, const Size(1600, 900));
+    await tester.pumpWidget(
+      themed(
+        SettingsScreen(
+          categories: [
+            SettingsCategoryViewModel(
+              id: 'basic',
+              label: 'Basic Settings',
+              icon: Icons.tune,
+              options: [
+                MoonlightSettingOption(
+                  title: 'Video resolution',
+                  control: TvActionButton(
+                    label: '1280 × 720',
+                    onPressed: () {},
+                  ),
+                ),
+              ],
+            ),
+          ],
+          selectedCategoryId: 'basic',
+          onCategorySelected: (_) {},
+          onBack: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Basic Settings');
+    expect(
+      TvFocusable.move(
+        FocusManager.instance.primaryFocus,
+        TraversalDirection.right,
+      ),
+      isTrue,
+    );
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, '1280 × 720');
+  });
+
+  testWidgets('launching app card retains focus', (tester) async {
+    setViewport(tester, const Size(1280, 720));
+    var launching = false;
+    late StateSetter update;
+    await tester.pumpWidget(
+      themed(
+        StatefulBuilder(
+          builder: (context, setState) {
+            update = setState;
+            return AppsScreen(
+              hostName: 'Gaming PC',
+              apps: [
+                AppTileViewModel(
+                  id: 'desktop',
+                  title: 'Desktop',
+                  isLoading: launching,
+                ),
+                const AppTileViewModel(id: 'steam', title: 'Steam'),
+              ],
+              onAppSelected: (_) {},
+              onBack: () {},
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Desktop');
+
+    update(() => launching = true);
+    await tester.pump();
+
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Desktop');
+  });
+
   testWidgets('settings options reserve snackbar-safe trailing scroll space', (
     tester,
   ) async {

@@ -172,6 +172,8 @@ for (const method of [
   'unlockAudio',
   'setInputMode',
   'connectedGamepadMask',
+  'restartApp',
+  'exitApp',
   'setEventSink',
   'logDiagnostic',
   'getDiagnosticLogStatus',
@@ -325,6 +327,8 @@ assert.deepEqual(
   [[0x03, 0], [0x04, 0]]
 );
 assert.equal(bridge.connectedGamepadMask(), 5);
+assert.equal(bridge.restartApp(), true);
+assert.equal(bridge.exitApp(), false);
 
 const events = [];
 bridge.setEventSink((event) => events.push(event));

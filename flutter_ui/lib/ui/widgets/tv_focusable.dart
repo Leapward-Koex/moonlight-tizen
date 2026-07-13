@@ -38,6 +38,8 @@ class TvFocusable extends StatefulWidget {
   final BorderRadius borderRadius;
 
   static final Map<FocusNode, VoidCallback> _activationCallbacks = {};
+  static final Map<FocusNode, bool Function(TraversalDirection direction)>
+  _directionCallbacks = {};
 
   /// Invokes the control currently represented by [node]. This is used by
   /// normalized gamepad input, which does not arrive as a browser key event.
@@ -46,6 +48,14 @@ class TvFocusable extends StatefulWidget {
     if (callback == null) return false;
     callback();
     return true;
+  }
+
+  /// Moves focus for normalized gamepad input while preserving any
+  /// control-specific directional behavior used by keyboard/remote input.
+  static bool move(FocusNode? node, TraversalDirection direction) {
+    if (node == null) return false;
+    if (_directionCallbacks[node]?.call(direction) ?? false) return true;
+    return node.focusInDirection(direction);
   }
 
   @override
@@ -69,6 +79,7 @@ class _TvFocusableState extends State<TvFocusable> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.focusNode != widget.focusNode) {
       _removeActivationCallback();
+      _removeDirectionCallback();
       if (_ownsFocusNode) _focusNode.dispose();
       _setFocusNode(widget.focusNode);
     }
@@ -86,15 +97,25 @@ class _TvFocusableState extends State<TvFocusable> {
     } else {
       _removeActivationCallback();
     }
+    if (widget.enabled && widget.onDirection != null) {
+      TvFocusable._directionCallbacks[_focusNode] = widget.onDirection!;
+    } else {
+      _removeDirectionCallback();
+    }
   }
 
   void _removeActivationCallback() {
     TvFocusable._activationCallbacks.remove(_focusNode);
   }
 
+  void _removeDirectionCallback() {
+    TvFocusable._directionCallbacks.remove(_focusNode);
+  }
+
   @override
   void dispose() {
     _removeActivationCallback();
+    _removeDirectionCallback();
     if (_ownsFocusNode) _focusNode.dispose();
     super.dispose();
   }

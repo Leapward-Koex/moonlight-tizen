@@ -34,7 +34,10 @@ final class FakeOverrideBundle {
   final InMemoryPersistentStateStore storage;
 }
 
-Future<FakeOverrideBundle> createFakeOverrideBundle(FakeStateSeed seed) async {
+Future<FakeOverrideBundle> createFakeOverrideBundle(
+  FakeStateSeed seed, {
+  MoonlightRepository? repository,
+}) async {
   final storage = InMemoryPersistentStateStore();
   if (seed.settings != null) {
     await storage.write(
@@ -48,12 +51,14 @@ Future<FakeOverrideBundle> createFakeOverrideBundle(FakeStateSeed seed) async {
     jsonEncode(seed.hosts.map((host) => host.toJson()).toList()),
     _fakeStorageOptions('saved-hosts-v1'),
   );
-  final repository = FakeMoonlightRepository(
-    appsByHost: seed.appsByHost,
-    offlineHostIds: seed.offlineHostIds,
-    pairingFails: seed.pairingFails,
-    launchFails: seed.launchFails,
-  );
+  final resolvedRepository =
+      repository ??
+      FakeMoonlightRepository(
+        appsByHost: seed.appsByHost,
+        offlineHostIds: seed.offlineHostIds,
+        pairingFails: seed.pairingFails,
+        launchFails: seed.launchFails,
+      );
   return FakeOverrideBundle(
     storage: storage,
     overrides: [
@@ -61,7 +66,7 @@ Future<FakeOverrideBundle> createFakeOverrideBundle(FakeStateSeed seed) async {
       platformCapabilitiesProvider.overrideWithValue(
         seed.capabilities ?? const PlatformCapabilities(),
       ),
-      moonlightRepositoryProvider.overrideWithValue(repository),
+      moonlightRepositoryProvider.overrideWithValue(resolvedRepository),
     ],
   );
 }

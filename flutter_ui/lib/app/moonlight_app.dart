@@ -39,6 +39,7 @@ class MoonlightFlutterApp extends StatefulWidget {
     required this.navigationActions,
     required this.checkForUpdates,
     required this.restartApp,
+    required this.exitApp,
     required this.setDiagnosticLogLevel,
     required this.diagnosticStatus,
     required this.clearDiagnosticLogs,
@@ -59,6 +60,7 @@ class MoonlightFlutterApp extends StatefulWidget {
   final Stream<String> navigationActions;
   final CheckForUpdates checkForUpdates;
   final NativeBoolAction restartApp;
+  final NativeBoolAction exitApp;
   final ValueChanged<DiagnosticLogLevel> setDiagnosticLogLevel;
   final DiagnosticStatusReader diagnosticStatus;
   final ClearDiagnosticLogs clearDiagnosticLogs;
@@ -111,6 +113,7 @@ class _MoonlightFlutterAppState extends State<MoonlightFlutterApp> {
           navigationActions: widget.navigationActions,
           checkForUpdates: widget.checkForUpdates,
           restartApp: widget.restartApp,
+          exitApp: widget.exitApp,
           setDiagnosticLogLevel: widget.setDiagnosticLogLevel,
           diagnosticStatus: widget.diagnosticStatus,
           clearDiagnosticLogs: widget.clearDiagnosticLogs,
@@ -151,6 +154,7 @@ class _MoonlightExperience extends ConsumerStatefulWidget {
     required this.navigationActions,
     required this.checkForUpdates,
     required this.restartApp,
+    required this.exitApp,
     required this.setDiagnosticLogLevel,
     required this.diagnosticStatus,
     required this.clearDiagnosticLogs,
@@ -173,6 +177,7 @@ class _MoonlightExperience extends ConsumerStatefulWidget {
   final Stream<String> navigationActions;
   final CheckForUpdates checkForUpdates;
   final NativeBoolAction restartApp;
+  final NativeBoolAction exitApp;
   final ValueChanged<DiagnosticLogLevel> setDiagnosticLogLevel;
   final DiagnosticStatusReader diagnosticStatus;
   final ClearDiagnosticLogs clearDiagnosticLogs;
@@ -288,8 +293,13 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
     final discovery = ref.watch(subnetDiscoveryProvider);
     final refreshing =
         _polling || discovery.phase == SubnetDiscoveryPhase.scanning;
+    final initialDiscoveryInProgress = switch (discovery.phase) {
+      SubnetDiscoveryPhase.idle || SubnetDiscoveryPhase.waiting => _polling,
+      SubnetDiscoveryPhase.scanning => true,
+      _ => false,
+    };
     return HostsScreen(
-      loading: refreshing,
+      loading: initialDiscoveryInProgress,
       hosts: entries.map(_hostViewModel).toList(growable: false),
       onAddHost: _showAddHost,
       onHostSelected: _openHost,
@@ -1897,6 +1907,25 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
     );
   }
 
+  void _confirmExit() {
+    showMoonlightDialog<void>(
+      context: context,
+      builder: (dialogContext) => ConfirmationDialog(
+        title: 'Close Moonlight?',
+        message: 'Do you want to close the application?',
+        confirmLabel: 'Close',
+        destructive: true,
+        onCancel: () => Navigator.of(dialogContext).pop(),
+        onConfirm: () {
+          Navigator.of(dialogContext).pop();
+          if (!widget.exitApp()) {
+            showMoonlightSnackBar(context, 'Closing the app is unavailable.');
+          }
+        },
+      ),
+    );
+  }
+
   void _confirmRestoreDefaults() {
     showMoonlightDialog<void>(
       context: context,
@@ -1967,7 +1996,9 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
       }
       if (widget.page == _Page.apps) {
         _goHosts();
+        return;
       }
+      if (widget.page == _Page.hosts) _confirmExit();
       return;
     }
 
@@ -1984,7 +2015,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
       _ => null,
     };
     if (direction != null) {
-      focus?.focusInDirection(direction);
+      TvFocusable.move(focus, direction);
       return;
     }
     if (action == 'accept') {

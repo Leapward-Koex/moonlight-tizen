@@ -130,7 +130,9 @@ class AppCard extends StatelessWidget {
         : MoonlightColors.cyan;
     return TvFocusable(
       autofocus: autofocus,
-      enabled: app.enabled && !app.isLoading,
+      // Keep the launching card focusable so focus does not jump to another
+      // game during the transition. Duplicate launches are guarded upstream.
+      enabled: app.enabled,
       semanticLabel: app.isRunning ? '${app.title}, running' : app.title,
       scaleOnFocus: MoonlightMetrics.cardFocusScale,
       focusColor: focusColor,

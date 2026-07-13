@@ -7,6 +7,45 @@ import 'package:moonlight_tizen_flutter/data/nvhttp_client.dart';
 import 'package:moonlight_tizen_flutter/domain/domain.dart';
 
 void main() {
+  test('UI navigation edge-triggers Back but permits direction repeats', () {
+    expect(
+      shouldForwardUiNavigation(
+        const NativeInputEvent(
+          type: 'action',
+          action: 'back',
+          phase: 'pressed',
+        ),
+      ),
+      isTrue,
+    );
+    expect(
+      shouldForwardUiNavigation(
+        const NativeInputEvent(type: 'action', action: 'back', phase: 'repeat'),
+      ),
+      isFalse,
+    );
+    expect(
+      shouldForwardUiNavigation(
+        const NativeInputEvent(
+          type: 'action',
+          action: 'right',
+          phase: 'repeat',
+        ),
+      ),
+      isTrue,
+    );
+    expect(
+      shouldForwardUiNavigation(
+        const NativeInputEvent(
+          type: 'action',
+          action: 'right',
+          phase: 'released',
+        ),
+      ),
+      isFalse,
+    );
+  });
+
   group('createNativeProductionBundle', () {
     test(
       'reuses a saved identity and initializes a shared repository',
@@ -175,6 +214,9 @@ final class _FakeNativeRuntime implements MoonlightNativeRuntime {
 
   @override
   bool restartApp() => true;
+
+  @override
+  bool exitApp() => true;
 
   @override
   String setDiagnosticLogLevel(String level) => level;

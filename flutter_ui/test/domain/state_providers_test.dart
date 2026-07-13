@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:moonlight_tizen_flutter/data/fakes/fake_moonlight_repository.dart';
 import 'package:moonlight_tizen_flutter/domain/domain.dart';
 import 'package:moonlight_tizen_flutter/state/state.dart';
 
@@ -50,6 +51,57 @@ void main() {
 
     final apps = await container.read(appsProvider('host-1').future);
     expect(apps.single.title, 'Desktop');
+  });
+
+  test('background host polling does not reload the games list', () async {
+    const host = SavedHost(
+      id: 'host-1',
+      hostname: 'Fake PC',
+      address: '192.0.2.1',
+    );
+    final repository = FakeMoonlightRepository(
+      appsByHost: const {
+        'host-1': [MoonlightApp(id: 1, title: 'Desktop')],
+      },
+    );
+    final bundle = await createFakeOverrideBundle(
+      const FakeStateSeed(
+        hosts: [host],
+        appsByHost: {
+          'host-1': [MoonlightApp(id: 1, title: 'Desktop')],
+        },
+      ),
+      repository: repository,
+    );
+    final container = ProviderContainer(overrides: bundle.overrides);
+    addTearDown(container.dispose);
+    await container.read(bootstrapProvider.future);
+    await Future<void>.delayed(Duration.zero);
+    final subscription = container.listen(
+      appsProvider(host.id),
+      (_, _) {},
+      fireImmediately: true,
+    );
+    addTearDown(subscription.close);
+    expect(await container.read(appsProvider(host.id).future), isEmpty);
+    expect(repository.getAppListCallCount, 0);
+
+    container
+        .read(hostStatusesProvider.notifier)
+        .set(host.id, const HostStatus(online: true, paired: true));
+    await Future<void>.delayed(Duration.zero);
+    expect(
+      (await container.read(appsProvider(host.id).future)).single.title,
+      'Desktop',
+    );
+    expect(repository.getAppListCallCount, 1);
+
+    for (var poll = 0; poll < 12; poll += 1) {
+      await container.read(appCoordinatorProvider).pollHost(host.id);
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    expect(repository.getAppListCallCount, 1);
   });
 
   test(

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/experimental/persist.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../data/host_workflows.dart';
@@ -193,6 +194,32 @@ final class HostEntry {
   final bool statusKnown;
 }
 
+typedef _HostConnectionKey = ({
+  String address,
+  String userEnteredAddress,
+  String localAddress,
+  String externalAddress,
+  int httpPort,
+  int httpsPort,
+  int externalPort,
+  String pinnedCertificate,
+});
+
+_HostConnectionKey? _hostConnectionKey(List<SavedHost> hosts, String hostId) {
+  final host = hosts.where((item) => item.id == hostId).firstOrNull;
+  if (host == null) return null;
+  return (
+    address: host.address,
+    userEnteredAddress: host.userEnteredAddress,
+    localAddress: host.localAddress,
+    externalAddress: host.externalAddress,
+    httpPort: host.httpPort,
+    httpsPort: host.httpsPort,
+    externalPort: host.externalPort,
+    pinnedCertificate: host.pinnedCertificate,
+  );
+}
+
 @riverpod
 List<HostEntry> hosts(Ref ref) {
   final statuses = ref.watch(hostStatusesProvider);
@@ -213,15 +240,27 @@ List<HostEntry> hosts(Ref ref) {
 class Apps extends _$Apps {
   @override
   Future<List<MoonlightApp>> build(String hostId) async {
-    final host = ref
-        .watch(savedHostsProvider)
-        .where((item) => item.id == hostId)
-        .firstOrNull;
-    final status =
-        ref.watch(hostStatusesProvider)[hostId] ?? const HostStatus();
-    if (host == null || !status.online || !status.paired) {
+    final connection = ref.watch(
+      savedHostsProvider.select((hosts) => _hostConnectionKey(hosts, hostId)),
+    );
+    final readiness = ref.watch(
+      hostStatusesProvider.select((statuses) {
+        final status = statuses[hostId];
+        return (
+          online: status?.online ?? false,
+          paired: status?.paired ?? false,
+        );
+      }),
+    );
+    if (connection == null || !readiness.online || !readiness.paired) {
       return const <MoonlightApp>[];
     }
+    final host = ref
+        .read(savedHostsProvider)
+        .where((item) => item.id == hostId)
+        .firstOrNull;
+    final status = ref.read(hostStatusesProvider)[hostId] ?? const HostStatus();
+    if (host == null) return const <MoonlightApp>[];
     final apps = await ref
         .watch(moonlightRepositoryProvider)
         .getAppList(host, status);
@@ -236,12 +275,22 @@ class Apps extends _$Apps {
 
 @riverpod
 Future<Uint8List?> boxArt(Ref ref, String hostId, int appId) async {
+  final connection = ref.watch(
+    savedHostsProvider.select((hosts) => _hostConnectionKey(hosts, hostId)),
+  );
+  final readiness = ref.watch(
+    hostStatusesProvider.select((statuses) {
+      final status = statuses[hostId];
+      return (online: status?.online ?? false, paired: status?.paired ?? false);
+    }),
+  );
+  if (connection == null || !readiness.online || !readiness.paired) return null;
   final host = ref
-      .watch(savedHostsProvider)
+      .read(savedHostsProvider)
       .where((item) => item.id == hostId)
       .firstOrNull;
-  final status = ref.watch(hostStatusesProvider)[hostId] ?? const HostStatus();
-  if (host == null || !status.online || !status.paired) return null;
+  final status = ref.read(hostStatusesProvider)[hostId] ?? const HostStatus();
+  if (host == null) return null;
   return ref.watch(moonlightRepositoryProvider).getBoxArt(host, status, appId);
 }
 
@@ -639,9 +688,6 @@ final class AppCoordinator {
       if (!guard.isCurrent(generation)) throw const StaleOperationException();
       ref.read(savedHostsProvider.notifier).upsert(result.host);
       ref.read(hostStatusesProvider.notifier).set(hostId, result.status);
-      if (result.status.paired && result.status.successfulPollCount % 10 == 0) {
-        ref.invalidate(appsProvider(hostId));
-      }
       _logger.log('debug', 'coordinator.host.poll_completed', {
         'generation': generation,
         'durationMs': stopwatch.elapsedMilliseconds,

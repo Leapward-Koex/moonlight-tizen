@@ -90,6 +90,14 @@ final class NativeInputEvent {
       );
 }
 
+/// Returns whether a native action should be forwarded to Flutter UI
+/// navigation. Direction repeats remain useful, while Back is edge-triggered
+/// so holding the button cannot repeatedly dismiss and reopen dialogs.
+bool shouldForwardUiNavigation(NativeInputEvent event) =>
+    event.type == 'action' &&
+    event.phase != 'released' &&
+    (event.action != 'back' || event.phase == 'pressed');
+
 final class NativeInputDevice {
   const NativeInputDevice({
     required this.slot,
@@ -172,6 +180,7 @@ abstract interface class MoonlightNativeRuntime
   bool testRumble(int browserIndex);
   bool sendEscape();
   bool restartApp();
+  bool exitApp();
   String setDiagnosticLogLevel(String level);
   void logDiagnostic(
     String level,

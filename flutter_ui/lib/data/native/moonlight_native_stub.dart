@@ -104,6 +104,9 @@ final class UnsupportedMoonlightNativeRuntime
   bool restartApp() => false;
 
   @override
+  bool exitApp() => false;
+
+  @override
   String setDiagnosticLogLevel(String level) => level;
 
   @override

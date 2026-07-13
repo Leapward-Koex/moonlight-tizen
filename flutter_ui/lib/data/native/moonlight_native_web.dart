@@ -45,6 +45,7 @@ extension type _MoonlightNativeFacade(JSObject _) implements JSObject {
   external JSBoolean testRumble(JSNumber browserIndex);
   external JSBoolean sendEscape();
   external JSBoolean restartApp();
+  external JSBoolean exitApp();
   external JSString setDiagnosticLogLevel(JSString level);
   external JSBoolean logDiagnostic(
     JSString level,
@@ -563,6 +564,15 @@ final class WebMoonlightNativeRuntime implements MoonlightNativeRuntime {
   bool restartApp() {
     try {
       return _native.restartApp().toDart;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  bool exitApp() {
+    try {
+      return _native.exitApp().toDart;
     } catch (_) {
       return false;
     }

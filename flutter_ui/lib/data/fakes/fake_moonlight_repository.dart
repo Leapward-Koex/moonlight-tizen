@@ -21,6 +21,7 @@ final class FakeMoonlightRepository implements MoonlightRepository {
   final bool pairingFails;
   final bool launchFails;
   final DateTime now;
+  int getAppListCallCount = 0;
 
   @override
   Future<void> cancel(SavedHost host, HostStatus status) async {}
@@ -36,7 +37,10 @@ final class FakeMoonlightRepository implements MoonlightRepository {
   Future<List<MoonlightApp>> getAppList(
     SavedHost host,
     HostStatus status,
-  ) async => List.unmodifiable(appsByHost[host.id] ?? const []);
+  ) async {
+    getAppListCallCount += 1;
+    return List.unmodifiable(appsByHost[host.id] ?? const []);
+  }
 
   @override
   Future<LaunchResult> launch(
