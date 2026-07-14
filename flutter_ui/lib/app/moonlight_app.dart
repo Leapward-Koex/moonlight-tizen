@@ -1343,17 +1343,17 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
           MoonlightSettingOption(
             title: 'Audio backend',
             description:
-                'Choose the audio output implementation. Web Audio is recommended; Native EMSS is experimental.',
+                'Native EMSS is the recommended low-latency path on supported Tizen TVs. Web Audio remains available as a fallback.',
             control: TvChoiceControl<AudioBackend>(
               value: settings.audioBackend,
               choices: [
                 const ChoiceItem(
                   value: AudioBackend.webAudio,
-                  label: 'Web Audio (recommended)',
+                  label: 'Web Audio (fallback)',
                 ),
                 ChoiceItem(
                   value: AudioBackend.nativeEmss,
-                  label: 'Native EMSS (experimental)',
+                  label: 'Native EMSS (recommended)',
                   enabled: capabilities.supportsNativeAudio,
                 ),
               ],
@@ -1374,24 +1374,25 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
                   update(settings.copyWith(audioConfiguration: value)),
             ),
           ),
-          MoonlightSettingOption(
-            title: 'Audio packet duration',
-            description:
-                'Controls the size of each Opus packet. Smaller packets reduce latency but increase network overhead. Auto uses 10 ms.',
-            control: TvChoiceControl<int>(
-              value: settings.audioPacketDurationMs,
-              choices: AppSettings.packetDurationsMs
-                  .map(
-                    (duration) => ChoiceItem(
-                      value: duration,
-                      label: duration == 0 ? 'Auto' : '$duration ms',
-                    ),
-                  )
-                  .toList(growable: false),
-              onChanged: (value) =>
-                  update(settings.copyWith(audioPacketDurationMs: value)),
+          if (settings.audioBackend == AudioBackend.webAudio)
+            MoonlightSettingOption(
+              title: 'Audio packet duration',
+              description:
+                  'Controls the size of each Opus packet. Smaller packets reduce latency but increase network overhead.',
+              control: TvChoiceControl<int>(
+                value: settings.audioPacketDurationMs,
+                choices: AppSettings.packetDurationsMs
+                    .map(
+                      (duration) => ChoiceItem(
+                        value: duration,
+                        label: duration == 0 ? 'Auto' : '$duration ms',
+                      ),
+                    )
+                    .toList(growable: false),
+                onChanged: (value) =>
+                    update(settings.copyWith(audioPacketDurationMs: value)),
+              ),
             ),
-          ),
           if (settings.audioBackend == AudioBackend.webAudio)
             MoonlightSettingOption(
               title: 'Audio jitter buffer',

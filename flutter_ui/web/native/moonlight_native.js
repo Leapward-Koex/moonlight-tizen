@@ -615,6 +615,18 @@
       emit({ type: 'transient', message: payload });
     } else if (prefix === 'CodecProfileResult') {
       emit({ type: 'codec-profile', payload: payload, data: parseJsonPayload(payload) });
+    } else if (prefix === 'AudioPolicy') {
+      var policy = parseJsonPayload(payload);
+      emit({
+        type: 'audio-policy',
+        payload: payload,
+        data: policy,
+        state: policy.state || '',
+        reason: policy.reason || '',
+        clockDeltaMs: policy.clockDeltaMs,
+        queueDepthMs: policy.queueDepthMs,
+        resyncCount: policy.resyncCount
+      });
     } else if (prefix === 'DialogMsg') {
       showFatal(payload);
       emit({ type: 'dialog', severity: 'error', message: payload });

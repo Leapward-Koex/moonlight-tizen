@@ -1,5 +1,11 @@
 #include "Limelight-internal.h"
 
+#ifdef OS_WASM
+extern int g_AudioStartupDropMsOverride;
+#else
+static int g_AudioStartupDropMsOverride = -1;
+#endif
+
 static SOCKET rtpSocket = INVALID_SOCKET;
 
 static LINKED_BLOCKING_QUEUE packetQueue;
@@ -13,6 +19,7 @@ static PPLT_CRYPTO_CONTEXT audioDecryptionCtx;
 static uint32_t avRiKeyId;
 
 static unsigned short lastSeq;
+static AUDIO_FRAME_METADATA lastAudioMetadata;
 
 static bool pingThreadStarted;
 static bool receivedDataFromPeer;
@@ -45,6 +52,15 @@ typedef struct _QUEUED_AUDIO_PACKET {
     char data[MAX_PACKET_SIZE];
 } QUEUED_AUDIO_PACKET, *PQUEUED_AUDIO_PACKET;
 
+static void submitAudioSample(char* sampleData, int sampleLength, const AUDIO_FRAME_METADATA* metadata) {
+    if (AudioCallbacks.decodeAndPlaySampleEx != NULL) {
+        AudioCallbacks.decodeAndPlaySampleEx(sampleData, sampleLength, metadata);
+    }
+    else {
+        AudioCallbacks.decodeAndPlaySample(sampleData, sampleLength);
+    }
+}
+
 static void AudioPingThreadProc(void* context) {
     char legacyPingData[] = { 0x50, 0x49, 0x4E, 0x47 };
     LC_SOCKADDR saddr;
@@ -76,9 +92,16 @@ static void AudioPingThreadProc(void* context) {
 
 // Initialize the audio stream and start
 int initializeAudioStream(void) {
-    LbqInitializeLinkedBlockingQueue(&packetQueue, 30);
+    // The renderer thread remains separate from UDP reception, but a stalled
+    // sink must not accumulate more than 200 ms of encoded audio.
+    int queueFrameCapacity = 200 / (AudioPacketDuration > 0 ? AudioPacketDuration : 5);
+    if (queueFrameCapacity < 1) {
+        queueFrameCapacity = 1;
+    }
+    LbqInitializeLinkedBlockingQueue(&packetQueue, queueFrameCapacity);
     RtpaInitializeQueue(&rtpAudioQueue);
     lastSeq = 0;
+    memset(&lastAudioMetadata, 0, sizeof(lastAudioMetadata));
     receivedDataFromPeer = false;
     pingThreadStarted = false;
     firstReceiveTime = 0;
@@ -101,8 +124,9 @@ int initializeAudioStream(void) {
     memcpy(&avRiKeyId, StreamConfig.remoteInputAesIv, sizeof(avRiKeyId));
     avRiKeyId = BE32(avRiKeyId);
 
-    Limelog("Audio stream initialized: audioConfig=0x%x, encryptionFlags=0x%x, arCaps=0x%x\n",
-            StreamConfig.audioConfiguration, StreamConfig.encryptionFlags, AudioCallbacks.capabilities);
+    Limelog("Audio stream initialized: audioConfig=0x%x, encryptionFlags=0x%x, arCaps=0x%x, encodedQueueFrames=%d\n",
+            StreamConfig.audioConfiguration, StreamConfig.encryptionFlags, AudioCallbacks.capabilities,
+            queueFrameCapacity);
 
     return 0;
 }
@@ -201,18 +225,32 @@ static void decodeInputData(PQUEUED_AUDIO_PACKET packet) {
     // packet. Trigger packet loss concealment logic in libopus by
     // invoking the decoder with a NULL buffer.
     if (packet->header.size == 0) {
+        AUDIO_FRAME_METADATA metadata = lastAudioMetadata;
+        metadata.isConcealment = true;
+        if (metadata.timestampValid) {
+            metadata.sequenceNumber++;
+            metadata.presentationTimeMs += AudioPacketDuration;
+            lastAudioMetadata = metadata;
+        }
         audioPlcRequests++;
         audioPacketsSubmitted++;
-        AudioCallbacks.decodeAndPlaySample(NULL, 0);
+        submitAudioSample(NULL, 0, &metadata);
         return;
     }
 
     PRTP_PACKET rtp = (PRTP_PACKET)&packet->data[0];
+    AUDIO_FRAME_METADATA metadata = {
+        .presentationTimeMs = rtp->timestamp,
+        .sequenceNumber = rtp->sequenceNumber,
+        .timestampValid = true,
+        .isConcealment = false,
+    };
     if (lastSeq != 0 && (unsigned short)(lastSeq + 1) != rtp->sequenceNumber) {
         Limelog("Network dropped audio data (expected %d, but received %d)\n", lastSeq + 1, rtp->sequenceNumber);
     }
 
     lastSeq = rtp->sequenceNumber;
+    lastAudioMetadata = metadata;
 
     if (AudioEncryptionEnabled) {
         // We must have room for the AES padding which may be written to the buffer
@@ -257,7 +295,7 @@ static void decodeInputData(PQUEUED_AUDIO_PACKET packet) {
 #endif
 
         audioPacketsSubmitted++;
-        AudioCallbacks.decodeAndPlaySample((char*)decryptedOpusData, dataLength);
+        submitAudioSample((char*)decryptedOpusData, dataLength, &metadata);
     }
     else {
 #ifdef LC_DEBUG
@@ -275,7 +313,7 @@ static void decodeInputData(PQUEUED_AUDIO_PACKET packet) {
 #endif
 
         audioPacketsSubmitted++;
-        AudioCallbacks.decodeAndPlaySample((char*)(rtp + 1), packet->header.size - sizeof(*rtp));
+        submitAudioSample((char*)(rtp + 1), packet->header.size - sizeof(*rtp), &metadata);
     }
 }
 
@@ -289,7 +327,10 @@ static void AudioReceiveThreadProc(void* context) {
     int nextAudioWaitLogMs;
 
     packet = NULL;
-    packetsToDrop = 500 / AudioPacketDuration;
+    const int startupDropMs = g_AudioStartupDropMsOverride >= 0
+        ? g_AudioStartupDropMsOverride
+        : 500;
+    packetsToDrop = startupDropMs / AudioPacketDuration;
     nextAudioWaitLogMs = 1000;
 
     if (setNonFatalRecvTimeoutMs(rtpSocket, UDP_RECV_POLL_TIMEOUT_MS) < 0) {
@@ -525,10 +566,18 @@ int startAudioStream(void* audioContext, int arFlags) {
     }
 
     chosenConfig.samplesPerFrame = 48 * AudioPacketDuration;
+    PltLockMutex(&packetQueue.mutex);
+    packetQueue.sizeBound = 200 / AudioPacketDuration;
+    if (packetQueue.sizeBound < 1) {
+        packetQueue.sizeBound = 1;
+    }
+    PltUnlockMutex(&packetQueue.mutex);
     Limelog("Starting audio stream: audioPacketDuration=%d, sampleRate=%d, channels=%d, streams=%d, coupledStreams=%d, samplesPerFrame=%d, arFlags=0x%x, directSubmit=%d\n",
             AudioPacketDuration, chosenConfig.sampleRate, chosenConfig.channelCount,
             chosenConfig.streams, chosenConfig.coupledStreams, chosenConfig.samplesPerFrame,
             arFlags, (AudioCallbacks.capabilities & CAPABILITY_DIRECT_SUBMIT) != 0);
+    Limelog("Encoded audio decoder queue capacity: frames=%d, durationMs=%d\n",
+            packetQueue.sizeBound, packetQueue.sizeBound * AudioPacketDuration);
 
     err = AudioCallbacks.init(StreamConfig.audioConfiguration, &chosenConfig, audioContext, arFlags);
     if (err != 0) {

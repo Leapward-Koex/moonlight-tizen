@@ -20,6 +20,7 @@
 #include <opus_multistream.h>
 
 #include "lib.hpp"
+#include "emss_audio_policy.hpp"
 
 #include "samsung/wasm/elementary_media_stream_source.h"
 #include "samsung/wasm/elementary_media_stream_source_listener.h"
@@ -219,7 +220,10 @@ class MoonlightInstance {
   static void AudDecStop(void);
   static void AudDecCleanup(void);
   static void AudDecDecodeAndPlaySample(char* sampleData, int sampleLength);
-  static void SubmitNativeAudioFrame(const opus_int16* samples, int decodedSamples, uint64_t firstSample);
+  static void AudDecDecodeAndPlaySampleEx(char* sampleData, int sampleLength,
+                                          const AUDIO_FRAME_METADATA* metadata);
+  static void SubmitNativeAudioFrame(const opus_int16* samples, int decodedSamples,
+                                     const AUDIO_FRAME_METADATA* metadata);
 
   MessageResult MakeCert();
 
@@ -286,8 +290,21 @@ class MoonlightInstance {
   void CompleteStartFailure(uint32_t attemptId, int errorCode, const std::string& reason);
   void ResetMediaStateForStart(uint32_t attemptId);
   void ConfigureSyntheticAudioTest();
+  void RequestSyntheticAudioPlayback();
   void ResetSyntheticAudioTestMedia();
   void LogEmssAudioClock(const char* context, double audioPts) const;
+  bool PrepareNativeAudioFrame(const AUDIO_FRAME_METADATA& metadata,
+                               int pendingMs, double* ptsSeconds);
+  bool PrepareVideoFrame(uint32_t rawPtsMs, bool isIdr,
+                         double* ptsSeconds);
+  void ResetEmssAudioPolicy();
+  void PostAudioPolicyEvent(const char* state, const char* reason,
+                            double clockDeltaMs, int queueDepthMs,
+                            uint32_t resyncCount) const;
+  void ScheduleEmssResync(const char* reason, double clockDeltaMs,
+                          int queueDepthMs, uint32_t resyncCount,
+                          bool degraded);
+  double ReadMediaTimeMs(bool forceRefresh = false);
   void JoinStaleThreadsIfIdle();
   void CompleteStop(uint32_t attemptId, int errorCode, uint64_t stopStartMs);
   static const char* StreamLifecycleName(StreamLifecycle lifecycle);
@@ -386,7 +403,10 @@ class MoonlightInstance {
   std::atomic<samsung::wasm::SessionId> m_VideoSessionId;
   std::atomic<SyntheticAudioTestState> m_SyntheticAudioTestState;
   std::atomic<samsung::wasm::SessionId> m_SyntheticAudioSessionId;
-  uint64_t m_SyntheticAudioSampleCursor;
+  std::atomic<bool> m_SyntheticAudioOpenSucceeded;
+  std::atomic<bool> m_SyntheticAudioTrackOpened;
+  std::atomic<bool> m_SyntheticAudioPlayRequested;
+  double m_SyntheticAudioLastPts;
   uint32_t m_SyntheticAudioClickCount;
   std::vector<opus_int16> m_SyntheticAudioClick;
   samsung::html::HTMLMediaElement m_MediaElement;
@@ -398,6 +418,19 @@ class MoonlightInstance {
   samsung::wasm::ElementaryMediaTrack m_AudioTrack;
   samsung::wasm::ElementaryMediaTrack m_VideoTrack;
   samsung::wasm::ElementaryMediaTrack m_SyntheticAudioTrack;
+  mutable std::mutex m_AudioPolicyMutex;
+  EmssAudioPolicy m_EmssAudioPolicy;
+  uint64_t m_AvDivergenceSinceMs;
+  uint64_t m_MediaStationarySinceMs;
+  uint64_t m_LastAudioPolicyLogMs;
+  uint64_t m_LastAudioPolicyWarningMs;
+  bool m_DegradedAudioWarningShown;
+  bool m_MediaClockHasAdvanced;
+  double m_LastObservedMediaTimeMs;
+  double m_IncomingPtsAtStationaryStartMs;
+  double m_CachedMediaTimeMs;
+  uint64_t m_LastMediaTimeReadMs;
+  int m_RequestedEmssLatencyModeRaw;
   int m_ProbedVideoFormat;
   int m_ProbedVideoWidth;
   int m_ProbedVideoHeight;

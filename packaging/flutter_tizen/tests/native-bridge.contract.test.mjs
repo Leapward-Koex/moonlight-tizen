@@ -370,11 +370,18 @@ bridge.setEventSink((event) => events.push(event));
 globalThis.handleMessage('WarningMsg: Network is slow');
 globalThis.handleMessage('StatMsg: 59.9 FPS');
 globalThis.handleMessage('CodecProfileResult: {"supported":true}');
+globalThis.handleMessage('AudioPolicy: {"state":"resyncing","reason":"av-clock-divergence","clockDeltaMs":245,"queueDepthMs":40,"resyncCount":2}');
 assert.equal(elements['stream-warning'].textContent, 'Network is slow');
 assert.equal(elements['stream-statistics'].textContent, '59.9 FPS');
 assert.ok(events.some((event) => event.type === 'warning' && event.visible));
 assert.ok(events.some((event) => event.type === 'statistics' && event.visible));
 assert.ok(events.some((event) => event.type === 'codec-profile' && event.data.supported));
+assert.ok(events.some((event) =>
+  event.type === 'audio-policy' &&
+  event.state === 'resyncing' &&
+  event.data.reason === 'av-clock-divergence' &&
+  event.resyncCount === 2
+));
 
 globalThis.handleMessage('streamStartFailed: 42:-200:renderer failed');
 assert.equal(documentElement.dataset.streamState, 'error');

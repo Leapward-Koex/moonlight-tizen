@@ -264,6 +264,9 @@ final class AppSettings {
   factory AppSettings.defaultsFor(PlatformCapabilities capabilities) =>
       AppSettings(
         gameMode: capabilities.defaultGameMode,
+        audioBackend: capabilities.supportsNativeAudio
+            ? AudioBackend.nativeEmss
+            : AudioBackend.webAudio,
       ).normalized(capabilities);
 
   factory AppSettings.fromJson(Map<String, Object?> json) {

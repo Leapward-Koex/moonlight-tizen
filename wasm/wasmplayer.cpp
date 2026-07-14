@@ -1,5 +1,7 @@
 #include "moonlight_wasm.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
@@ -505,16 +507,19 @@ MoonlightInstance::SyntheticAudioTrackListener::SyntheticAudioTrackListener(
 ) : m_Instance(instance) {}
 
 void MoonlightInstance::SyntheticAudioTrackListener::OnTrackOpen() {
-  if (m_Instance->m_SyntheticAudioTestState.load() != SyntheticAudioTestState::Opening) {
+  SyntheticAudioTestState state = m_Instance->m_SyntheticAudioTestState.load();
+  if (state != SyntheticAudioTestState::Opening && state != SyntheticAudioTestState::Ready) {
     ClLogMessage("Ignoring stale synthetic PCM OnTrackOpen callback\n");
     return;
   }
   ClLogMessage("SYNTHETIC AUDIO ElementaryMediaTrack::OnTrackOpen (sessionId=%u)\n",
     static_cast<unsigned int>(m_Instance->m_SyntheticAudioSessionId.load()));
+  m_Instance->m_SyntheticAudioTrackOpened.store(true);
   m_Instance->m_SyntheticAudioTestState.store(SyntheticAudioTestState::Ready);
   m_Instance->LogEmssAudioClock(
     "synthetic-dialog-ready",
-    static_cast<double>(m_Instance->m_SyntheticAudioSampleCursor) / 48000.0);
+    std::max(0.0, m_Instance->m_SyntheticAudioLastPts));
+  m_Instance->RequestSyntheticAudioPlayback();
 }
 
 void MoonlightInstance::SyntheticAudioTrackListener::OnTrackClosed(
@@ -559,26 +564,316 @@ const char* MoonlightInstance::EmssLatencyModeName(
 
 void MoonlightInstance::LogEmssAudioClock(const char* context, double audioPts) const {
   const char* actualModeName = "unavailable";
+  int actualModeRaw = -1;
   int modeResultCode = -1;
   if (m_Source) {
     auto modeResult = m_Source->GetLatencyMode();
     modeResultCode = static_cast<int>(modeResult.operation_result);
     if (modeResult) {
       actualModeName = EmssLatencyModeName(*modeResult);
+      actualModeRaw = static_cast<int>(*modeResult);
     }
   }
 
   auto mediaTimeResult = m_MediaElement.GetCurrentTime();
   if (mediaTimeResult) {
     ClLogMessage(
-      "EMSS audio clock: context=%s, actualMode=%s, audioPts=%.6f, mediaTime=%.6f, modeResult=%d\n",
-      context, actualModeName, audioPts, (*mediaTimeResult).count(), modeResultCode);
+      "EMSS audio clock: context=%s, requestedMode=%s, requestedModeRaw=%d, actualMode=%s, actualModeRaw=%d, audioPts=%.6f, mediaTime=%.6f, modeResult=%d\n",
+      context,
+      EmssLatencyModeName(static_cast<EmssLatencyMode>(m_RequestedEmssLatencyModeRaw)),
+      m_RequestedEmssLatencyModeRaw, actualModeName, actualModeRaw, audioPts,
+      (*mediaTimeResult).count(), modeResultCode);
   } else {
     ClLogMessage(
-      "EMSS audio clock: context=%s, actualMode=%s, audioPts=%.6f, mediaTime=unavailable, modeResult=%d, mediaTimeResult=%d\n",
-      context, actualModeName, audioPts, modeResultCode,
+      "EMSS audio clock: context=%s, requestedMode=%s, requestedModeRaw=%d, actualMode=%s, actualModeRaw=%d, audioPts=%.6f, mediaTime=unavailable, modeResult=%d, mediaTimeResult=%d\n",
+      context,
+      EmssLatencyModeName(static_cast<EmssLatencyMode>(m_RequestedEmssLatencyModeRaw)),
+      m_RequestedEmssLatencyModeRaw, actualModeName, actualModeRaw, audioPts, modeResultCode,
       static_cast<int>(mediaTimeResult.operation_result));
   }
+}
+
+double MoonlightInstance::ReadMediaTimeMs(bool forceRefresh) {
+  const uint64_t nowMs = LiGetMillis();
+  {
+    std::lock_guard<std::mutex> lock(m_AudioPolicyMutex);
+    if (!forceRefresh && m_LastMediaTimeReadMs != 0 &&
+        nowMs - m_LastMediaTimeReadMs < 100) {
+      return m_CachedMediaTimeMs;
+    }
+  }
+  auto result = m_MediaElement.GetCurrentTime();
+  const double mediaTimeMs = result ? (*result).count() * 1000.0 : -1.0;
+  {
+    std::lock_guard<std::mutex> lock(m_AudioPolicyMutex);
+    m_CachedMediaTimeMs = mediaTimeMs;
+    m_LastMediaTimeReadMs = nowMs;
+  }
+  return mediaTimeMs;
+}
+
+void MoonlightInstance::ResetEmssAudioPolicy() {
+  std::lock_guard<std::mutex> lock(m_AudioPolicyMutex);
+  m_EmssAudioPolicy.Reset();
+  m_AvDivergenceSinceMs = 0;
+  m_MediaStationarySinceMs = 0;
+  m_LastAudioPolicyLogMs = 0;
+  m_LastAudioPolicyWarningMs = 0;
+  m_DegradedAudioWarningShown = false;
+  m_MediaClockHasAdvanced = false;
+  m_LastObservedMediaTimeMs = -1.0;
+  m_IncomingPtsAtStationaryStartMs = 0.0;
+  m_CachedMediaTimeMs = -1.0;
+  m_LastMediaTimeReadMs = 0;
+}
+
+void MoonlightInstance::PostAudioPolicyEvent(
+    const char* state, const char* reason, double clockDeltaMs,
+    int queueDepthMs, uint32_t resyncCount) const {
+  std::ostringstream message;
+  message << "AudioPolicy: {\"state\":";
+  AppendJsonString(message, state ? state : "");
+  message << ",\"reason\":";
+  AppendJsonString(message, reason ? reason : "");
+  message << ",\"clockDeltaMs\":" << clockDeltaMs;
+  message << ",\"queueDepthMs\":" << queueDepthMs;
+  message << ",\"resyncCount\":" << resyncCount << "}";
+  PostToJs(message.str());
+}
+
+void MoonlightInstance::ScheduleEmssResync(
+    const char* reason, double clockDeltaMs, int queueDepthMs,
+    uint32_t resyncCount, bool degraded) {
+  PostAudioPolicyEvent("resyncing", reason, clockDeltaMs, queueDepthMs,
+                       resyncCount);
+
+  bool showTransient = false;
+  bool showDegraded = false;
+  {
+    std::lock_guard<std::mutex> lock(m_AudioPolicyMutex);
+    const uint64_t nowMs = LiGetMillis();
+    if (m_LastAudioPolicyWarningMs == 0 ||
+        nowMs - m_LastAudioPolicyWarningMs >= 30000) {
+      m_LastAudioPolicyWarningMs = nowMs;
+      showTransient = true;
+    }
+    if (degraded && !m_DegradedAudioWarningShown) {
+      m_DegradedAudioWarningShown = true;
+      showDegraded = true;
+    }
+  }
+  if (showTransient) {
+    PostToJs("TransientMsg: Audio/video timing diverged; resynchronizing at the live edge.");
+  }
+  if (showDegraded) {
+    PostAudioPolicyEvent("degraded", reason, clockDeltaMs, queueDepthMs,
+                         resyncCount);
+    PostToJs("WarningMsg: Repeated audio/video resynchronization detected. For reliable playback, use H.264 or HEVC at 60 fps or less.");
+  }
+
+  m_Dispatcher.post_job([this, resyncCount]() {
+    if (!m_Source || GetLifecycle() == StreamLifecycle::Idle) {
+      return;
+    }
+    auto flushResult = m_Source->Flush();
+    ClLogMessage("EMSS resync flush: result=%d, resyncCount=%u\n",
+      static_cast<int>(flushResult.operation_result), resyncCount);
+    if (flushResult) {
+      std::lock_guard<std::mutex> lock(m_AudioPolicyMutex);
+      m_EmssAudioPolicy.MarkResyncFlushed();
+    }
+    LiRequestIdrFrame();
+    ClLogMessage("EMSS resync IDR requested: resyncCount=%u\n", resyncCount);
+  }, false);
+}
+
+bool MoonlightInstance::PrepareNativeAudioFrame(
+    const AUDIO_FRAME_METADATA& metadata, int pendingMs, double* ptsSeconds) {
+  const uint64_t nowMs = LiGetMillis();
+  const double mediaTimeMs = ReadMediaTimeMs();
+  EmssAudioPolicy::TimestampDecision decision;
+  EmssAudioPolicy::RecoveryTick recoveryTick;
+  EmssAudioPolicy::ResyncDecision resync;
+  double clockDeltaMs = 0.0;
+  bool queueAllowsAppend = false;
+  bool logMetrics = false;
+  double lastVideoPtsMs = 0.0;
+  int backlogLimitMs = 40;
+  uint32_t timestampRebases = 0;
+  uint32_t resyncCount = 0;
+  const char* resyncReason = "none";
+
+  {
+    std::lock_guard<std::mutex> lock(m_AudioPolicyMutex);
+    decision = m_EmssAudioPolicy.Audio(
+      metadata.presentationTimeMs, metadata.timestampValid,
+      metadata.isConcealment, nowMs, mediaTimeMs);
+    queueAllowsAppend = m_EmssAudioPolicy.ShouldAppendForBacklog(pendingMs, nowMs);
+
+    if (m_EmssAudioPolicy.HasAudioPts() && m_EmssAudioPolicy.HasVideoPts()) {
+      clockDeltaMs = m_EmssAudioPolicy.LastAudioPtsMs() -
+                     m_EmssAudioPolicy.LastVideoPtsMs();
+      if (std::fabs(clockDeltaMs) > 200.0) {
+        if (m_AvDivergenceSinceMs == 0) {
+          m_AvDivergenceSinceMs = nowMs;
+        }
+        else if (nowMs - m_AvDivergenceSinceMs >= 1000) {
+          resyncReason = "av-clock-divergence";
+        }
+      }
+      else {
+        m_AvDivergenceSinceMs = 0;
+      }
+    }
+
+    const double incomingPtsMs = std::max(
+      m_EmssAudioPolicy.HasAudioPts() ? m_EmssAudioPolicy.LastAudioPtsMs() : 0.0,
+      m_EmssAudioPolicy.HasVideoPts() ? m_EmssAudioPolicy.LastVideoPtsMs() : 0.0);
+    if (mediaTimeMs >= 0.0) {
+      if (m_LastObservedMediaTimeMs < 0.0 ||
+          mediaTimeMs > m_LastObservedMediaTimeMs + 1.0) {
+        if (m_LastObservedMediaTimeMs >= 0.0) {
+          m_MediaClockHasAdvanced = true;
+        }
+        m_LastObservedMediaTimeMs = mediaTimeMs;
+        m_MediaStationarySinceMs = nowMs;
+        m_IncomingPtsAtStationaryStartMs = incomingPtsMs;
+      }
+      else if (m_MediaClockHasAdvanced && m_MediaStationarySinceMs != 0 &&
+               nowMs - m_MediaStationarySinceMs >= 500 &&
+               incomingPtsMs - m_IncomingPtsAtStationaryStartMs >= 250.0) {
+        resyncReason = "media-clock-stalled";
+      }
+    }
+
+    if (resyncReason[0] != 'n') {
+      const double anchorMs = std::max({
+        m_EmssAudioPolicy.HasAudioPts() ? m_EmssAudioPolicy.LastAudioPtsMs() : 0.0,
+        m_EmssAudioPolicy.HasVideoPts() ? m_EmssAudioPolicy.LastVideoPtsMs() : 0.0,
+        mediaTimeMs >= 0.0 ? mediaTimeMs : 0.0}) + 20.0;
+      resync = m_EmssAudioPolicy.BeginResync(nowMs, anchorMs);
+    }
+    recoveryTick = m_EmssAudioPolicy.TickRecovery(nowMs);
+    lastVideoPtsMs = m_EmssAudioPolicy.LastVideoPtsMs();
+    backlogLimitMs = m_EmssAudioPolicy.BacklogLimitMs(nowMs);
+    timestampRebases = m_EmssAudioPolicy.TimestampRebases();
+    resyncCount = m_EmssAudioPolicy.ResyncCount();
+    if (m_LastAudioPolicyLogMs == 0 || nowMs - m_LastAudioPolicyLogMs >= 1000) {
+      m_LastAudioPolicyLogMs = nowMs;
+      logMetrics = true;
+    }
+  }
+
+  if (logMetrics) {
+    ClLogMessage(
+      "EMSS audio policy metrics: rawAudioPtsMs=%u, normalizedAudioPtsMs=%.3f, normalizedVideoPtsMs=%.3f, mediaTimeMs=%.3f, clockDeltaMs=%.3f, queueDepthMs=%d, queueCapMs=%d, plc=%d, append=%d, dropReason=%s, rebased=%d, timestampRebases=%u, resyncCount=%u\n",
+      metadata.presentationTimeMs, decision.ptsMs,
+      lastVideoPtsMs, mediaTimeMs, clockDeltaMs,
+      pendingMs, backlogLimitMs,
+      metadata.isConcealment, decision.append && queueAllowsAppend,
+      !decision.append ? decision.reason : (!queueAllowsAppend ? "live-edge-cap" : "none"),
+      decision.rebased, timestampRebases, resyncCount);
+  }
+  if (resync.started) {
+    ScheduleEmssResync(resyncReason, clockDeltaMs, pendingMs, resync.count,
+                       resync.degraded);
+  }
+  if (recoveryTick.requestAnotherIdr) {
+    LiRequestIdrFrame();
+    ClLogMessage("EMSS resync recovery requested a second IDR\n");
+  }
+  if (recoveryTick.restartRequired) {
+    PostToJs("WarningMsg: EMSS audio/video recovery could not obtain an IDR within five seconds. Restart the stream.");
+  }
+  *ptsSeconds = decision.ptsMs / 1000.0;
+  return decision.append && queueAllowsAppend && !resync.started;
+}
+
+bool MoonlightInstance::PrepareVideoFrame(uint32_t rawPtsMs, bool isIdr,
+                                          double* ptsSeconds) {
+  const uint64_t nowMs = LiGetMillis();
+  const double mediaTimeMs = ReadMediaTimeMs();
+  const int pendingMs = LiGetPendingAudioDuration();
+  EmssAudioPolicy::TimestampDecision decision;
+  EmssAudioPolicy::RecoveryTick recoveryTick;
+  EmssAudioPolicy::ResyncDecision resync;
+  double clockDeltaMs = 0.0;
+  uint32_t resyncCount = 0;
+  const char* resyncReason = "none";
+
+  {
+    std::lock_guard<std::mutex> lock(m_AudioPolicyMutex);
+    decision = m_EmssAudioPolicy.Video(rawPtsMs, isIdr, nowMs, mediaTimeMs);
+    if (m_AudioBackend == AudioBackend::NativeEmss &&
+        m_EmssAudioPolicy.HasAudioPts() && m_EmssAudioPolicy.HasVideoPts()) {
+      clockDeltaMs = m_EmssAudioPolicy.LastAudioPtsMs() -
+                     m_EmssAudioPolicy.LastVideoPtsMs();
+      if (std::fabs(clockDeltaMs) > 200.0) {
+        if (m_AvDivergenceSinceMs == 0) {
+          m_AvDivergenceSinceMs = nowMs;
+        }
+        else if (nowMs - m_AvDivergenceSinceMs >= 1000) {
+          resyncReason = "av-clock-divergence";
+        }
+      }
+      else {
+        m_AvDivergenceSinceMs = 0;
+      }
+    }
+    const double incomingPtsMs = std::max(
+      m_EmssAudioPolicy.HasAudioPts() ? m_EmssAudioPolicy.LastAudioPtsMs() : 0.0,
+      m_EmssAudioPolicy.HasVideoPts() ? m_EmssAudioPolicy.LastVideoPtsMs() : 0.0);
+    if (m_AudioBackend == AudioBackend::NativeEmss && mediaTimeMs >= 0.0) {
+      if (m_LastObservedMediaTimeMs < 0.0 ||
+          mediaTimeMs > m_LastObservedMediaTimeMs + 1.0) {
+        if (m_LastObservedMediaTimeMs >= 0.0) {
+          m_MediaClockHasAdvanced = true;
+        }
+        m_LastObservedMediaTimeMs = mediaTimeMs;
+        m_MediaStationarySinceMs = nowMs;
+        m_IncomingPtsAtStationaryStartMs = incomingPtsMs;
+      }
+      else if (m_MediaClockHasAdvanced && m_MediaStationarySinceMs != 0 &&
+               nowMs - m_MediaStationarySinceMs >= 500 &&
+               incomingPtsMs - m_IncomingPtsAtStationaryStartMs >= 250.0) {
+        resyncReason = "media-clock-stalled";
+      }
+    }
+    if (resyncReason[0] != 'n') {
+      const double anchorMs = std::max({
+        m_EmssAudioPolicy.LastAudioPtsMs(),
+        m_EmssAudioPolicy.LastVideoPtsMs(),
+        mediaTimeMs >= 0.0 ? mediaTimeMs : 0.0}) + 20.0;
+      resync = m_EmssAudioPolicy.BeginResync(nowMs, anchorMs);
+    }
+    recoveryTick = m_EmssAudioPolicy.TickRecovery(nowMs);
+    resyncCount = m_EmssAudioPolicy.ResyncCount();
+    if (decision.recovered) {
+      m_AvDivergenceSinceMs = 0;
+      m_MediaStationarySinceMs = nowMs;
+      m_LastObservedMediaTimeMs = mediaTimeMs;
+      m_IncomingPtsAtStationaryStartMs = decision.ptsMs;
+    }
+  }
+
+  if (decision.recovered) {
+    PostAudioPolicyEvent("recovered", decision.reason, clockDeltaMs, pendingMs,
+                         resyncCount);
+    ClLogMessage("EMSS resync recovered on IDR: rawVideoPtsMs=%u, normalizedVideoPtsMs=%.3f, mediaTimeMs=%.3f, resyncCount=%u\n",
+      rawPtsMs, decision.ptsMs, mediaTimeMs, resyncCount);
+  }
+  if (resync.started) {
+    ScheduleEmssResync(resyncReason, clockDeltaMs, pendingMs, resync.count,
+                       resync.degraded);
+  }
+  if (recoveryTick.requestAnotherIdr) {
+    LiRequestIdrFrame();
+  }
+  if (recoveryTick.restartRequired) {
+    PostToJs("WarningMsg: EMSS audio/video recovery could not obtain an IDR within five seconds. Restart the stream.");
+  }
+  *ptsSeconds = decision.ptsMs / 1000.0;
+  return decision.append && !resync.started;
 }
 
 void MoonlightInstance::ResetSyntheticAudioTestMedia() {
@@ -596,8 +891,11 @@ void MoonlightInstance::ResetSyntheticAudioTestMedia() {
   m_AudioSessionId.store(0);
   m_VideoSessionId.store(0);
   m_SyntheticAudioSessionId.store(0);
+  m_SyntheticAudioOpenSucceeded.store(false);
+  m_SyntheticAudioTrackOpened.store(false);
+  m_SyntheticAudioPlayRequested.store(false);
   m_EmssReadyState = EmssReadyState::kDetached;
-  m_SyntheticAudioSampleCursor = 0;
+  m_SyntheticAudioLastPts = -1.0;
   m_SyntheticAudioClickCount = 0;
   m_SyntheticAudioTestState.store(SyntheticAudioTestState::Inactive);
 }
@@ -630,9 +928,22 @@ MessageResult MoonlightInstance::StartSyntheticAudioTest(bool gameMode) {
     m_SyntheticAudioClick[frame * 2 + 1] = static_cast<opus_int16>(sample);
   }
 
-  const EmssLatencyMode selectedMode = gameMode
+  const auto emssVersion = samsung::wasm::EmssVersionInfo::Create();
+  const EmssLatencyMode requestedMode = gameMode
     ? EmssLatencyMode::kUltraLow
     : EmssLatencyMode::kLow;
+  const EmssLatencyMode selectedMode =
+    requestedMode == EmssLatencyMode::kUltraLow && !emssVersion.has_ultra_low_latency
+      ? EmssLatencyMode::kLow
+      : requestedMode;
+  m_RequestedEmssLatencyModeRaw = static_cast<int>(requestedMode);
+  ClLogMessage(
+    "Synthetic EMSS capabilities: hasEmss=%d, legacy=%d, ultraLow=%d, configValidation=%d, requestedMode=%s, requestedModeRaw=%d, selectedMode=%s, selectedModeRaw=%d, fallback=%d\n",
+    emssVersion.has_emss, emssVersion.has_legacy_emss,
+    emssVersion.has_ultra_low_latency, emssVersion.has_config_validation,
+    EmssLatencyModeName(requestedMode), static_cast<int>(requestedMode),
+    EmssLatencyModeName(selectedMode), static_cast<int>(selectedMode),
+    selectedMode != requestedMode);
   m_Source = std::make_unique<samsung::wasm::ElementaryMediaStreamSource>(
     selectedMode,
     EmssRenderingMode::kMediaElement);
@@ -697,7 +1008,8 @@ void MoonlightInstance::ConfigureSyntheticAudioTest() {
 
   m_SyntheticAudioTestState.store(SyntheticAudioTestState::Opening);
   auto openResult = m_Source->Open([this](EmssOperationResult result) {
-    if (m_SyntheticAudioTestState.load() != SyntheticAudioTestState::Opening) {
+    SyntheticAudioTestState state = m_SyntheticAudioTestState.load();
+    if (state != SyntheticAudioTestState::Opening && state != SyntheticAudioTestState::Ready) {
       ClLogMessage("Ignoring stale synthetic PCM Open callback: result=%d\n",
         static_cast<int>(result));
       return;
@@ -708,30 +1020,44 @@ void MoonlightInstance::ConfigureSyntheticAudioTest() {
       m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
       return;
     }
-    ClLogMessage("Synthetic PCM source opened; requesting playback\n");
-    auto playResult = m_MediaElement.Play([this](EmssOperationResult playResult) {
-      SyntheticAudioTestState state = m_SyntheticAudioTestState.load();
-      if (state != SyntheticAudioTestState::Opening && state != SyntheticAudioTestState::Ready) {
-        ClLogMessage("Ignoring stale synthetic PCM Play callback: result=%d\n",
-          static_cast<int>(playResult));
-        return;
-      }
-      ClLogMessage("Synthetic PCM Play callback: result=%d, ready=%d\n",
-        static_cast<int>(playResult),
-        m_SyntheticAudioTestState.load() == SyntheticAudioTestState::Ready);
-      if (playResult != EmssOperationResult::kSuccess) {
-        m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
-      }
-    });
-    if (!playResult) {
-      ClLogMessage("Synthetic PCM Play request failed: result=%d\n",
-        static_cast<int>(playResult.operation_result));
-      m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
-    }
+    m_SyntheticAudioOpenSucceeded.store(true);
+    ClLogMessage("Synthetic PCM source Open callback succeeded\n");
+    RequestSyntheticAudioPlayback();
   });
   if (!openResult) {
     ClLogMessage("Synthetic PCM Open request failed: result=%d\n",
       static_cast<int>(openResult.operation_result));
+    m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
+  }
+}
+
+void MoonlightInstance::RequestSyntheticAudioPlayback() {
+  if (!m_SyntheticAudioOpenSucceeded.load() ||
+      !m_SyntheticAudioTrackOpened.load()) {
+    return;
+  }
+  bool expected = false;
+  if (!m_SyntheticAudioPlayRequested.compare_exchange_strong(expected, true)) {
+    return;
+  }
+
+  ClLogMessage("Synthetic PCM Open and TrackOpen complete; requesting playback exactly once\n");
+  auto playResult = m_MediaElement.Play([this](EmssOperationResult result) {
+    SyntheticAudioTestState state = m_SyntheticAudioTestState.load();
+    if (state != SyntheticAudioTestState::Opening && state != SyntheticAudioTestState::Ready) {
+      ClLogMessage("Ignoring stale synthetic PCM Play callback: result=%d\n",
+        static_cast<int>(result));
+      return;
+    }
+    ClLogMessage("Synthetic PCM Play callback: result=%d, ready=%d\n",
+      static_cast<int>(result), state == SyntheticAudioTestState::Ready);
+    if (result != EmssOperationResult::kSuccess) {
+      m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
+    }
+  });
+  if (!playResult) {
+    ClLogMessage("Synthetic PCM Play request failed: result=%d\n",
+      static_cast<int>(playResult.operation_result));
     m_SyntheticAudioTestState.store(SyntheticAudioTestState::Failed);
   }
 }
@@ -747,7 +1073,11 @@ MessageResult MoonlightInstance::PlaySyntheticAudioClick(std::string inputLabel)
 
   constexpr int kSampleRate = 48000;
   constexpr int kPacketFrames = 960;
-  const double audioPts = static_cast<double>(m_SyntheticAudioSampleCursor) / kSampleRate;
+  const double mediaPts = std::max(0.0, ReadMediaTimeMs(true) / 1000.0);
+  const double audioPts = m_SyntheticAudioLastPts < 0.0
+    ? mediaPts
+    : std::max(mediaPts, m_SyntheticAudioLastPts +
+      static_cast<double>(kPacketFrames) / kSampleRate);
   const uint32_t clickNumber = ++m_SyntheticAudioClickCount;
   LogEmssAudioClock("synthetic-click-before-append", audioPts);
   ClLogMessage(
@@ -775,7 +1105,7 @@ MessageResult MoonlightInstance::PlaySyntheticAudioClick(std::string inputLabel)
     return MessageResult::Reject(emscripten::val(
       std::string("The TV rejected the synthetic PCM click packet.")));
   }
-  m_SyntheticAudioSampleCursor += kPacketFrames;
+  m_SyntheticAudioLastPts = audioPts;
   return MessageResult::Resolve(emscripten::val(clickNumber));
 }
 
@@ -1089,6 +1419,15 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     return DR_OK;
   }
 
+  double normalizedVideoPts = 0.0;
+  if (!g_Instance->PrepareVideoFrame(
+        decodeUnit->presentationTimeMs,
+        decodeUnit->frameType == FRAME_TYPE_IDR,
+        &normalizedVideoPts)) {
+    return DR_OK;
+  }
+  s_pktPts = TimeStamp(normalizedVideoPts);
+
   if (!s_loggedFirstDecodeUnit) {
     s_loggedFirstDecodeUnit = true;
     ClLogMessage("First video decode unit accepted after %llu ms: frameNumber=%d, frameType=%d, fullLength=%u, receiveToQueueMs=%u\n",
@@ -1268,16 +1607,15 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   if (g_Instance->m_VideoTrack.AppendPacket(pkt)) {
     // Calculate time after rendering
     uint32_t afterRender = LiGetMillis();
-    // Increment packet timestamp for next frame
-    s_pktPts += s_frameDuration;
     // Track total render time and count rendered frames
     m_ActiveWndVideoStats.totalRenderTime += afterRender - beforeRender;
     m_ActiveWndVideoStats.renderedFrames++;
     if (!s_loggedFirstAppend) {
       s_loggedFirstAppend = true;
-      ClLogMessage("First video packet appended after %llu ms: frameNumber=%d, keyFrame=%d, packetBytes=%u, renderCallMs=%u, sessionId=%u\n",
+      ClLogMessage("First video packet appended after %llu ms: frameNumber=%d, keyFrame=%d, rawPtsMs=%u, normalizedPts=%.6f, packetBytes=%u, renderCallMs=%u, sessionId=%u\n",
         (unsigned long long)(s_VideoSetupStartMs ? LiGetMillis() - s_VideoSetupStartMs : 0),
-        decodeUnit->frameNumber, decodeUnit->frameType == FRAME_TYPE_IDR, offset,
+        decodeUnit->frameNumber, decodeUnit->frameType == FRAME_TYPE_IDR,
+        decodeUnit->presentationTimeMs, normalizedVideoPts, offset,
         afterRender - beforeRender, static_cast<unsigned int>(g_Instance->m_VideoSessionId.load()));
     }
   } else {

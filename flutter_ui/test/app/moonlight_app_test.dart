@@ -370,6 +370,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Audio Settings'));
     await tester.pumpAndSettle();
+    expect(find.text('Audio packet duration'), findsNothing);
+    expect(find.text('Audio jitter buffer'), findsNothing);
     tester
         .widget<TvActionButton>(
           find.widgetWithText(TvActionButton, 'Open PCM click test'),
@@ -398,6 +400,38 @@ void main() {
         .onPressed!();
     await tester.pumpAndSettle();
     expect(stops, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('saved Web Audio settings retain manual audio controls', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final bundle = await createFakeOverrideBundle(
+      FakeStateSeed(
+        capabilities: PlatformCapabilities.tizen10(),
+        settings: const AppSettings(audioBackend: AudioBackend.webAudio),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(overrides: bundle.overrides, child: _testApp()),
+    );
+    await tester.pumpAndSettle();
+    tester
+        .widget<TvIconButton>(find.byKey(const ValueKey('header-settings')))
+        .onPressed();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Audio Settings'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Audio packet duration'), findsOneWidget);
+    expect(find.text('Audio jitter buffer'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

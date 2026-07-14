@@ -87,6 +87,21 @@ static void recArDecodeAndPlaySample(char* sampleData, int sampleLength)
     realArCallbacks.decodeAndPlaySample(sampleData, sampleLength);
 }
 
+static void recArDecodeAndPlaySampleEx(char* sampleData, int sampleLength,
+    const AUDIO_FRAME_METADATA* metadata)
+{
+    if (audioFile != NULL && sampleData != NULL && sampleLength > 0) {
+        fwrite(sampleData, 1, sampleLength, audioFile);
+    }
+
+    if (realArCallbacks.decodeAndPlaySampleEx != NULL) {
+        realArCallbacks.decodeAndPlaySampleEx(sampleData, sampleLength, metadata);
+    }
+    else {
+        realArCallbacks.decodeAndPlaySample(sampleData, sampleLength);
+    }
+}
+
 void setRecorderCallbacks(PDECODER_RENDERER_CALLBACKS drCallbacks, PAUDIO_RENDERER_CALLBACKS arCallbacks)
 {
     realDrCallbacks = *drCallbacks;
@@ -99,4 +114,7 @@ void setRecorderCallbacks(PDECODER_RENDERER_CALLBACKS drCallbacks, PAUDIO_RENDER
     arCallbacks->init = recArInit;
     arCallbacks->cleanup = recArCleanup;
     arCallbacks->decodeAndPlaySample = recArDecodeAndPlaySample;
+    if (realArCallbacks.decodeAndPlaySampleEx != NULL) {
+        arCallbacks->decodeAndPlaySampleEx = recArDecodeAndPlaySampleEx;
+    }
 }

@@ -749,6 +749,7 @@ StreamEvent _streamEvent(Map<String, Object?> json) {
     'warning' || 'dialog' => StreamEventKind.warning,
     'statistics' => StreamEventKind.statistics,
     'codec-profile' => StreamEventKind.codecProfile,
+    'audio-policy' => StreamEventKind.audioPolicy,
     'rumble' => StreamEventKind.rumble,
     'mouse-emulation' => StreamEventKind.mouseEmulation,
     _ => StreamEventKind.lifecycle,

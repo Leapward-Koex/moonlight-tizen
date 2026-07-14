@@ -19,6 +19,7 @@ static void fakeArStart(void) {}
 static void fakeArStop(void) {}
 static void fakeArCleanup(void) {}
 static void fakeArDecodeAndPlaySample(char* sampleData, int sampleLength) {}
+static void fakeArDecodeAndPlaySampleEx(char* sampleData, int sampleLength, const AUDIO_FRAME_METADATA* metadata) {}
 
 AUDIO_RENDERER_CALLBACKS fakeArCallbacks = {
     .init = fakeArInit,
@@ -26,6 +27,7 @@ AUDIO_RENDERER_CALLBACKS fakeArCallbacks = {
     .stop = fakeArStop,
     .cleanup = fakeArCleanup,
     .decodeAndPlaySample = fakeArDecodeAndPlaySample,
+    .decodeAndPlaySampleEx = fakeArDecodeAndPlaySampleEx,
 };
 
 static void fakeClStageStarting(int stage) {}

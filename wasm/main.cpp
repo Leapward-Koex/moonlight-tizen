@@ -46,6 +46,7 @@ MoonlightInstance* g_Instance;
 extern "C" {
 int g_AudioPacketDurationOverride = 0;
 int g_AudioJitterMsOverride = 0;
+int g_AudioStartupDropMsOverride = -1;
 }
 
 MoonlightInstance::MoonlightInstance()
@@ -83,7 +84,10 @@ MoonlightInstance::MoonlightInstance()
     m_VideoSessionId(0),
     m_SyntheticAudioTestState(SyntheticAudioTestState::Inactive),
     m_SyntheticAudioSessionId(0),
-    m_SyntheticAudioSampleCursor(0),
+    m_SyntheticAudioOpenSucceeded(false),
+    m_SyntheticAudioTrackOpened(false),
+    m_SyntheticAudioPlayRequested(false),
+    m_SyntheticAudioLastPts(-1.0),
     m_SyntheticAudioClickCount(0),
     m_SyntheticAudioClick(),
     m_MediaElement("wasm_module"),
@@ -95,6 +99,19 @@ MoonlightInstance::MoonlightInstance()
     m_AudioTrack(),
     m_VideoTrack(),
     m_SyntheticAudioTrack(),
+    m_AudioPolicyMutex(),
+    m_EmssAudioPolicy(),
+    m_AvDivergenceSinceMs(0),
+    m_MediaStationarySinceMs(0),
+    m_LastAudioPolicyLogMs(0),
+    m_LastAudioPolicyWarningMs(0),
+    m_DegradedAudioWarningShown(false),
+    m_MediaClockHasAdvanced(false),
+    m_LastObservedMediaTimeMs(-1.0),
+    m_IncomingPtsAtStationaryStartMs(0.0),
+    m_CachedMediaTimeMs(-1.0),
+    m_LastMediaTimeReadMs(0),
+    m_RequestedEmssLatencyModeRaw(static_cast<int>(EmssLatencyMode::kLow)),
     m_ProbedVideoFormat(0),
     m_ProbedVideoWidth(0),
     m_ProbedVideoHeight(0),
@@ -204,6 +221,7 @@ void MoonlightInstance::ResetMediaStateForStart(uint32_t attemptId) {
     m_AudioSessionId.store(0);
     m_VideoSessionId.store(0);
   }
+  ResetEmssAudioPolicy();
 
   if (m_Source) {
     m_MediaElement.SetSrc(nullptr);
@@ -354,7 +372,6 @@ void* MoonlightInstance::StopThreadFunc(void* context) {
   } else {
     ClLogMessage("Stop thread skipped input join because no input thread was created\n");
   }
-
   // Flush every tracked input after polling has stopped so the host cannot
   // retain held controller, mouse, or keyboard state across sessions.
   g_Instance->ReleaseAllInput();
@@ -439,13 +456,23 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
   }
 
   // A zero override preserves moonlight-common's automatic low-latency choice.
-  g_AudioPacketDurationOverride = me->m_AudioPacketDuration;
+  g_AudioPacketDurationOverride = me->m_AudioBackend == AudioBackend::NativeEmss
+    ? 20
+    : me->m_AudioPacketDuration;
 
   // Apply user-selected Web Audio jitter target. Zero means the scheduler uses
   // its default of 100 ms.
-  g_AudioJitterMsOverride = me->m_AudioJitterMs;
-  ClLogMessage("Audio startup overrides applied: packetDurationMs=%d, jitterTargetMs=%d\n",
-    g_AudioPacketDurationOverride, g_AudioJitterMsOverride != 0 ? g_AudioJitterMsOverride : 100);
+  g_AudioJitterMsOverride = me->m_AudioBackend == AudioBackend::NativeEmss
+    ? 0
+    : me->m_AudioJitterMs;
+  g_AudioStartupDropMsOverride = me->m_AudioBackend == AudioBackend::NativeEmss ? 0 : 500;
+  ClLogMessage("Audio startup overrides applied: backend=%s, packetDurationMs=%d, jitterTargetMs=%d, startupDropMs=%d\n",
+    me->m_AudioBackend == AudioBackend::NativeEmss ? "emss" : "webaudio",
+    g_AudioPacketDurationOverride,
+    me->m_AudioBackend == AudioBackend::NativeEmss
+      ? 0
+      : (g_AudioJitterMsOverride != 0 ? g_AudioJitterMsOverride : 100),
+    g_AudioStartupDropMsOverride);
 
   AUDIO_RENDERER_CALLBACKS* audioCallbacks = me->m_AudioBackend == AudioBackend::NativeEmss
     ? &MoonlightInstance::s_NativeAudioCallbacks
@@ -650,16 +677,54 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   // Manage gamepad input states based on selected settings
   HandleGamepadInputState(rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons);
 
-  // Apply the desired latency mode ​based on the toggle switch state
-  EmssLatencyMode selectedLatencyMode = gameMode ? EmssLatencyMode::kUltraLow : EmssLatencyMode::kLow;
-  PostToJs(gameMode ? "Selecting the latency mode to: LATENCY_MODE_ULTRA_LOW" : "Selecting the latency mode to: LATENCY_MODE_LOW");
+  // Select Ultra Low only when the device reports support. Some TVs accept
+  // the enum but silently use another mode, so requested and actual values are
+  // logged independently.
+  const auto emssVersion = samsung::wasm::EmssVersionInfo::Create();
+  const EmssLatencyMode requestedLatencyMode = gameMode
+    ? EmssLatencyMode::kUltraLow
+    : EmssLatencyMode::kLow;
+  const EmssLatencyMode selectedLatencyMode =
+    requestedLatencyMode == EmssLatencyMode::kUltraLow && !emssVersion.has_ultra_low_latency
+      ? EmssLatencyMode::kLow
+      : requestedLatencyMode;
+  m_RequestedEmssLatencyModeRaw = static_cast<int>(requestedLatencyMode);
+  ClLogMessage(
+    "EMSS capabilities: hasEmss=%d, legacy=%d, videoTexture=%d, decodingMode=%d, lowLatencyVideoTexture=%d, ultraLow=%d, configValidation=%d\n",
+    emssVersion.has_emss, emssVersion.has_legacy_emss, emssVersion.has_video_texture,
+    emssVersion.has_decoding_mode, emssVersion.has_low_latency_video_texture,
+    emssVersion.has_ultra_low_latency, emssVersion.has_config_validation);
+  ClLogMessage("EMSS latency selection: requested=%s, requestedRaw=%d, selected=%s, selectedRaw=%d, fallback=%d\n",
+    EmssLatencyModeName(requestedLatencyMode), static_cast<int>(requestedLatencyMode),
+    EmssLatencyModeName(selectedLatencyMode), static_cast<int>(selectedLatencyMode),
+    selectedLatencyMode != requestedLatencyMode);
+  PostToJs(selectedLatencyMode == EmssLatencyMode::kUltraLow
+    ? "Selecting the latency mode to: LATENCY_MODE_ULTRA_LOW"
+    : "Selecting the latency mode to: LATENCY_MODE_LOW");
+  if (selectedLatencyMode != requestedLatencyMode) {
+    PostToJs("TransientMsg: Ultra Low EMSS is unavailable on this TV; using Low latency mode.");
+  }
   // Create the media source with the selected latency and rendering modes
   m_Source = std::make_unique<samsung::wasm::ElementaryMediaStreamSource>(
     selectedLatencyMode,
     EmssRenderingMode::kMediaElement
   );
-  // Set the source listener to the media source
-  m_Source->SetListener(&m_SourceListener);
+  if (!m_Source->IsValid()) {
+    ClLogMessage("EMSS source creation failed: selectedMode=%s, selectedModeRaw=%d\n",
+      EmssLatencyModeName(selectedLatencyMode), static_cast<int>(selectedLatencyMode));
+    m_Source.reset();
+    return failStartSetup("unable to create the EMSS media source");
+  }
+  // Set the source listener to the media source and retain the operation result
+  // in diagnostics. Continuing without it would leave stream startup waiting on
+  // callbacks which can never arrive.
+  auto sourceListenerResult = m_Source->SetListener(&m_SourceListener);
+  ClLogMessage("EMSS source listener: result=%d\n",
+    static_cast<int>(sourceListenerResult.operation_result));
+  if (!sourceListenerResult) {
+    m_Source.reset();
+    return failStartSetup("unable to attach the EMSS media source listener");
+  }
   LogEmssAudioClock("before-stream", 0.0);
 
   // Store the parameters from the start message

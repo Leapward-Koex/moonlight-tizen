@@ -21,7 +21,6 @@ using OperationResult = samsung::wasm::OperationResult;
 
 constexpr int kMaxChannels = 8;
 constexpr int kPcmRingCapacityFrames = 48000;
-constexpr int kNativeBacklogLimitMs = 40;
 
 enum SharedControlIndex {
   kWriteFrame = 0,
@@ -57,6 +56,8 @@ static uint32_t s_framesPosted = 0;
 static uint32_t s_nativeAppends = 0;
 static uint32_t s_nativeDrops = 0;
 static uint32_t s_nativeAppendErrors = 0;
+static uint64_t s_nativeTotalAppendDurationMs = 0;
+static uint32_t s_nativeMaxAppendDurationMs = 0;
 static uint32_t s_plcRequests = 0;
 static bool s_loggedFirstDecodedFrame = false;
 
@@ -169,26 +170,36 @@ void PostWebAudioFallback(const opus_int16* samples, int decodedSamples) {
 
 }  // namespace
 
-void MoonlightInstance::SubmitNativeAudioFrame(const opus_int16* samples, int decodedSamples, uint64_t firstSample) {
+void MoonlightInstance::SubmitNativeAudioFrame(
+    const opus_int16* samples, int decodedSamples,
+    const AUDIO_FRAME_METADATA* metadata) {
   if (!s_audioRunning.load() || !g_Instance->m_AudioStarted.load()) {
     s_nativeDrops++;
     return;
   }
 
   const int pendingDurationMs = LiGetPendingAudioDuration();
-  if (pendingDurationMs > kNativeBacklogLimitMs) {
+  double audioPts = 0.0;
+  AUDIO_FRAME_METADATA fallbackMetadata = {};
+  if (metadata == nullptr) {
+    fallbackMetadata.isConcealment = false;
+    fallbackMetadata.timestampValid = false;
+    metadata = &fallbackMetadata;
+  }
+  if (!g_Instance->PrepareNativeAudioFrame(*metadata, pendingDurationMs, &audioPts)) {
     s_nativeDrops++;
     if (s_nativeDrops <= 5 || (s_nativeDrops % 100) == 0) {
       MoonlightInstance::ClLogMessage(
-        "Native audio live-edge drop: pendingMs=%d, limitMs=%d, drops=%u\n",
-        pendingDurationMs, kNativeBacklogLimitMs, s_nativeDrops);
+        "Native audio policy drop: rawPtsMs=%u, timestampValid=%d, plc=%d, pendingMs=%d, drops=%u\n",
+        metadata->presentationTimeMs, metadata->timestampValid,
+        metadata->isConcealment, pendingDurationMs, s_nativeDrops);
     }
     return;
   }
 
   samsung::wasm::ElementaryMediaPacket packet {
-    TimeStamp(static_cast<double>(firstSample) / s_sampleRate),
-    TimeStamp(static_cast<double>(firstSample) / s_sampleRate),
+    TimeStamp(audioPts),
+    TimeStamp(audioPts),
     TimeStamp(static_cast<double>(decodedSamples) / s_sampleRate),
     true,
     static_cast<size_t>(decodedSamples) * s_channelCount * sizeof(opus_int16),
@@ -200,12 +211,23 @@ void MoonlightInstance::SubmitNativeAudioFrame(const opus_int16* samples, int de
     g_Instance->m_AudioSessionId.load(),
   };
 
+  const uint64_t appendStartMs = LiGetMillis();
   auto result = g_Instance->m_AudioTrack.AppendPacketAsync(packet);
+  const uint64_t appendDurationMs = LiGetMillis() - appendStartMs;
+  s_nativeTotalAppendDurationMs += appendDurationMs;
+  s_nativeMaxAppendDurationMs = std::max(
+    s_nativeMaxAppendDurationMs, static_cast<uint32_t>(appendDurationMs));
   if (result) {
     if (s_nativeAppends == 0 || (s_nativeAppends % 100) == 0) {
       g_Instance->LogEmssAudioClock(
         "stream-native-audio-append",
-        static_cast<double>(firstSample) / s_sampleRate);
+        audioPts);
+    }
+    if (appendDurationMs > 2) {
+      MoonlightInstance::ClLogMessage(
+        "Native audio append duration: durationMs=%llu, audioPts=%.6f, pendingMs=%d\n",
+        static_cast<unsigned long long>(appendDurationMs), audioPts,
+        pendingDurationMs);
     }
     s_nativeAppends++;
     return;
@@ -239,6 +261,8 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   s_nativeAppends = 0;
   s_nativeDrops = 0;
   s_nativeAppendErrors = 0;
+  s_nativeTotalAppendDurationMs = 0;
+  s_nativeMaxAppendDurationMs = 0;
   s_plcRequests = 0;
   s_loggedFirstDecodedFrame = false;
   s_workletAttached = false;
@@ -256,7 +280,9 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
     return -1;
   }
 
-  const int targetJitterMs = g_AudioJitterMsOverride != 0 ? g_AudioJitterMsOverride : 100;
+  const int targetJitterMs = g_Instance->m_AudioBackend == AudioBackend::NativeEmss
+    ? 0
+    : (g_AudioJitterMsOverride != 0 ? g_AudioJitterMsOverride : 100);
   ClLogMessage("Audio decoder init: backend=%s, audioConfig=0x%x, sampleRate=%d, channels=%zu, streams=%d, coupledStreams=%d, samplesPerFrame=%zu, arFlags=0x%x, maximumBufferMs=%d\n",
     g_Instance->m_AudioBackend == AudioBackend::NativeEmss ? "emss" : "webaudio",
     audioConfiguration, s_sampleRate, s_channelCount, opusConfig->streams,
@@ -305,10 +331,25 @@ void MoonlightInstance::AudDecStop(void) {
 
 void MoonlightInstance::AudDecCleanup(void) {
   AudDecStop();
-  ClLogMessage("Audio decoder cleanup: lifetimeMs=%llu, decodeCalls=%u, framesPosted=%u, nativeAppends=%u, nativeDrops=%u, nativeAppendErrors=%u, decodeFailures=%u, plcRequests=%u, workletUnderruns=%d, workletOverruns=%d, workletSkippedFrames=%d\n",
+  uint32_t timestampRebases = 0;
+  uint32_t resyncCount = 0;
+  double lastAudioPtsMs = 0.0;
+  double lastVideoPtsMs = 0.0;
+  {
+    std::lock_guard<std::mutex> lock(g_Instance->m_AudioPolicyMutex);
+    timestampRebases = g_Instance->m_EmssAudioPolicy.TimestampRebases();
+    resyncCount = g_Instance->m_EmssAudioPolicy.ResyncCount();
+    lastAudioPtsMs = g_Instance->m_EmssAudioPolicy.LastAudioPtsMs();
+    lastVideoPtsMs = g_Instance->m_EmssAudioPolicy.LastVideoPtsMs();
+  }
+  ClLogMessage("Audio decoder cleanup: lifetimeMs=%llu, decodeCalls=%u, framesPosted=%u, nativeAppends=%u, nativeDrops=%u, nativeAppendErrors=%u, nativeAppendAverageMs=%.3f, nativeAppendMaxMs=%u, decodeFailures=%u, plcRequests=%u, lastAudioPtsMs=%.3f, lastVideoPtsMs=%.3f, clockDeltaMs=%.3f, timestampRebases=%u, resyncCount=%u, workletUnderruns=%d, workletOverruns=%d, workletSkippedFrames=%d\n",
     static_cast<unsigned long long>(s_audioInitTimeMs ? LiGetMillis() - s_audioInitTimeMs : 0),
     s_decodeCalls, s_framesPosted, s_nativeAppends, s_nativeDrops, s_nativeAppendErrors,
-    s_decodeFailures, s_plcRequests, AtomicLoad(kUnderruns), AtomicLoad(kOverruns),
+    s_nativeAppends ? static_cast<double>(s_nativeTotalAppendDurationMs) / s_nativeAppends : 0.0,
+    s_nativeMaxAppendDurationMs, s_decodeFailures, s_plcRequests,
+    lastAudioPtsMs, lastVideoPtsMs, lastAudioPtsMs - lastVideoPtsMs,
+    timestampRebases, resyncCount,
+    AtomicLoad(kUnderruns), AtomicLoad(kOverruns),
     AtomicLoad(kSkippedFrames));
 
   if (g_Instance->m_AudioBackend == AudioBackend::WebAudio) {
@@ -331,6 +372,15 @@ void MoonlightInstance::AudDecCleanup(void) {
 }
 
 void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLength) {
+  AUDIO_FRAME_METADATA metadata = {};
+  metadata.timestampValid = false;
+  metadata.isConcealment = sampleData == nullptr || sampleLength == 0;
+  AudDecDecodeAndPlaySampleEx(sampleData, sampleLength, &metadata);
+}
+
+void MoonlightInstance::AudDecDecodeAndPlaySampleEx(
+    char* sampleData, int sampleLength,
+    const AUDIO_FRAME_METADATA* metadata) {
   if (!s_opusDecoder) {
     return;
   }
@@ -352,7 +402,6 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
     return;
   }
 
-  const uint64_t firstSample = s_audioSampleCursor;
   s_audioSampleCursor += static_cast<uint64_t>(decodedSamples);
 
   if (!s_loggedFirstDecodedFrame) {
@@ -363,7 +412,7 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
   }
 
   if (g_Instance->m_AudioBackend == AudioBackend::NativeEmss) {
-    SubmitNativeAudioFrame(s_decodeBuffer.data(), decodedSamples, firstSample);
+    SubmitNativeAudioFrame(s_decodeBuffer.data(), decodedSamples, metadata);
   } else if (s_workletAttached) {
     WriteWebAudioRing(s_decodeBuffer.data(), decodedSamples);
     s_framesPosted++;
@@ -380,6 +429,7 @@ AUDIO_RENDERER_CALLBACKS MoonlightInstance::s_WebAudioCallbacks = {
   .cleanup = MoonlightInstance::AudDecCleanup,
   .decodeAndPlaySample = MoonlightInstance::AudDecDecodeAndPlaySample,
   .capabilities = CAPABILITY_DIRECT_SUBMIT | CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION,
+  .decodeAndPlaySampleEx = nullptr,
 };
 
 AUDIO_RENDERER_CALLBACKS MoonlightInstance::s_NativeAudioCallbacks = {
@@ -389,4 +439,5 @@ AUDIO_RENDERER_CALLBACKS MoonlightInstance::s_NativeAudioCallbacks = {
   .cleanup = MoonlightInstance::AudDecCleanup,
   .decodeAndPlaySample = MoonlightInstance::AudDecDecodeAndPlaySample,
   .capabilities = CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION,
+  .decodeAndPlaySampleEx = MoonlightInstance::AudDecDecodeAndPlaySampleEx,
 };

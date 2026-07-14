@@ -233,6 +233,7 @@ target_compile_definitions(opus PUBLIC
 add_executable(moonlight-wasm
     wasm/libchelper.c
     wasm/auddec.cpp
+    wasm/emss_audio_policy.cpp
     wasm/connectionlistener.cpp
     wasm/gamepad.cpp
     wasm/http.cpp
@@ -286,6 +287,15 @@ target_link_libraries(moonlight-wasm PUBLIC
     moonlight-enet
     moonlight-rs
 )
+
+add_executable(emss-audio-policy-test
+    tests/emss_audio_policy_test.cpp
+    wasm/emss_audio_policy.cpp
+)
+target_include_directories(emss-audio-policy-test PRIVATE wasm)
+target_compile_features(emss-audio-policy-test PUBLIC cxx_std_17)
+set_target_properties(emss-audio-policy-test PROPERTIES
+    LINK_FLAGS "-s PROXY_TO_PTHREAD=0 -s ENVIRONMENT=node")
 
 set(EMSCRIPTEN_OUTPUT_FILES
   "${CMAKE_CURRENT_BINARY_DIR}/moonlight-wasm.js.mem"

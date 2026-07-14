@@ -10,7 +10,7 @@ void main() {
       expect(settings.frameRate, 60);
       expect(settings.bitrateMbps, 10);
       expect(settings.audioConfiguration, AudioConfiguration.stereo);
-      expect(settings.audioBackend, AudioBackend.webAudio);
+      expect(settings.audioBackend, AudioBackend.nativeEmss);
       expect(settings.audioPacketDurationMs, 0);
       expect(settings.audioJitterBufferMs, 100);
       expect(settings.videoCodec, VideoCodec.h264);
@@ -132,6 +132,40 @@ void main() {
       expect(restored.mouseEmulationSpeed, 1.6);
       expect(restored.pointerCaptureMode, PointerCaptureMode.streamStart);
       expect(restored.stopKeyboardShortcut, KeyboardShortcutPreset.compact);
+    });
+
+    test('preserves an existing Web Audio choice on supported TVs', () {
+      final restored = AppSettings.fromJson({
+        'audioBackend': 'webaudio',
+        'audioPacketDurationMs': 5,
+        'audioJitterBufferMs': 130,
+      }).normalized(PlatformCapabilities.tizen10());
+
+      expect(restored.audioBackend, AudioBackend.webAudio);
+      expect(restored.audioPacketDurationMs, 5);
+      expect(restored.audioJitterBufferMs, 130);
+    });
+
+    test('native EMSS stream requests always use 20 ms packets', () {
+      final settings = const AppSettings(
+        audioBackend: AudioBackend.nativeEmss,
+        audioPacketDurationMs: 5,
+      ).normalized(PlatformCapabilities.tizen10());
+      final request = StreamRequest.fromSettings(
+        app: const MoonlightApp(id: 1, title: 'Test'),
+        host: const SavedHost(
+          id: 'host',
+          hostname: 'Test PC',
+          address: '192.0.2.1',
+        ),
+        hostStatus: const HostStatus(),
+        settings: settings,
+        remoteInput: const RemoteInputCredentials(key: 'key', keyId: 1),
+        sessionUrl: 'rtsp://session',
+        disabledCodecMimeTypes: const [],
+      );
+
+      expect(request.audioPacketDurationMs, 20);
     });
 
     test('normalizes input calibration ranges', () {

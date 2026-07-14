@@ -160,7 +160,9 @@ final class StreamRequest {
     inputConfiguration: settings.toInputConfigurationJson(),
     audioBackend: settings.audioBackend,
     audioConfiguration: settings.audioConfiguration,
-    audioPacketDurationMs: settings.audioPacketDurationMs,
+    audioPacketDurationMs: settings.audioBackend == AudioBackend.nativeEmss
+        ? 20
+        : settings.audioPacketDurationMs,
     audioJitterBufferMs: settings.audioJitterBufferMs,
     playAudioOnHost: settings.playAudioOnHost,
     videoCodec: settings.videoCodec,
@@ -320,6 +322,7 @@ enum StreamEventKind {
   warning,
   statistics,
   codecProfile,
+  audioPolicy,
   rumble,
   mouseEmulation,
 }

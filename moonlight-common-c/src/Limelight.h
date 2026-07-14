@@ -352,6 +352,22 @@ typedef void(*AudioRendererCleanup)(void);
 // This callback provides Opus audio data to be decoded and played. sampleLength is in bytes.
 typedef void(*AudioRendererDecodeAndPlaySample)(char* sampleData, int sampleLength);
 
+// Metadata associated with an encoded audio frame. presentationTimeMs uses the
+// RTP audio clock used by Moonlight (milliseconds). Concealment frames have no
+// payload, but carry the expected sequence number and timestamp when known.
+typedef struct _AUDIO_FRAME_METADATA {
+    uint32_t presentationTimeMs;
+    uint16_t sequenceNumber;
+    bool timestampValid;
+    bool isConcealment;
+} AUDIO_FRAME_METADATA, *PAUDIO_FRAME_METADATA;
+
+// Extended form of AudioRendererDecodeAndPlaySample. This callback is optional
+// and appended to AUDIO_RENDERER_CALLBACKS for source compatibility. When it is
+// supplied, Moonlight invokes it instead of the legacy callback.
+typedef void(*AudioRendererDecodeAndPlaySampleEx)(char* sampleData, int sampleLength,
+    const AUDIO_FRAME_METADATA* metadata);
+
 typedef struct _AUDIO_RENDERER_CALLBACKS {
     AudioRendererInit init;
     AudioRendererStart start;
@@ -359,6 +375,7 @@ typedef struct _AUDIO_RENDERER_CALLBACKS {
     AudioRendererCleanup cleanup;
     AudioRendererDecodeAndPlaySample decodeAndPlaySample;
     int capabilities;
+    AudioRendererDecodeAndPlaySampleEx decodeAndPlaySampleEx;
 } AUDIO_RENDERER_CALLBACKS, *PAUDIO_RENDERER_CALLBACKS;
 
 // Use this function to zero the audio callbacks when allocated on the stack or heap

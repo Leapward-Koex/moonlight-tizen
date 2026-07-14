@@ -409,6 +409,7 @@ class StreamSession extends _$StreamSession {
         'attemptId': event.attemptId,
         'phase': phase.name,
         'message': event.message,
+        'data': event.data,
       },
     );
   }
