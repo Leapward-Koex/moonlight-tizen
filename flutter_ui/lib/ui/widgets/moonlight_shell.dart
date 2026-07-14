@@ -11,6 +11,8 @@ class MoonlightShell extends StatelessWidget {
     super.key,
     this.actions = const [],
     this.onBack,
+    this.backFocusNode,
+    this.onBackMoveRight,
     this.showHeader = true,
     this.logo,
     this.overlay,
@@ -20,6 +22,8 @@ class MoonlightShell extends StatelessWidget {
   final Widget body;
   final List<HeaderActionViewModel> actions;
   final VoidCallback? onBack;
+  final FocusNode? backFocusNode;
+  final VoidCallback? onBackMoveRight;
   final bool showHeader;
   final Widget? logo;
   final Widget? overlay;
@@ -37,6 +41,8 @@ class MoonlightShell extends StatelessWidget {
                 title: title,
                 actions: actions,
                 onBack: onBack,
+                backFocusNode: backFocusNode,
+                onBackMoveRight: onBackMoveRight,
                 logo: logo,
               ),
             )
@@ -52,12 +58,16 @@ class MoonlightHeader extends StatelessWidget {
     super.key,
     this.actions = const [],
     this.onBack,
+    this.backFocusNode,
+    this.onBackMoveRight,
     this.logo,
   });
 
   final String title;
   final List<HeaderActionViewModel> actions;
   final VoidCallback? onBack;
+  final FocusNode? backFocusNode;
+  final VoidCallback? onBackMoveRight;
   final Widget? logo;
 
   @override
@@ -73,6 +83,15 @@ class MoonlightHeader extends StatelessWidget {
                 icon: Icons.arrow_back,
                 label: 'Back',
                 onPressed: onBack!,
+                focusNode: backFocusNode,
+                onDirection: (direction) {
+                  if (direction == TraversalDirection.right &&
+                      onBackMoveRight != null) {
+                    onBackMoveRight!();
+                    return true;
+                  }
+                  return false;
+                },
               ),
             ),
       titleSpacing: onBack == null ? 24 : 8,

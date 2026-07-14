@@ -157,17 +157,6 @@ class TvToggleControl extends StatelessWidget {
           enabled: enabled,
           semanticLabel: '$label, ${value ? 'on' : 'off'}',
           onActivate: () => onChanged(!value),
-          onDirection: (direction) {
-            if (direction == TraversalDirection.left && value) {
-              onChanged(false);
-              return true;
-            }
-            if (direction == TraversalDirection.right && !value) {
-              onChanged(true);
-              return true;
-            }
-            return false;
-          },
           builder: (context, focused) => Center(
             child: IgnorePointer(
               child: Switch(value: value, onChanged: enabled ? (_) {} : null),
@@ -202,17 +191,6 @@ class TvChoiceControl<T> extends StatelessWidget {
       if (choice.value == value) return choice;
     }
     return null;
-  }
-
-  bool _step(int delta) {
-    final enabledChoices = choices.where((choice) => choice.enabled).toList();
-    if (enabledChoices.isEmpty) return false;
-    var index = enabledChoices.indexWhere((choice) => choice.value == value);
-    if (index < 0) index = 0;
-    final next = (index + delta).clamp(0, enabledChoices.length - 1);
-    if (next == index) return false;
-    onChanged(enabledChoices[next].value);
-    return true;
   }
 
   Future<void> _showChoices(BuildContext context) async {
@@ -263,11 +241,6 @@ class TvChoiceControl<T> extends StatelessWidget {
         enabled: enabled && choices.any((choice) => choice.enabled),
         semanticLabel: semanticLabel == null ? label : '$semanticLabel, $label',
         onActivate: () => _showChoices(context),
-        onDirection: (direction) {
-          if (direction == TraversalDirection.left) return _step(-1);
-          if (direction == TraversalDirection.right) return _step(1);
-          return false;
-        },
         builder: (context, focused) => ExcludeFocus(
           child: IgnorePointer(
             child: TextButton(

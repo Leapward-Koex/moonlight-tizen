@@ -34,6 +34,20 @@ Existing setups can instead set both `MOONLIGHT_TIZEN_SIGN_PROFILE` and
 `MOONLIGHT_TIZEN_PROFILES_PATH`. If multiple devices are attached, set
 `MOONLIGHT_TIZEN_SERIAL` as well.
 
+## Browser UI harness (no TV required)
+
+For interactive Flutter UI work, select **Moonlight: run simulated Flutter web
+in Chrome (profile)** in VS Code's Run and Debug panel. It launches
+`flutter_ui/lib/main_fake.dart`, which mounts the real app with Riverpod
+overrides for the native bridge, Moonlight repository, persistence, subnet
+discovery, diagnostics, and platform capabilities. The demo data is entirely
+in memory: it never contacts a Moonlight host or calls Tizen APIs.
+
+The harness intentionally uses Flutter's profile web mode. Debug mode's Dart
+development compiler injects inline scripts, which the production Tizen CSP
+correctly blocks; profile mode preserves that CSP while loading normally in a
+desktop browser.
+
 The script uses these stable local defaults:
 
 - Emscripten tree: `build/codex-wasm-proxy-pthread`

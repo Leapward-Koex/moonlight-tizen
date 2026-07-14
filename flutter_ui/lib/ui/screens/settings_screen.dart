@@ -26,6 +26,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class SettingsScreenState extends State<SettingsScreen> {
+  final FocusNode _backFocus = FocusNode(debugLabel: 'Back');
   final FocusScopeNode _categoriesFocus = FocusScopeNode(
     debugLabel: 'Settings categories',
   );
@@ -66,6 +67,7 @@ class SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    _backFocus.dispose();
     _categoriesFocus.dispose();
     _optionsFocus.dispose();
     for (final node in _categoryFocusNodes.values) {
@@ -93,9 +95,15 @@ class SettingsScreenState extends State<SettingsScreen> {
       _focusSelectedCategory();
       return true;
     }
+    if (!_backFocus.hasFocus) {
+      _focusBackButton();
+      return true;
+    }
     widget.onBack();
     return true;
   }
+
+  void _focusBackButton() => _backFocus.requestFocus();
 
   void _focusSelectedCategory() {
     final selected = _selectedCategory;
@@ -104,6 +112,11 @@ class SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _focusFirstOption() {
+    final previousOption = _optionsFocus.focusedChild;
+    if (previousOption != null && previousOption.canRequestFocus) {
+      previousOption.requestFocus();
+      return;
+    }
     final optionsContext = _optionsFocusKey.currentContext;
     if (optionsContext != null) {
       FocusScope.of(optionsContext).nextFocus();
@@ -114,7 +127,9 @@ class SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     return MoonlightShell(
       title: 'Settings',
-      onBack: handleBack,
+      onBack: widget.onBack,
+      backFocusNode: _backFocus,
+      onBackMoveRight: _focusSelectedCategory,
       actions: widget.headerActions,
       body: LayoutBuilder(
         builder: (context, constraints) {
@@ -133,6 +148,7 @@ class SettingsScreenState extends State<SettingsScreen> {
                   selectedCategoryId: null,
                   onSelected: (category) =>
                       widget.onCategorySelected(category.id),
+                  onMoveLeft: _focusBackButton,
                   focusNodeForCategory: _focusNodeForCategory,
                 ),
               );
@@ -166,7 +182,12 @@ class SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
-                Expanded(child: SettingsOptionsPane(category: selected)),
+                Expanded(
+                  child: SettingsOptionsPane(
+                    category: selected,
+                    onExitLeft: handleBack,
+                  ),
+                ),
               ],
             );
           }
@@ -185,6 +206,7 @@ class SettingsScreenState extends State<SettingsScreen> {
                       selectedCategoryId: selected.id,
                       onSelected: (category) =>
                           widget.onCategorySelected(category.id),
+                      onMoveLeft: _focusBackButton,
                       onMoveRight: _focusFirstOption,
                       focusNodeForCategory: _focusNodeForCategory,
                     ),
@@ -197,7 +219,10 @@ class SettingsScreenState extends State<SettingsScreen> {
                     child: Builder(
                       key: _optionsFocusKey,
                       builder: (context) =>
-                          SettingsOptionsPane(category: selected),
+                          SettingsOptionsPane(
+                            category: selected,
+                            onExitLeft: _focusSelectedCategory,
+                          ),
                     ),
                   ),
                 ),
@@ -217,6 +242,7 @@ class SettingsCategoryList extends StatelessWidget {
     required this.onSelected,
     super.key,
     this.onMoveRight,
+    this.onMoveLeft,
     this.focusNodeForCategory,
   });
 
@@ -224,33 +250,37 @@ class SettingsCategoryList extends StatelessWidget {
   final String? selectedCategoryId;
   final ValueChanged<SettingsCategoryViewModel> onSelected;
   final VoidCallback? onMoveRight;
+  final VoidCallback? onMoveLeft;
   final FocusNode Function(SettingsCategoryViewModel category)?
   focusNodeForCategory;
 
   @override
   Widget build(BuildContext context) {
-    return ListView.separated(
-      key: const PageStorageKey('settings-categories'),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
-      itemCount: categories.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final category = categories[index];
-        return SettingsCategoryTile(
-          key: ValueKey('settings-category-${category.id}'),
-          category: category,
-          selected: category.id == selectedCategoryId,
-          // Settings normally opens with a selected category. Request focus
-          // for that tile so a remote user can immediately move through the
-          // category list or into its controls.
-          autofocus:
-              category.id == selectedCategoryId ||
-              (selectedCategoryId == null && index == 0),
-          focusNode: focusNodeForCategory?.call(category),
-          onPressed: () => onSelected(category),
-          onMoveRight: onMoveRight,
-        );
-      },
+    return TvVerticalFocusTraversal(
+      child: ListView.separated(
+        key: const PageStorageKey('settings-categories'),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
+        itemCount: categories.length,
+        separatorBuilder: (context, index) => const SizedBox(height: 8),
+        itemBuilder: (context, index) {
+          final category = categories[index];
+          return SettingsCategoryTile(
+            key: ValueKey('settings-category-${category.id}'),
+            category: category,
+            selected: category.id == selectedCategoryId,
+            // Settings normally opens with a selected category. Request focus
+            // for that tile so a remote user can immediately move through the
+            // category list or into its controls.
+            autofocus:
+                category.id == selectedCategoryId ||
+                (selectedCategoryId == null && index == 0),
+            focusNode: focusNodeForCategory?.call(category),
+            onPressed: () => onSelected(category),
+            onMoveLeft: onMoveLeft,
+            onMoveRight: onMoveRight,
+          );
+        },
+      ),
     );
   }
 }
@@ -262,6 +292,7 @@ class SettingsCategoryTile extends StatelessWidget {
     required this.onPressed,
     super.key,
     this.autofocus = false,
+    this.onMoveLeft,
     this.onMoveRight,
     this.focusNode,
   });
@@ -270,6 +301,7 @@ class SettingsCategoryTile extends StatelessWidget {
   final bool selected;
   final VoidCallback onPressed;
   final bool autofocus;
+  final VoidCallback? onMoveLeft;
   final VoidCallback? onMoveRight;
   final FocusNode? focusNode;
 
@@ -283,6 +315,10 @@ class SettingsCategoryTile extends StatelessWidget {
         semanticLabel: category.label,
         onActivate: onPressed,
         onDirection: (direction) {
+          if (direction == TraversalDirection.left && onMoveLeft != null) {
+            onMoveLeft!();
+            return true;
+          }
           if (direction == TraversalDirection.right && onMoveRight != null) {
             onMoveRight!();
             return true;
@@ -320,45 +356,53 @@ class SettingsCategoryTile extends StatelessWidget {
 }
 
 class SettingsOptionsPane extends StatelessWidget {
-  const SettingsOptionsPane({required this.category, super.key});
+  const SettingsOptionsPane({
+    required this.category,
+    super.key,
+    this.onExitLeft,
+  });
 
   final SettingsCategoryViewModel category;
+  final VoidCallback? onExitLeft;
 
   @override
   Widget build(BuildContext context) {
     if (category.options.isEmpty) {
       return const Center(child: Text('No options in this category.'));
     }
-    return ListView.builder(
-      key: PageStorageKey('settings-options-${category.id}'),
-      // Leave enough trailing scroll extent for the focused final option to
-      // sit fully above the floating snackbar used throughout Settings.
-      padding: const EdgeInsets.fromLTRB(28, 28, 28, 152),
-      itemCount: category.options.length + 1,
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  category.label,
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _categoryDescription(category.id),
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: MoonlightColors.textMuted,
+    return TvVerticalFocusTraversal(
+      onExitLeft: onExitLeft,
+      child: ListView.builder(
+        key: PageStorageKey('settings-options-${category.id}'),
+        // Leave enough trailing scroll extent for the focused final option to
+        // sit fully above the floating snackbar used throughout Settings.
+        padding: const EdgeInsets.fromLTRB(28, 28, 28, 152),
+        itemCount: category.options.length + 1,
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    category.label,
+                    style: Theme.of(context).textTheme.headlineMedium,
                   ),
-                ),
-              ],
-            ),
-          );
-        }
-        return category.options[index - 1];
-      },
+                  const SizedBox(height: 6),
+                  Text(
+                    _categoryDescription(category.id),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: MoonlightColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+          return category.options[index - 1];
+        },
+      ),
     );
   }
 

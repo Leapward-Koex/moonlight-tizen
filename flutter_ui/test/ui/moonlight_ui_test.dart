@@ -269,6 +269,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.offset, 0, reason: 'visible controls should stay put');
 
+    nodes[2].requestFocus();
+    await tester.pump();
+    expect(controller.offset, 0, reason: 'focus scrolling should animate');
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(
+      controller.offset,
+      greaterThan(0),
+      reason: 'a lower-half control should move toward the viewport center',
+    );
+    await tester.pumpAndSettle();
+    final viewportCenter = tester
+        .getCenter(find.byKey(const Key('focus-scroll-viewport')))
+        .dy;
+    final focusedCenter = tester
+        .getCenter(find.byKey(const Key('focus-item-2')))
+        .dy;
+    expect(focusedCenter, closeTo(viewportCenter, 1));
+
+    controller.jumpTo(0);
+
     nodes[7].requestFocus();
     await tester.pump();
     expect(controller.offset, 0, reason: 'focus scrolling should animate');
@@ -285,6 +306,27 @@ void main() {
         .getBottomLeft(find.byKey(const Key('focus-item-7')))
         .dy;
     expect(viewportBottom - focusedBottom, greaterThan(24));
+
+    final downwardOffset = controller.offset;
+    nodes[6].requestFocus();
+    await tester.pump();
+    expect(
+      controller.offset,
+      downwardOffset,
+      reason: 'reverse focus scrolling should also animate',
+    );
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(
+      controller.offset,
+      lessThan(downwardOffset),
+      reason: 'an upper-half control should move toward the viewport center',
+    );
+    await tester.pumpAndSettle();
+    final reverseFocusedCenter = tester
+        .getCenter(find.byKey(const Key('focus-item-6')))
+        .dy;
+    expect(reverseFocusedCenter, closeTo(viewportCenter, 1));
   });
 
   testWidgets('dialog actions remain activatable by normalized gamepad input', (
@@ -375,6 +417,12 @@ void main() {
     expect(backCount, 0);
 
     settingsKey.currentState!.handleBack();
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Back');
+    expect(backCount, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
     expect(backCount, 1);
   });
 
@@ -458,10 +506,31 @@ void main() {
     await tester.pumpAndSettle();
     expect(FocusManager.instance.primaryFocus?.debugLabel, '1280 × 720');
 
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Basic Settings');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, '1280 × 720');
+
     settingsKey.currentState!.handleBack();
     await tester.pumpAndSettle();
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'Basic Settings');
     expect(backCount, 0);
+
+    settingsKey.currentState!.handleBack();
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Back');
+    expect(backCount, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Basic Settings');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Back');
 
     settingsKey.currentState!.handleBack();
     expect(backCount, 1);
@@ -508,6 +577,109 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(FocusManager.instance.primaryFocus?.debugLabel, '1280 × 720');
+
+    expect(
+      TvFocusable.move(
+        FocusManager.instance.primaryFocus,
+        TraversalDirection.left,
+      ),
+      isTrue,
+    );
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Basic Settings');
+  });
+
+  testWidgets('settings options use stable vertical reading order', (
+    tester,
+  ) async {
+    setViewport(tester, const Size(1600, 900));
+    await tester.pumpWidget(
+      themed(
+        SettingsScreen(
+          categories: [
+            SettingsCategoryViewModel(
+              id: 'advanced',
+              label: 'Advanced Settings',
+              icon: Icons.build,
+              options: [
+                TvToggleControl(
+                  value: false,
+                  label: 'Performance statistics',
+                  onChanged: (_) {},
+                ),
+                TvActionButton(
+                  label: 'Probe codec profiles',
+                  onPressed: () {},
+                ),
+                TvChoiceControl<String>(
+                  value: 'debug',
+                  choices: const [
+                    ChoiceItem(value: 'debug', label: 'DEBUG'),
+                    ChoiceItem(value: 'info', label: 'INFO'),
+                  ],
+                  semanticLabel: 'Diagnostic log level',
+                  onChanged: (_) {},
+                ),
+                DiagnosticsActionPanel(
+                  actions: [
+                    MoonlightDialogAction(
+                      label: 'Export diagnostic logs',
+                      onPressed: () {},
+                    ),
+                    MoonlightDialogAction(
+                      label: 'Clear diagnostic logs',
+                      onPressed: () {},
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
+          selectedCategoryId: 'advanced',
+          onCategorySelected: (_) {},
+          onBack: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'Performance statistics, off',
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'Advanced Settings');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'Performance statistics, off',
+    );
+
+    for (final label in [
+      'Probe codec profiles',
+      'Diagnostic log level, DEBUG',
+      'Export diagnostic logs',
+    ]) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(FocusManager.instance.primaryFocus?.debugLabel, label);
+    }
+
+    for (final label in [
+      'Diagnostic log level, DEBUG',
+      'Probe codec profiles',
+      'Performance statistics, off',
+    ]) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+      expect(FocusManager.instance.primaryFocus?.debugLabel, label);
+    }
   });
 
   testWidgets('launching app card retains focus', (tester) async {

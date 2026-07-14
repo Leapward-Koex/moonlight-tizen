@@ -14,18 +14,21 @@ void main() {
   testWidgets('support dialog generates a QR code for this repository', (
     tester,
   ) async {
-    final bundle = await createFakeOverrideBundle(const FakeStateSeed());
     String? encodedUrl;
+    final bundle = await createFakeOverrideBundle(
+      const FakeStateSeed(),
+      runtime: FakeMoonlightNativeRuntime(
+        onDiagnosticQrSvg: (url) {
+          encodedUrl = url;
+          return '<svg></svg>';
+        },
+      ),
+    );
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: bundle.overrides,
-        child: _testApp(
-          diagnosticQrSvg: (url) {
-            encodedUrl = url;
-            return '<svg></svg>';
-          },
-        ),
+        child: const MoonlightFlutterApp(),
       ),
     );
     await tester.pumpAndSettle();
@@ -51,14 +54,17 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final bundle = await createFakeOverrideBundle(const FakeStateSeed());
-    final navigation = StreamController<String>.broadcast(sync: true);
-    addTearDown(navigation.close);
+    final input = StreamController<NativeInputEvent>.broadcast(sync: true);
+    addTearDown(input.close);
+    final bundle = await createFakeOverrideBundle(
+      const FakeStateSeed(),
+      runtime: FakeMoonlightNativeRuntime(inputEvents: input.stream),
+    );
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: bundle.overrides,
-        child: _testApp(navigationActions: navigation.stream),
+        child: const MoonlightFlutterApp(),
       ),
     );
     await tester.pumpAndSettle();
@@ -68,7 +74,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'Basic Settings');
-    navigation.add('right');
+    input.add(
+      const NativeInputEvent(type: 'action', action: 'right', phase: 'pressed'),
+    );
     await tester.pumpAndSettle();
     expect(FocusManager.instance.primaryFocus?.debugLabel, '1280 × 720');
 
@@ -84,14 +92,17 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final bundle = await createFakeOverrideBundle(const FakeStateSeed());
-    final navigation = StreamController<String>.broadcast(sync: true);
-    addTearDown(navigation.close);
+    final input = StreamController<NativeInputEvent>.broadcast(sync: true);
+    addTearDown(input.close);
+    final bundle = await createFakeOverrideBundle(
+      const FakeStateSeed(),
+      runtime: FakeMoonlightNativeRuntime(inputEvents: input.stream),
+    );
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: bundle.overrides,
-        child: _testApp(navigationActions: navigation.stream),
+        child: const MoonlightFlutterApp(),
       ),
     );
     await tester.pumpAndSettle();
@@ -111,7 +122,13 @@ void main() {
     );
     expect(tester.widget<Switch>(toggle).value, isFalse);
 
-    navigation.add('accept');
+    input.add(
+      const NativeInputEvent(
+        type: 'action',
+        action: 'accept',
+        phase: 'pressed',
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(tester.widget<Switch>(toggle).value, isTrue);
@@ -130,19 +147,17 @@ void main() {
       address: '192.0.2.1',
     );
     final repository = _ControlledRepository();
+    final discovery = _ControlledDiscovery();
     final bundle = await createFakeOverrideBundle(
       const FakeStateSeed(hosts: [host]),
       repository: repository,
+      subnetDiscoveryGateway: discovery,
     );
-    final discovery = _ControlledDiscovery();
 
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [
-          ...bundle.overrides,
-          subnetDiscoveryGatewayProvider.overrideWithValue(discovery),
-        ],
-        child: _testApp(),
+        overrides: bundle.overrides,
+        child: const MoonlightFlutterApp(),
       ),
     );
     await tester.pump();
@@ -182,30 +197,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: bundle.overrides,
-        child: MoonlightFlutterApp(
-          startNativeStream: (_) async {},
-          stopNativeStream: () async {},
-          recoverNativeStreamSurface: () {},
-          unlockAudio: () {},
-          connectedGamepadMask: () => 0,
-          inputDevices: () => const [],
-          testRumble: (_) => false,
-          inputEvents: const Stream<NativeInputEvent>.empty(),
-          navigationActions: const Stream<String>.empty(),
-          startSyntheticAudioTest: ({required gameMode}) async {},
-          playSyntheticAudioClick: (_) async => 1,
-          stopSyntheticAudioTest: () async {},
-          checkForUpdates: () async => (version: '', notes: ''),
-          restartApp: () => false,
-          exitApp: () => false,
-          setDiagnosticLogLevel: (_) {},
-          diagnosticStatus: () => const <String, Object?>{},
-          clearDiagnosticLogs: () async => const <String, Object?>{},
-          startLogExport: () async => '',
-          stopLogExport: () async {},
-          diagnosticQrSvg: (_) => '',
-          probeCodecs: (_) async => const <String, Object?>{},
-        ),
+        child: const MoonlightFlutterApp(),
       ),
     );
     await tester.pumpAndSettle();
@@ -229,6 +221,10 @@ void main() {
   testWidgets('native stream failure can recover with button and Back', (
     tester,
   ) async {
+    final navigation = StreamController<NativeInputEvent>.broadcast(sync: true);
+    var recoverCount = 0;
+    var exitCount = 0;
+    addTearDown(navigation.close);
     final bundle = await createFakeOverrideBundle(
       const FakeStateSeed(
         hosts: [
@@ -241,47 +237,28 @@ void main() {
           ],
         },
       ),
+      runtime: FakeMoonlightNativeRuntime(
+        inputEvents: navigation.stream,
+        startStreamError: StateError('native failed'),
+        onRecoverStreamSurface: () => recoverCount += 1,
+        onExitApp: () {
+          exitCount += 1;
+          return true;
+        },
+      ),
     );
-    final navigation = StreamController<String>.broadcast(sync: true);
-    var recoverCount = 0;
-    var exitCount = 0;
-    addTearDown(navigation.close);
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: bundle.overrides,
-        child: MoonlightFlutterApp(
-          startNativeStream: (_) async => throw StateError('native failed'),
-          stopNativeStream: () async {},
-          recoverNativeStreamSurface: () => recoverCount += 1,
-          unlockAudio: () {},
-          connectedGamepadMask: () => 0,
-          inputDevices: () => const [],
-          testRumble: (_) => false,
-          inputEvents: const Stream<NativeInputEvent>.empty(),
-          navigationActions: navigation.stream,
-          startSyntheticAudioTest: ({required gameMode}) async {},
-          playSyntheticAudioClick: (_) async => 1,
-          stopSyntheticAudioTest: () async {},
-          checkForUpdates: () async => (version: '', notes: ''),
-          restartApp: () => false,
-          exitApp: () {
-            exitCount += 1;
-            return true;
-          },
-          setDiagnosticLogLevel: (_) {},
-          diagnosticStatus: () => const <String, Object?>{},
-          clearDiagnosticLogs: () async => const <String, Object?>{},
-          startLogExport: () async => '',
-          stopLogExport: () async {},
-          diagnosticQrSvg: (_) => '',
-          probeCodecs: (_) async => const <String, Object?>{},
-        ),
+        child: const MoonlightFlutterApp(),
       ),
     );
     await tester.pumpAndSettle();
 
-    navigation.add('back');
+    navigation.add(
+      const NativeInputEvent(type: 'action', action: 'back', phase: 'pressed'),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Close Moonlight?'), findsOneWidget);
     expect(find.text('Cancel'), findsOneWidget);
@@ -290,7 +267,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(exitCount, 0);
 
-    navigation.add('back');
+    navigation.add(
+      const NativeInputEvent(type: 'action', action: 'back', phase: 'pressed'),
+    );
     await tester.pumpAndSettle();
     FocusManager.instance.primaryFocus?.focusInDirection(
       TraversalDirection.right,
@@ -320,7 +299,9 @@ void main() {
     await tester.tap(find.text('Steam'));
     await tester.pumpAndSettle();
     expect(find.text('The stream could not start'), findsOneWidget);
-    navigation.add('back');
+    navigation.add(
+      const NativeInputEvent(type: 'action', action: 'back', phase: 'pressed'),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Desktop'), findsOneWidget);
     expect(recoverCount, 2);
@@ -336,31 +317,32 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final bundle = await createFakeOverrideBundle(
-      FakeStateSeed(capabilities: PlatformCapabilities.tizen10()),
-    );
     final input = StreamController<NativeInputEvent>.broadcast(sync: true);
     addTearDown(input.close);
     var starts = 0;
     var stops = 0;
     final labels = <String>[];
+    final bundle = await createFakeOverrideBundle(
+      FakeStateSeed(capabilities: PlatformCapabilities.tizen10()),
+      runtime: FakeMoonlightNativeRuntime(
+        inputEvents: input.stream,
+        onStartSyntheticAudioTest: ({required gameMode}) async {
+          starts += 1;
+        },
+        onPlaySyntheticAudioClick: (label) async {
+          labels.add(label);
+          return labels.length;
+        },
+        onStopSyntheticAudioTest: () async {
+          stops += 1;
+        },
+      ),
+    );
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: bundle.overrides,
-        child: _testApp(
-          inputEvents: input.stream,
-          startSyntheticAudioTest: ({required gameMode}) async {
-            starts += 1;
-          },
-          playSyntheticAudioClick: (label) async {
-            labels.add(label);
-            return labels.length;
-          },
-          stopSyntheticAudioTest: () async {
-            stops += 1;
-          },
-        ),
+        child: const MoonlightFlutterApp(),
       ),
     );
     await tester.pumpAndSettle();
@@ -418,7 +400,10 @@ void main() {
     );
 
     await tester.pumpWidget(
-      ProviderScope(overrides: bundle.overrides, child: _testApp()),
+      ProviderScope(
+        overrides: bundle.overrides,
+        child: const MoonlightFlutterApp(),
+      ),
     );
     await tester.pumpAndSettle();
     tester
@@ -435,41 +420,6 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }
-
-MoonlightFlutterApp _testApp({
-  Stream<NativeInputEvent> inputEvents = const Stream<NativeInputEvent>.empty(),
-  Stream<String> navigationActions = const Stream<String>.empty(),
-  DiagnosticQrSvg diagnosticQrSvg = _emptyDiagnosticQrSvg,
-  StartSyntheticAudioTest? startSyntheticAudioTest,
-  PlaySyntheticAudioClick? playSyntheticAudioClick,
-  StopNativeStream? stopSyntheticAudioTest,
-}) => MoonlightFlutterApp(
-  startNativeStream: (_) async {},
-  stopNativeStream: () async {},
-  recoverNativeStreamSurface: () {},
-  unlockAudio: () {},
-  connectedGamepadMask: () => 0,
-  inputDevices: () => const [],
-  testRumble: (_) => false,
-  inputEvents: inputEvents,
-  navigationActions: navigationActions,
-  startSyntheticAudioTest:
-      startSyntheticAudioTest ?? ({required gameMode}) async {},
-  playSyntheticAudioClick: playSyntheticAudioClick ?? (_) async => 1,
-  stopSyntheticAudioTest: stopSyntheticAudioTest ?? () async {},
-  checkForUpdates: () async => (version: '', notes: ''),
-  restartApp: () => false,
-  exitApp: () => false,
-  setDiagnosticLogLevel: (_) {},
-  diagnosticStatus: () => const <String, Object?>{},
-  clearDiagnosticLogs: () async => const <String, Object?>{},
-  startLogExport: () async => '',
-  stopLogExport: () async {},
-  diagnosticQrSvg: diagnosticQrSvg,
-  probeCodecs: (_) async => const <String, Object?>{},
-);
-
-String _emptyDiagnosticQrSvg(String _) => '';
 
 final class _ControlledDiscovery implements SubnetDiscoveryGateway {
   final Completer<List<String>> _scan = Completer<List<String>>();

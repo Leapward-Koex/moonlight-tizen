@@ -1,6 +1,4 @@
-import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -61,53 +59,10 @@ Future<void> main() async {
         .read(clientIdentityStateProvider.notifier)
         .setIdentity(native.identity);
 
-    native.runtime.events.listen(
-      container.read(streamSessionProvider.notifier).applyEvent,
-      onError: (Object error, StackTrace stackTrace) {
-        container
-            .read(streamSessionProvider.notifier)
-            .fail(
-              MoonlightRuntimeError(code: 'native-event', message: '$error'),
-            );
-      },
-    );
-    native.runtime.inputEvents.listen(
-      (event) => _handleNativeStreamShortcut(native.runtime, event),
-    );
-
     runApp(
       UncontrolledProviderScope(
         container: container,
-        child: MoonlightFlutterApp(
-          unlockAudio: native.runtime.unlockAudio,
-          connectedGamepadMask: native.runtime.connectedGamepadMask,
-          inputDevices: native.runtime.inputDevices,
-          testRumble: native.runtime.testRumble,
-          inputEvents: native.runtime.inputEvents,
-          navigationActions: native.runtime.inputEvents
-              .where(shouldForwardUiNavigation)
-              .map((event) => event.action),
-          startSyntheticAudioTest: native.runtime.startSyntheticAudioTest,
-          playSyntheticAudioClick: native.runtime.playSyntheticAudioClick,
-          stopSyntheticAudioTest: native.runtime.stopSyntheticAudioTest,
-          checkForUpdates: () => _checkForUpdates(native.runtime),
-          restartApp: native.runtime.restartApp,
-          exitApp: native.runtime.exitApp,
-          setDiagnosticLogLevel: (level) =>
-              native.runtime.setDiagnosticLogLevel(level.name),
-          diagnosticStatus: native.runtime.diagnosticLogStatus,
-          clearDiagnosticLogs: native.runtime.clearDiagnosticLogs,
-          startLogExport: () => _startLogExport(native.runtime),
-          stopLogExport: native.runtime.stopLogExportServer,
-          diagnosticQrSvg: native.runtime.diagnosticQrSvg,
-          probeCodecs: native.runtime.probeVideoCodecSupport,
-          startNativeStream: (request) async {
-            final event = await native.runtime.startStream(request);
-            container.read(streamSessionProvider.notifier).applyEvent(event);
-          },
-          stopNativeStream: native.runtime.stopStream,
-          recoverNativeStreamSurface: native.runtime.recoverStreamSurface,
-        ),
+        child: const MoonlightFlutterApp(),
       ),
     );
     native.runtime.logDiagnostic('info', 'app.bootstrap.ui_started');
@@ -183,56 +138,6 @@ void _installGlobalErrorLogging(MoonlightNativeRuntime runtime) {
   };
 }
 
-Future<({String version, String notes})> _checkForUpdates(
-  MoonlightNativeRuntime runtime,
-) async {
-  final response = await runtime.openText(
-    Uri.https(
-      'api.github.com',
-      '/repos/Leapward-Koex/moonlight-tizen/releases/latest',
-    ),
-  );
-  final json = (jsonDecode(response) as Map).cast<String, Object?>();
-  return (
-    version: '${json['tag_name'] ?? json['name'] ?? 'Unknown'}',
-    notes: '${json['body'] ?? 'No release notes were provided.'}',
-  );
-}
-
-Future<String> _startLogExport(MoonlightNativeRuntime runtime) async {
-  runtime.logDiagnostic('info', 'diagnostics.export_started', {
-    'status': runtime.diagnosticLogStatus(),
-  });
-  final logs = await runtime.diagnosticLogs();
-  if (logs.isEmpty) {
-    throw StateError('No diagnostic logs are available.');
-  }
-  final payload =
-      '${jsonEncode({
-        'time': DateTime.now().toUtc().toIso8601String(),
-        'level': 'info',
-        'message': 'Moonlight Flutter diagnostic bundle',
-        'meta': {'appVersion': '1.13.0', 'packageId': 'MLFlutter1', 'applicationId': 'MLFlutter1.MoonlightFlutter', 'logStatus': runtime.diagnosticLogStatus()},
-      })}\n$logs';
-  final token = List<int>.generate(
-    16,
-    (_) => Random.secure().nextInt(256),
-  ).map((value) => value.toRadixString(16).padLeft(2, '0')).join();
-  final result = await runtime.startLogExportServer(
-    payload: payload,
-    filename: 'moonlight-flutter-diagnostics.log',
-    token: token,
-  );
-  final ipAddress = runtime.getIpAddress();
-  final port = result['port'];
-  final path = result['path'];
-  if (ipAddress.isEmpty || port == null || path == null) {
-    await runtime.stopLogExportServer();
-    throw StateError('The TV network address is unavailable.');
-  }
-  return 'http://$ipAddress:$port$path';
-}
-
 Future<ClientIdentity?> _readIdentity(PersistentStateStore storage) async {
   try {
     final source = await storage.backend.read('clientIdentity.v1');
@@ -246,23 +151,6 @@ Future<ClientIdentity?> _readIdentity(PersistentStateStore storage) async {
         : null;
   } catch (_) {
     return null;
-  }
-}
-
-void _handleNativeStreamShortcut(
-  MoonlightNativeRuntime runtime,
-  NativeInputEvent event,
-) {
-  // UI navigation actions are consumed by MoonlightFlutterApp's
-  // navigationActions stream. Synthesizing matching keyboard events here
-  // would activate the focused control a second time.
-  if (event.type != 'action' || event.phase == 'released') return;
-  if (event.action == 'stop') {
-    unawaited(runtime.stopStream());
-    return;
-  }
-  if (event.action == 'toggleStats') {
-    unawaited(runtime.toggleStats());
   }
 }
 

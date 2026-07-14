@@ -65,10 +65,12 @@ class TvFocusable extends StatefulWidget {
 
 class _TvFocusableState extends State<TvFocusable> {
   static const _focusScrollDuration = Duration(milliseconds: 220);
-  static const _focusScrollAlignment = 0.8;
+  static const _focusScrollAlignment = 0.5;
+  static const _focusScrollTolerance = 1.0;
 
   late FocusNode _focusNode;
   late bool _ownsFocusNode;
+  _TvVerticalFocusTraversalState? _verticalTraversal;
   bool _focused = false;
 
   @override
@@ -79,13 +81,27 @@ class _TvFocusableState extends State<TvFocusable> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final verticalTraversal = TvVerticalFocusTraversal._maybeOf(context);
+    if (_verticalTraversal != verticalTraversal) {
+      _verticalTraversal?.unregister(_focusNode);
+      _verticalTraversal = verticalTraversal;
+      _verticalTraversal?.register(_focusNode);
+    }
+    _syncDirectionCallback();
+  }
+
+  @override
   void didUpdateWidget(TvFocusable oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.focusNode != widget.focusNode) {
+      _verticalTraversal?.unregister(_focusNode);
       _removeActivationCallback();
       _removeDirectionCallback();
       if (_ownsFocusNode) _focusNode.dispose();
       _setFocusNode(widget.focusNode);
+      _verticalTraversal?.register(_focusNode);
     }
     _syncActivationCallback();
   }
@@ -101,8 +117,12 @@ class _TvFocusableState extends State<TvFocusable> {
     } else {
       _removeActivationCallback();
     }
-    if (widget.enabled && widget.onDirection != null) {
-      TvFocusable._directionCallbacks[_focusNode] = widget.onDirection!;
+    _syncDirectionCallback();
+  }
+
+  void _syncDirectionCallback() {
+    if (widget.enabled) {
+      TvFocusable._directionCallbacks[_focusNode] = _moveFocus;
     } else {
       _removeDirectionCallback();
     }
@@ -118,6 +138,7 @@ class _TvFocusableState extends State<TvFocusable> {
 
   @override
   void dispose() {
+    _verticalTraversal?.unregister(_focusNode);
     _removeActivationCallback();
     _removeDirectionCallback();
     if (_ownsFocusNode) _focusNode.dispose();
@@ -138,10 +159,7 @@ class _TvFocusableState extends State<TvFocusable> {
       _ => null,
     };
     if (direction != null) {
-      if (widget.onDirection?.call(direction) ?? false) {
-        return KeyEventResult.handled;
-      }
-      node.focusInDirection(direction);
+      _moveFocus(direction);
       return KeyEventResult.handled;
     }
 
@@ -162,6 +180,18 @@ class _TvFocusableState extends State<TvFocusable> {
     return KeyEventResult.ignored;
   }
 
+  bool _moveFocus(TraversalDirection direction) {
+    if (widget.onDirection?.call(direction) ?? false) return true;
+    if (TvVerticalFocusTraversal.maybeHandle(
+      context,
+      _focusNode,
+      direction,
+    )) {
+      return true;
+    }
+    return _focusNode.focusInDirection(direction);
+  }
+
   void _ensureComfortablyVisible() {
     final object = context.findRenderObject();
     final scrollable = Scrollable.maybeOf(context);
@@ -179,6 +209,14 @@ class _TvFocusableState extends State<TvFocusable> {
         .getOffsetToReveal(object, 1, axis: position.axis)
         .offset
         .clamp(position.minScrollExtent, position.maxScrollExtent);
+    final centeredOffset = viewport
+        .getOffsetToReveal(
+          object,
+          _focusScrollAlignment,
+          axis: position.axis,
+        )
+        .offset
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
     final visibleFrom = leadingOffset < trailingOffset
         ? leadingOffset
         : trailingOffset;
@@ -186,10 +224,16 @@ class _TvFocusableState extends State<TvFocusable> {
         ? leadingOffset
         : trailingOffset;
 
-    // Do not reposition controls that are already fully visible. When focus
-    // reaches an offscreen control, use an explicit trailing-biased alignment
-    // so it arrives with context below it instead of hugging the viewport edge.
-    if (position.pixels >= visibleFrom && position.pixels <= visibleThrough) {
+    final fullyVisible =
+        position.pixels >= visibleFrom && position.pixels <= visibleThrough;
+
+    // A TV user needs context in the direction they are travelling. Move a
+    // fully visible control toward the center whether it was reached with Up
+    // or Down. Clamping keeps the first and final controls naturally aligned
+    // when the list has no more scroll extent in that direction.
+    if (fullyVisible &&
+        (centeredOffset - position.pixels).abs() <=
+            _focusScrollTolerance) {
       return;
     }
     Scrollable.ensureVisible(
@@ -271,6 +315,100 @@ class _TvFocusableState extends State<TvFocusable> {
   }
 }
 
+/// Makes Up and Down follow reading order within a TV list.
+///
+/// Directional focus normally chooses the geometrically nearest control. That
+/// works well for grids, but mixed-width settings cards can make focus jump
+/// backward. Controls may still consume Left and Right themselves; otherwise
+/// an optional Left callback lets a containing pane expose its parent level.
+class TvVerticalFocusTraversal extends StatefulWidget {
+  const TvVerticalFocusTraversal({
+    required this.child,
+    super.key,
+    this.onExitLeft,
+  });
+
+  final Widget child;
+  final VoidCallback? onExitLeft;
+
+  static _TvVerticalFocusTraversalState? _maybeOf(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<_TvVerticalFocusTraversalScope>()
+          ?.state;
+
+  static bool maybeHandle(
+    BuildContext context,
+    FocusNode node,
+    TraversalDirection direction,
+  ) {
+    return _maybeOf(context)?.move(node, direction) ?? false;
+  }
+
+  @override
+  State<TvVerticalFocusTraversal> createState() =>
+      _TvVerticalFocusTraversalState();
+}
+
+class _TvVerticalFocusTraversalState
+    extends State<TvVerticalFocusTraversal> {
+  final Set<FocusNode> _nodes = {};
+  final ReadingOrderTraversalPolicy _policy = ReadingOrderTraversalPolicy();
+
+  void register(FocusNode node) => _nodes.add(node);
+
+  void unregister(FocusNode node) => _nodes.remove(node);
+
+  bool move(FocusNode currentNode, TraversalDirection direction) {
+    if (direction == TraversalDirection.left && widget.onExitLeft != null) {
+      widget.onExitLeft!();
+      return true;
+    }
+    final delta = switch (direction) {
+      TraversalDirection.up => -1,
+      TraversalDirection.down => 1,
+      TraversalDirection.left || TraversalDirection.right => 0,
+    };
+    if (delta == 0) return false;
+
+    final ordered = _policy
+        .sortDescendants(
+          _nodes.where(
+            (node) =>
+                node.context != null &&
+                node.canRequestFocus &&
+                !node.skipTraversal,
+          ),
+          currentNode,
+        )
+        .toList(growable: false);
+    final currentIndex = ordered.indexOf(currentNode);
+    final nextIndex = currentIndex + delta;
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= ordered.length) {
+      return false;
+    }
+    ordered[nextIndex].requestFocus();
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) => _TvVerticalFocusTraversalScope(
+    state: this,
+    child: widget.child,
+  );
+}
+
+class _TvVerticalFocusTraversalScope extends InheritedWidget {
+  const _TvVerticalFocusTraversalScope({
+    required this.state,
+    required super.child,
+  });
+
+  final _TvVerticalFocusTraversalState state;
+
+  @override
+  bool updateShouldNotify(_TvVerticalFocusTraversalScope oldWidget) => false;
+}
+
 class TvIconButton extends StatelessWidget {
   const TvIconButton({
     required this.icon,
@@ -279,6 +417,8 @@ class TvIconButton extends StatelessWidget {
     super.key,
     this.enabled = true,
     this.autofocus = false,
+    this.focusNode,
+    this.onDirection,
     this.badge,
     this.size = MoonlightMetrics.minHitTarget,
   });
@@ -288,6 +428,8 @@ class TvIconButton extends StatelessWidget {
   final VoidCallback onPressed;
   final bool enabled;
   final bool autofocus;
+  final FocusNode? focusNode;
+  final bool Function(TraversalDirection direction)? onDirection;
   final String? badge;
   final double size;
 
@@ -304,9 +446,11 @@ class TvIconButton extends StatelessWidget {
       child: SizedBox.square(
         dimension: size,
         child: TvFocusable(
+          focusNode: focusNode,
           autofocus: autofocus,
           enabled: enabled,
           semanticLabel: label,
+          onDirection: onDirection,
           borderRadius: BorderRadius.circular(size / 2),
           onActivate: onPressed,
           builder: (context, focused) => Stack(

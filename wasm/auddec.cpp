@@ -35,7 +35,11 @@ enum SharedControlIndex {
   kSkippedFrames = 9,
   kDecodedFrames = 10,
   kActive = 11,
-  kSharedControlCount = 12,
+  kRenderedFrames = 12,
+  kSilentFrames = 13,
+  kRestarts = 14,
+  kProcessCalls = 15,
+  kSharedControlCount = 16,
 };
 
 alignas(4) static int32_t s_sharedControl[kSharedControlCount] = {};
@@ -75,16 +79,22 @@ inline int32_t AtomicAdd(int index, int32_t value) {
 
 void ResetSharedRing(int targetJitterMs) {
   const int packetFrames = static_cast<int>(s_samplesPerFrame);
-  const int maximumFrames = std::max(packetFrames, (s_sampleRate * targetJitterMs) / 1000);
+  const int requestedFrames = std::max(
+    packetFrames,
+    (s_sampleRate * std::max(targetJitterMs, 10)) / 1000);
   const int minimumFrames = std::min(
-    maximumFrames,
-    std::max(packetFrames * 2, s_sampleRate / 100));
+    requestedFrames,
+    std::max(packetFrames, s_sampleRate / 100));
 
   AtomicStore(kWriteFrame, 0);
   AtomicStore(kReadFrame, 0);
   AtomicAdd(kGeneration, 1);
-  AtomicStore(kTargetFrames, minimumFrames);
-  AtomicStore(kMaximumTargetFrames, maximumFrames);
+  // The UI value is a jitter-buffer target, not an upper bound. Starting at
+  // the minimum and slowly growing after every underrun made the worklet
+  // oscillate between starvation and live-edge skips, which sounded heavily
+  // distorted on Tizen. Keep the requested target stable for the session.
+  AtomicStore(kTargetFrames, requestedFrames);
+  AtomicStore(kMaximumTargetFrames, requestedFrames);
   AtomicStore(kMinimumTargetFrames, minimumFrames);
   AtomicStore(kPacketFrames, packetFrames);
   AtomicStore(kUnderruns, 0);
@@ -92,6 +102,10 @@ void ResetSharedRing(int targetJitterMs) {
   AtomicStore(kSkippedFrames, 0);
   AtomicStore(kDecodedFrames, 0);
   AtomicStore(kActive, 0);
+  AtomicStore(kRenderedFrames, 0);
+  AtomicStore(kSilentFrames, 0);
+  AtomicStore(kRestarts, 0);
+  AtomicStore(kProcessCalls, 0);
 }
 
 bool AttachWebAudioRing() {
@@ -283,10 +297,12 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   const int targetJitterMs = g_Instance->m_AudioBackend == AudioBackend::NativeEmss
     ? 0
     : (g_AudioJitterMsOverride != 0 ? g_AudioJitterMsOverride : 100);
-  ClLogMessage("Audio decoder init: backend=%s, audioConfig=0x%x, sampleRate=%d, channels=%zu, streams=%d, coupledStreams=%d, samplesPerFrame=%zu, arFlags=0x%x, maximumBufferMs=%d\n",
+  ResetSharedRing(targetJitterMs);
+  ClLogMessage("Audio decoder init: backend=%s, audioConfig=0x%x, sampleRate=%d, channels=%zu, streams=%d, coupledStreams=%d, samplesPerFrame=%zu, arFlags=0x%x, targetBufferMs=%d, targetFrames=%d\n",
     g_Instance->m_AudioBackend == AudioBackend::NativeEmss ? "emss" : "webaudio",
     audioConfiguration, s_sampleRate, s_channelCount, opusConfig->streams,
-    opusConfig->coupledStreams, s_samplesPerFrame, arFlags, targetJitterMs);
+    opusConfig->coupledStreams, s_samplesPerFrame, arFlags, targetJitterMs,
+    AtomicLoad(kTargetFrames));
 
   int opusResult = OPUS_OK;
   s_opusDecoder = opus_multistream_decoder_create(
@@ -304,7 +320,6 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   g_Instance->m_AudioChannelCount.store(static_cast<int>(s_channelCount));
   g_Instance->m_AudioSamplesPerFrame.store(static_cast<int>(s_samplesPerFrame));
 
-  ResetSharedRing(targetJitterMs);
   if (g_Instance->m_AudioBackend == AudioBackend::WebAudio) {
     s_workletAttached = AttachWebAudioRing();
     ClLogMessage("WebAudio sink selected: mode=%s\n",
@@ -342,7 +357,7 @@ void MoonlightInstance::AudDecCleanup(void) {
     lastAudioPtsMs = g_Instance->m_EmssAudioPolicy.LastAudioPtsMs();
     lastVideoPtsMs = g_Instance->m_EmssAudioPolicy.LastVideoPtsMs();
   }
-  ClLogMessage("Audio decoder cleanup: lifetimeMs=%llu, decodeCalls=%u, framesPosted=%u, nativeAppends=%u, nativeDrops=%u, nativeAppendErrors=%u, nativeAppendAverageMs=%.3f, nativeAppendMaxMs=%u, decodeFailures=%u, plcRequests=%u, lastAudioPtsMs=%.3f, lastVideoPtsMs=%.3f, clockDeltaMs=%.3f, timestampRebases=%u, resyncCount=%u, workletUnderruns=%d, workletOverruns=%d, workletSkippedFrames=%d\n",
+  ClLogMessage("Audio decoder cleanup: lifetimeMs=%llu, decodeCalls=%u, framesPosted=%u, nativeAppends=%u, nativeDrops=%u, nativeAppendErrors=%u, nativeAppendAverageMs=%.3f, nativeAppendMaxMs=%u, decodeFailures=%u, plcRequests=%u, lastAudioPtsMs=%.3f, lastVideoPtsMs=%.3f, clockDeltaMs=%.3f, timestampRebases=%u, resyncCount=%u, workletUnderruns=%d, workletOverruns=%d, workletSkippedFrames=%d, workletRenderedFrames=%d, workletSilentFrames=%d, workletRestarts=%d, workletProcessCalls=%d, workletTargetFrames=%d\n",
     static_cast<unsigned long long>(s_audioInitTimeMs ? LiGetMillis() - s_audioInitTimeMs : 0),
     s_decodeCalls, s_framesPosted, s_nativeAppends, s_nativeDrops, s_nativeAppendErrors,
     s_nativeAppends ? static_cast<double>(s_nativeTotalAppendDurationMs) / s_nativeAppends : 0.0,
@@ -350,7 +365,9 @@ void MoonlightInstance::AudDecCleanup(void) {
     lastAudioPtsMs, lastVideoPtsMs, lastAudioPtsMs - lastVideoPtsMs,
     timestampRebases, resyncCount,
     AtomicLoad(kUnderruns), AtomicLoad(kOverruns),
-    AtomicLoad(kSkippedFrames));
+    AtomicLoad(kSkippedFrames), AtomicLoad(kRenderedFrames),
+    AtomicLoad(kSilentFrames), AtomicLoad(kRestarts),
+    AtomicLoad(kProcessCalls), AtomicLoad(kTargetFrames));
 
   if (g_Instance->m_AudioBackend == AudioBackend::WebAudio) {
     MAIN_THREAD_ASYNC_EM_ASM({

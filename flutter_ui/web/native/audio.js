@@ -4,7 +4,7 @@
 
   if (root.MoonlightAudio) return;
 
-  var CONTROL_LENGTH = 12;
+  var CONTROL_LENGTH = 16;
   var WRITE_FRAME = 0;
   var READ_FRAME = 1;
   var GENERATION = 2;
@@ -17,6 +17,10 @@
   var SKIPPED_FRAMES = 9;
   var DECODED_FRAMES = 10;
   var ACTIVE = 11;
+  var RENDERED_FRAMES = 12;
+  var SILENT_FRAMES = 13;
+  var RESTARTS = 14;
+  var PROCESS_CALLS = 15;
 
   var nextTime = 0;
   var started = false;
@@ -162,7 +166,7 @@
     resetStats();
     var context = createContext();
     log('info', 'audio scheduler started', {
-      maximumBufferMs: root._mlAudioTargetMs,
+      targetBufferMs: root._mlAudioTargetMs,
       context: snapshot(context)
     });
     return prepareWorklet(context);
@@ -284,11 +288,11 @@
     var maximumLead = targetSeconds + Math.max(0.05, frameSeconds * 4);
 
     if (!started) {
-      nextTime = now + Math.min(targetSeconds, minimumLead);
+      nextTime = now + Math.max(targetSeconds, minimumLead);
       started = true;
     } else if (nextTime < now) {
       stats.lateResyncs += 1;
-      nextTime = now + Math.min(targetSeconds, minimumLead);
+      nextTime = now + Math.max(targetSeconds, minimumLead);
     }
     var leadSeconds = nextTime - now;
     stats.lastLeadMs = Math.round(leadSeconds * 1000);
@@ -340,6 +344,10 @@
       result.overruns = root.Atomics.load(sharedControl, OVERRUNS);
       result.skippedFrames = root.Atomics.load(sharedControl, SKIPPED_FRAMES);
       result.decodedFrames = root.Atomics.load(sharedControl, DECODED_FRAMES);
+      result.renderedFrames = root.Atomics.load(sharedControl, RENDERED_FRAMES);
+      result.silentFrames = root.Atomics.load(sharedControl, SILENT_FRAMES);
+      result.restarts = root.Atomics.load(sharedControl, RESTARTS);
+      result.processCalls = root.Atomics.load(sharedControl, PROCESS_CALLS);
       if (root._mlAudioCtx && root._mlAudioCtx.sampleRate) {
         result.bufferedMs = Math.round(result.bufferedFrames * 10000 / root._mlAudioCtx.sampleRate) / 10;
         result.targetMs = Math.round(result.targetFrames * 10000 / root._mlAudioCtx.sampleRate) / 10;

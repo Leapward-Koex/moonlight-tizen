@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:go_router/go_router.dart';
 
 import '../data/host_workflows.dart';
 import '../data/native/native_runtime.dart';
+import '../data/native/production_native.dart';
 import '../domain/domain.dart';
 import '../state/state.dart';
 import '../ui/moonlight_ui.dart';
@@ -30,8 +32,84 @@ typedef DiagnosticQrSvg = String Function(String value);
 typedef ProbeCodecs =
     Future<Map<String, Object?>> Function(Map<String, Object?> request);
 
-class MoonlightFlutterApp extends StatefulWidget {
-  const MoonlightFlutterApp({
+/// The application composition root used by both production and browser fake
+/// entrypoints. Every native/browser interaction comes from Riverpod so the
+/// complete experience can be exercised with provider overrides.
+class MoonlightFlutterApp extends ConsumerStatefulWidget {
+  const MoonlightFlutterApp({super.key});
+
+  @override
+  ConsumerState<MoonlightFlutterApp> createState() =>
+      _MoonlightFlutterAppProviderState();
+}
+
+class _MoonlightFlutterAppProviderState
+    extends ConsumerState<MoonlightFlutterApp> {
+  late final MoonlightNativeRuntime _runtime;
+  late final StreamSubscription<StreamEvent> _streamEventSubscription;
+  late final StreamSubscription<NativeInputEvent> _streamShortcutSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _runtime = ref.read(moonlightNativeRuntimeProvider);
+    _streamEventSubscription = _runtime.events.listen(
+      ref.read(streamSessionProvider.notifier).applyEvent,
+      onError: (Object error, StackTrace stackTrace) {
+        ref
+            .read(streamSessionProvider.notifier)
+            .fail(
+              MoonlightRuntimeError(code: 'native-event', message: '$error'),
+            );
+      },
+    );
+    _streamShortcutSubscription = _runtime.inputEvents.listen(
+      (event) => _handleNativeStreamShortcut(_runtime, event),
+    );
+  }
+
+  @override
+  void dispose() {
+    unawaited(_streamEventSubscription.cancel());
+    unawaited(_streamShortcutSubscription.cancel());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => _MoonlightFlutterApp(
+    startNativeStream: (request) async {
+      final event = await _runtime.startStream(request);
+      ref.read(streamSessionProvider.notifier).applyEvent(event);
+    },
+    stopNativeStream: _runtime.stopStream,
+    recoverNativeStreamSurface: _runtime.recoverStreamSurface,
+    unlockAudio: _runtime.unlockAudio,
+    connectedGamepadMask: _runtime.connectedGamepadMask,
+    inputDevices: _runtime.inputDevices,
+    testRumble: _runtime.testRumble,
+    inputEvents: _runtime.inputEvents,
+    navigationActions: _runtime.inputEvents
+        .where(shouldForwardUiNavigation)
+        .map((event) => event.action),
+    startSyntheticAudioTest: _runtime.startSyntheticAudioTest,
+    playSyntheticAudioClick: _runtime.playSyntheticAudioClick,
+    stopSyntheticAudioTest: _runtime.stopSyntheticAudioTest,
+    checkForUpdates: () => _checkForUpdates(_runtime),
+    restartApp: _runtime.restartApp,
+    exitApp: _runtime.exitApp,
+    setDiagnosticLogLevel: (level) =>
+        _runtime.setDiagnosticLogLevel(level.name),
+    diagnosticStatus: _runtime.diagnosticLogStatus,
+    clearDiagnosticLogs: _runtime.clearDiagnosticLogs,
+    startLogExport: () => _startLogExport(_runtime),
+    stopLogExport: _runtime.stopLogExportServer,
+    diagnosticQrSvg: _runtime.diagnosticQrSvg,
+    probeCodecs: _runtime.probeVideoCodecSupport,
+  );
+}
+
+class _MoonlightFlutterApp extends StatefulWidget {
+  const _MoonlightFlutterApp({
     required this.startNativeStream,
     required this.stopNativeStream,
     required this.recoverNativeStreamSurface,
@@ -54,7 +132,6 @@ class MoonlightFlutterApp extends StatefulWidget {
     required this.stopLogExport,
     required this.diagnosticQrSvg,
     required this.probeCodecs,
-    super.key,
   });
 
   final StartNativeStream startNativeStream;
@@ -81,10 +158,10 @@ class MoonlightFlutterApp extends StatefulWidget {
   final ProbeCodecs probeCodecs;
 
   @override
-  State<MoonlightFlutterApp> createState() => _MoonlightFlutterAppState();
+  State<_MoonlightFlutterApp> createState() => _MoonlightFlutterAppState();
 }
 
-class _MoonlightFlutterAppState extends State<MoonlightFlutterApp> {
+class _MoonlightFlutterAppState extends State<_MoonlightFlutterApp> {
   late final GoRouter _router = GoRouter(
     routes: [
       GoRoute(
@@ -1397,7 +1474,7 @@ class _MoonlightExperienceState extends ConsumerState<_MoonlightExperience> {
             MoonlightSettingOption(
               title: 'Audio jitter buffer',
               description:
-                  'Controls how far ahead audio is scheduled. A larger buffer smooths network gaps but adds audio delay. The default is 100 ms.',
+                  'Controls how much audio is accumulated before playback and after a gap. A larger buffer prevents dropouts but adds audio delay. Start at 100 ms for quality testing, then lower it to find the stable latency limit.',
               control: TvSliderControl(
                 value: settings.audioJitterBufferMs.toDouble(),
                 min: 10,
@@ -2241,6 +2318,71 @@ final class _HostInput {
   const _HostInput(this.address, this.port);
   final String address;
   final int port;
+}
+
+Future<({String version, String notes})> _checkForUpdates(
+  MoonlightNativeRuntime runtime,
+) async {
+  final response = await runtime.openText(
+    Uri.https(
+      'api.github.com',
+      '/repos/Leapward-Koex/moonlight-tizen/releases/latest',
+    ),
+  );
+  final json = (jsonDecode(response) as Map).cast<String, Object?>();
+  return (
+    version: '${json['tag_name'] ?? json['name'] ?? 'Unknown'}',
+    notes: '${json['body'] ?? 'No release notes were provided.'}',
+  );
+}
+
+Future<String> _startLogExport(MoonlightNativeRuntime runtime) async {
+  runtime.logDiagnostic('info', 'diagnostics.export_started', {
+    'status': runtime.diagnosticLogStatus(),
+  });
+  final logs = await runtime.diagnosticLogs();
+  if (logs.isEmpty) {
+    throw StateError('No diagnostic logs are available.');
+  }
+  final payload =
+      '${jsonEncode({
+        'time': DateTime.now().toUtc().toIso8601String(),
+        'level': 'info',
+        'message': 'Moonlight Flutter diagnostic bundle',
+        'meta': {'appVersion': '1.13.0', 'packageId': 'MLFlutter1', 'applicationId': 'MLFlutter1.MoonlightFlutter', 'logStatus': runtime.diagnosticLogStatus()},
+      })}\n$logs';
+  final token = List<int>.generate(
+    16,
+    (_) => Random.secure().nextInt(256),
+  ).map((value) => value.toRadixString(16).padLeft(2, '0')).join();
+  final result = await runtime.startLogExportServer(
+    payload: payload,
+    filename: 'moonlight-flutter-diagnostics.log',
+    token: token,
+  );
+  final ipAddress = runtime.getIpAddress();
+  final port = result['port'];
+  final path = result['path'];
+  if (ipAddress.isEmpty || port == null || path == null) {
+    await runtime.stopLogExportServer();
+    throw StateError('The TV network address is unavailable.');
+  }
+  return 'http://$ipAddress:$port$path';
+}
+
+void _handleNativeStreamShortcut(
+  MoonlightNativeRuntime runtime,
+  NativeInputEvent event,
+) {
+  // UI navigation actions are consumed separately by the app router.
+  if (event.type != 'action' || event.phase == 'released') return;
+  if (event.action == 'stop') {
+    unawaited(runtime.stopStream());
+    return;
+  }
+  if (event.action == 'toggleStats') {
+    unawaited(runtime.toggleStats());
+  }
 }
 
 _HostInput _parseHostInput(String source) {

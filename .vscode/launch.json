@@ -7,6 +7,15 @@
       "request": "launch",
       "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}\\tools\\vscode-launch-emulator.ps1\"",
       "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Moonlight: run simulated Flutter web in Chrome (profile)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}\\flutter_ui",
+      "program": "${workspaceFolder}\\flutter_ui\\lib\\main_fake.dart",
+      "deviceId": "chrome",
+      "flutterMode": "profile"
     }
   ]
 }
